@@ -50,18 +50,24 @@ export function recordSuccess(name: Name): void {
   streaks.delete(name);
 }
 
+function streak(name: Name, now: number): void {
+  const n = (streaks.get(name) ?? 0) + 1;
+  if (n >= FAILURE_STREAK) open(name, STREAK_COOLDOWN_MS, now);
+  else streaks.set(name, n);
+}
+
 export function recordFailure(name: Name, err: unknown, now = Date.now()): void {
-  if (!(err instanceof HttpError)) return;
+  if (!(err instanceof HttpError)) {
+    // a provider that hangs on every call costs a full timeout per query: count timeouts like 5xx
+    if (err instanceof Error && /timed out|timeout/i.test(err.message)) streak(name, now);
+    return;
+  }
   if (err.status === 429) return open(name, err.retryAfterMs ?? THROTTLE_COOLDOWN_MS, now);
   // Apple signals its rate limit with a bare 403.
   if (name === 'itunes' && err.status === 403) return open(name, err.retryAfterMs ?? THROTTLE_COOLDOWN_MS, now);
   // MusicBrainz answers 503 when a client exceeds 1 req/s.
   if (name === 'musicbrainz' && err.status === 503) return open(name, Math.max(err.retryAfterMs ?? 0, MB_BACKOFF_MS), now);
-  if (err.status === 403 || err.status >= 500) {
-    const n = (streaks.get(name) ?? 0) + 1;
-    if (n >= FAILURE_STREAK) open(name, STREAK_COOLDOWN_MS, now);
-    else streaks.set(name, n);
-  }
+  if (err.status === 403 || err.status >= 500) streak(name, now);
 }
 
 export function resetBreakers(): void {

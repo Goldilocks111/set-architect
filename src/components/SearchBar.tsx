@@ -110,7 +110,7 @@ export default function SearchBar({ onAdd, inSet }: Props) {
                 const added = inSet.has(t.id);
                 return (
                   <li
-                    key={`${t.id}-${i}`}
+                    key={t.id}
                     id={`${listId}-${i}`}
                     role="option"
                     aria-selected={i === active}

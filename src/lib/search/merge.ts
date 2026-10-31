@@ -81,7 +81,13 @@ function labelKinds(v: ParsedVersion): VersionKind[] {
  */
 function versionSignature(v: ParsedVersion): string {
   if (v.kind === 'other') return fold(v.label ?? '');
-  return [...new Set(labelKinds(v).filter((k) => k !== v.kind))].sort().join('+');
+  // Read modifiers from the label's words, not its comma parts: "ARTBAT Extended Remix" is one part.
+  const remixerWords = new Set(tokens(v.remixer ?? ''));
+  const mods = tokens(v.label ?? '')
+    .filter((w) => !remixerWords.has(w))
+    .map((w) => VERSION_WORDS[w])
+    .filter((k) => k && k !== v.kind);
+  return [...new Set(mods)].sort().join('+');
 }
 
 /** Release-context tags that are not part of the work's name: "Pusher [From GTAVI: Original Score]", "X - From \"Barbie\"". */
@@ -104,6 +110,8 @@ interface Group {
   members: Member[];
   version: ParsedVersion;
   names: Set<string>;
+  /** Each member's whole credit, spaceless: "Mark, Knight" and "Mark Knight" both give "markknight". */
+  credits: Set<string>;
   isrcs: Set<string>;
   durationMs?: number;
 }
@@ -117,14 +125,15 @@ function sameVersion(a: ParsedVersion, b: ParsedVersion): boolean {
   );
 }
 
-function artistsOverlap(names: Set<string>, other: string[]): boolean {
-  if (other.some((n) => names.has(n))) return true;
-  const a = [...names].map((n) => n.replace(/ /g, '')).join('');
-  return other.some((n) => {
-    const c = n.replace(/ /g, '');
-    return c.length >= 4 && a.includes(c);
-  });
+/**
+ * Same artist when a whole individual name is shared or the whole credits are equal once spaces and
+ * punctuation are gone. Never by substring: "Elle" is not "Elle King", "Kygo" is not "Kygo Tribute".
+ */
+function artistsOverlap(names: Set<string>, credits: Set<string>, otherNames: string[], otherCredit: string): boolean {
+  return otherNames.some((n) => names.has(n)) || (otherCredit !== '' && credits.has(otherCredit));
 }
+
+const creditOf = (r: Pick<SearchResult, 'artist' | 'artists'>) => compact(r.artists.length ? r.artists.join(' ') : r.artist);
 
 const durationsAgree = (a?: number, b?: number) => a === undefined || b === undefined || Math.abs(a - b) <= DURATION_TOLERANCE_MS;
 
@@ -132,17 +141,24 @@ function groupResults(members: Member[]): Group[] {
   const groups: Group[] = [];
   for (const m of members) {
     const names = artistNames(m.r);
+    const credit = creditOf(m.r);
     const isrc = m.r.isrc?.toUpperCase();
     const g =
       (isrc && groups.find((x) => x.isrcs.has(isrc))) ||
       groups.find(
-        (x) => sameVersion(x.version, m.r.version) && artistsOverlap(x.names, names) && durationsAgree(x.durationMs, m.r.durationMs)
+        (x) =>
+          // two different ISRCs are two different recordings, however alike their titles
+          !(isrc && x.isrcs.size) &&
+          sameVersion(x.version, m.r.version) &&
+          artistsOverlap(x.names, x.credits, names, credit) &&
+          durationsAgree(x.durationMs, m.r.durationMs)
       );
     if (!g) {
       groups.push({
         members: [m],
         version: m.r.version,
         names: new Set(names),
+        credits: new Set([credit]),
         isrcs: new Set(isrc ? [isrc] : []),
         durationMs: m.r.durationMs,
       });
@@ -150,10 +166,14 @@ function groupResults(members: Member[]): Group[] {
     }
     g.members.push(m);
     names.forEach((n) => g.names.add(n));
+    g.credits.add(credit);
     if (isrc) g.isrcs.add(isrc);
     g.durationMs ??= m.r.durationMs;
-    // Same ISRC with a different title: the more specific description of the recording wins.
-    if (KIND_SPECIFICITY(m.r.version.kind) > KIND_SPECIFICITY(g.version.kind)) g.version = m.r.version;
+    // Same ISRC with a different title: the more specific description of the recording wins; between two
+    // originals the label-less form wins, so the chip does not depend on which provider answered first.
+    const mk = KIND_SPECIFICITY(m.r.version.kind);
+    const gk = KIND_SPECIFICITY(g.version.kind);
+    if (mk > gk || (mk === 0 && gk === 0 && g.version.label && !m.r.version.label)) g.version = m.r.version;
   }
   return groups;
 }
@@ -300,7 +320,17 @@ function toHit(g: Group): Omit<MergedHit, 'score'> {
   const isrc = [...g.isrcs][0];
   const primary = ms[0].r;
   const hit: Omit<MergedHit, 'score'> = {
-    key: isrc ?? [fold(primary.artists[0] ?? primary.artist), fold(v.baseTitle), v.kind, fold(v.remixer ?? ''), versionSignature(v)].join('|'),
+    key:
+      isrc ??
+      [
+        fold(primary.artists[0] ?? primary.artist),
+        fold(v.baseTitle),
+        v.kind,
+        fold(v.remixer ?? ''),
+        versionSignature(v),
+        // recordings split only by length (radio-length vs full-length originals) need distinct keys
+        g.durationMs === undefined ? '' : `d${Math.round(g.durationMs / 1000)}`,
+      ].join('|'),
     artist: primary.artist,
     baseTitle: v.baseTitle,
     version: v,
@@ -322,21 +352,32 @@ function toHit(g: Group): Omit<MergedHit, 'score'> {
   return hit;
 }
 
+/** Keys feed Track ids, so any remaining collision (e.g. two artists' groups with one lead) gets a suffix. */
+export function uniqueKeys(hits: MergedHit[]): MergedHit[] {
+  const seen = new Map<string, number>();
+  return hits.map((h) => {
+    const n = seen.get(h.key) ?? 0;
+    seen.set(h.key, n + 1);
+    return n ? { ...h, key: `${h.key}#${n + 1}` } : h;
+  });
+}
+
 /** Orders works by their best version and keeps every version of a work next to each other. */
 function groupByWork(hits: MergedHit[]): MergedHit[] {
-  const works: Array<{ title: string; names: Set<string>; hits: MergedHit[] }> = [];
+  const works: Array<{ title: string; names: Set<string>; credits: Set<string>; hits: MergedHit[] }> = [];
   for (const h of hits) {
     const title = fold(h.baseTitle);
     const names = artistNames({ artist: h.artist, artists: [] });
-    const w = works.find((x) => x.title === title && artistsOverlap(x.names, names));
+    const credit = compact(h.artist);
+    const w = works.find((x) => x.title === title && artistsOverlap(x.names, x.credits, names, credit));
     if (w) w.hits.push(h);
-    else works.push({ title, names: new Set(names), hits: [h] });
+    else works.push({ title, names: new Set(names), credits: new Set([credit]), hits: [h] });
   }
   return works.flatMap((w) => w.hits);
 }
 
 /** SEARCH_PROVIDERS="spotify,deezer" restricts the default set (ops/benchmark knob); unset means all. */
-function defaultProviders(): SearchProvider[] {
+export function defaultProviders(): SearchProvider[] {
   const allow = process.env.SEARCH_PROVIDERS?.split(',').map((s) => s.trim()).filter(Boolean);
   return allow?.length ? searchProviders.filter((p) => allow.includes(p.name)) : searchProviders;
 }
@@ -420,10 +461,12 @@ export async function mergedSearch(
   let members = await ask(primary.map((p) => [p, query]));
   let ranked = rank(members, q);
   if (!ranked.some((r) => r.a.strong)) {
+    // a provider that already failed or hung in this request is not asked again (it would cost a second timeout)
+    const usable = (ps: SearchProvider[]) => ps.filter((p) => !degraded.has(p.name));
     const work = identifiedWork(query, ranked);
     const refined = refinedQuery(query, work);
     const calls: Array<[SearchProvider, string]> = itunes.map((p) => [p, query]);
-    if (refined) calls.push(...primary.map((p): [SearchProvider, string] => [p, refined]));
+    if (refined) calls.push(...usable(primary).map((p): [SearchProvider, string] => [p, refined]));
     // MusicBrainz lists every recording of a work, including versions the streaming catalogs lack. Without an
     // identified work (e.g. a half-typed query) it would only queue behind its 1 req/s limit for nothing.
     if (work) {
@@ -438,7 +481,7 @@ export async function mergedSearch(
   }
 
   return {
-    hits: groupByWork(ranked.map((r) => r.hit)),
+    hits: uniqueKeys(groupByWork(ranked.map((r) => r.hit))),
     degraded: providers.map((p) => p.name).filter((n) => degraded.has(n)),
   };
 }

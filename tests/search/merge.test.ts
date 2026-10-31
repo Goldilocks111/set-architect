@@ -2,7 +2,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { mergedSearch, PROVIDER_TIMEOUT_MS, providerQuery, resetProviderBudgets } from '@/lib/search/merge';
+import { mergedSearch, PROVIDER_TIMEOUT_MS, providerQuery, resetProviderBudgets, uniqueKeys } from '@/lib/search/merge';
 import { THROTTLE_COOLDOWN_MS } from '@/lib/search/breaker';
 import { parseVersion } from '@/lib/search/version';
 import { HttpError } from '@/lib/http';
@@ -417,5 +417,87 @@ describe('mergedSearch: MusicBrainz version discovery', () => {
     });
     const radios = hits.filter((h) => h.version.kind === 'radio');
     expect(radios.map((h) => h.providers)).toEqual([['itunes'], ['musicbrainz']]);
+  });
+});
+
+describe('mergedSearch: review fix round 1', () => {
+  it('I1: never merges a different artist whose name is a substring, in either provider order', async () => {
+    const a = res('spotify', 'Elle King', 'Ex', { durationMs: 200_000 });
+    const b = res('deezer', 'Elle', 'Ex', { durationMs: 200_000 });
+    for (const providers of [[prov('spotify', [a]), prov('deezer', [b])], [prov('deezer', [b]), prov('spotify', [a])]]) {
+      const { hits } = await mergedSearch('ex', { providers });
+      expect(hits).toHaveLength(2);
+    }
+    const kygo = await mergedSearch('firestone', {
+      providers: [prov('spotify', [res('spotify', 'Kygo Tribute', 'Firestone')]), prov('deezer', [res('deezer', 'Kygo', 'Firestone')])],
+    });
+    expect(kygo.hits).toHaveLength(2);
+  });
+
+  it('I1: still merges the same credit written with different separators', async () => {
+    const { hits } = await mergedSearch('x track', {
+      providers: [prov('spotify', [res('spotify', 'Mark Knight', 'Track')]), prov('deezer', [res('deezer', 'Mark, Knight', 'Track')])],
+    });
+    expect(hits).toHaveLength(1);
+  });
+
+  it('I2: "X Extended Remix" and "X Remix" stay apart even without durations (R5)', async () => {
+    const { hits } = await mergedSearch('cola artbat remix', {
+      providers: [
+        prov('spotify', [res('spotify', 'CamelPhat', 'Cola - ARTBAT Remix')]),
+        prov('deezer', [res('deezer', 'CamelPhat', 'Cola (ARTBAT Extended Remix)')]),
+      ],
+    });
+    expect(hits).toHaveLength(2);
+    expect(new Set(hits.map((h) => h.key)).size).toBe(2);
+  });
+
+  it('I2: two different ISRCs never merge, whatever the titles say', async () => {
+    const { hits } = await mergedSearch('camelphat cola', {
+      providers: [
+        prov('spotify', [res('spotify', 'CamelPhat', 'Cola', { isrc: 'GB1' })]),
+        prov('deezer', [res('deezer', 'CamelPhat', 'Cola', { isrc: 'GB2' })]),
+      ],
+    });
+    expect(hits.map((h) => h.key).sort()).toEqual(['GB1', 'GB2']);
+  });
+
+  it('I3: recordings split only by duration get distinct, stable keys', async () => {
+    const run = () =>
+      mergedSearch('camelphat cola', {
+        providers: [
+          prov('spotify', [res('spotify', 'CamelPhat', 'Cola', { durationMs: 190_000 })]),
+          prov('deezer', [res('deezer', 'CamelPhat', 'Cola', { durationMs: 420_000 })]),
+        ],
+      });
+    const first = (await run()).hits.map((h) => h.key);
+    expect(new Set(first).size).toBe(2);
+    expect((await run()).hits.map((h) => h.key)).toEqual(first);
+  });
+
+  it('I3: any remaining key collision is suffixed', () => {
+    const h = (key: string) => ({ key, artist: 'A', baseTitle: 'S', version: { baseTitle: 'S', kind: 'original' as const, featuring: [] }, providers: [], score: 0 });
+    expect(uniqueKeys([h('k'), h('j'), h('k'), h('k')]).map((x) => x.key)).toEqual(['k', 'j', 'k#2', 'k#3']);
+  });
+
+  it('prefers the label-less form when two providers describe the same original', async () => {
+    const { hits } = await mergedSearch('cola', {
+      providers: [
+        prov('spotify', [res('spotify', 'CamelPhat', 'Cola - Original Mix', { isrc: 'GB1' })]),
+        prov('deezer', [res('deezer', 'CamelPhat', 'Cola', { isrc: 'GB1' })]),
+      ],
+    });
+    expect(hits[0].version.label).toBeUndefined();
+  });
+
+  it('does not ask a provider again in round two after it hung in round one', async () => {
+    const hung = prov('spotify', () => new Promise(() => {}));
+    const t0 = Date.now();
+    await mergedSearch('CamelPhat Cola ZHU Remix', {
+      timeoutMs: 40,
+      providers: [hung, prov('deezer', [res('deezer', 'CamelPhat', 'Cola')])],
+    });
+    expect(hung.search).toHaveBeenCalledTimes(1);
+    expect(Date.now() - t0).toBeLessThan(80);
   });
 });

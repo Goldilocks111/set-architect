@@ -15,8 +15,7 @@ import { spotifyAdapter } from './sources/spotify';
 import type { SourceAdapter } from './sources/types';
 import { youtubeAdapter } from './sources/youtube';
 import { cachedMergedSearch } from './search/cache';
-import { firstRoundProviders, mergedSearch } from './search/merge';
-import { searchProviders } from './search/providers';
+import { defaultProviders, firstRoundProviders, mergedSearch } from './search/merge';
 import type { MergedHit } from './search/types';
 
 export const ADAPTER_TIMEOUT_MS = 4000;
@@ -111,7 +110,7 @@ export function hitToTrack(hit: MergedHit): Track {
 }
 
 export async function searchTracks(query: string): Promise<Track[]> {
-  const providers = searchProviders.filter((p) => p.configured());
+  const providers = defaultProviders().filter((p) => p.configured());
   const { hits, degraded } = await cachedMergedSearch(query, (q) => mergedSearch(q, { providers }));
   const first = firstRoundProviders(providers);
   if (!hits.length && first.every((p) => degraded.includes(p.name))) return searchDemoTracks(query);

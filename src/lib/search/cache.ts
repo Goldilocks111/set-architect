@@ -14,7 +14,12 @@ interface Entry {
   at: number;
   ttl: number;
   value: MergedSearchResponse;
+  /** In-memory only (never serialized): the response with its previews, served while they are still valid. */
+  full?: MergedSearchResponse;
 }
+
+/** Deezer preview URLs are signed for about 15 minutes. */
+export const PREVIEW_TTL_MS = 10 * 60_000;
 
 // Insertion-ordered: the first key is the oldest, evicted first.
 let entries: Map<string, Entry> | null = null;
@@ -39,13 +44,15 @@ function persistSoon(): void {
   writeTimer = setTimeout(() => {
     writeTimer = null;
     try {
-      fs.writeFileSync(file(), JSON.stringify([...load()]));
+      fs.writeFileSync(file(), serialize());
     } catch {
       // best-effort
     }
   }, WRITE_DELAY_MS);
   writeTimer.unref?.();
 }
+
+const serialize = () => JSON.stringify([...load()].map(([k, { full: _mem, ...e }]) => [k, e]));
 
 export const cacheKey = (query: string) => fold(query);
 
@@ -69,12 +76,12 @@ export async function cachedMergedSearch(
   const key = cacheKey(query);
   const map = load();
   const hit = map.get(key);
-  if (hit && now - hit.at < hit.ttl) return hit.value;
+  if (hit && now - hit.at < hit.ttl) return hit.full && now - hit.at < PREVIEW_TTL_MS ? hit.full : hit.value;
 
   const res = await search(query);
   if (key && !(res.hits.length === 0 && res.degraded.length)) {
     map.delete(key);
-    map.set(key, { at: now, ttl: res.degraded.length ? DEGRADED_TTL_MS : CACHE_TTL_MS, value: storable(res) });
+    map.set(key, { at: now, ttl: res.degraded.length ? DEGRADED_TTL_MS : CACHE_TTL_MS, value: storable(res), full: res });
     while (map.size > CACHE_MAX_ENTRIES) map.delete(map.keys().next().value!);
     persistSoon();
   }
@@ -96,5 +103,5 @@ export function clearSearchCache(): void {
 export function flushSearchCache(): void {
   if (writeTimer) clearTimeout(writeTimer);
   writeTimer = null;
-  fs.writeFileSync(file(), JSON.stringify([...load()]));
+  fs.writeFileSync(file(), serialize());
 }

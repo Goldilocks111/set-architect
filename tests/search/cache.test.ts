@@ -47,11 +47,14 @@ describe('cachedMergedSearch', () => {
     expect(dead).toHaveBeenCalledTimes(2);
   });
 
-  it('returns previews fresh but never stores them', async () => {
+  it('serves previews from memory while they are valid, strips them after, and never persists them', async () => {
     const fresh = await cache.cachedMergedSearch('q', async () => ok(), 0);
     expect(fresh.hits[0].previewUrl).toBeDefined();
-    const cached = await cache.cachedMergedSearch('q', async () => ok('other'), 1);
-    expect(cached.hits[0].previewUrl).toBeUndefined();
+    const soon = await cache.cachedMergedSearch('q', async () => ok('other'), cache.PREVIEW_TTL_MS - 1);
+    expect(soon.hits[0]).toMatchObject({ key: 'k', previewUrl: expect.any(String) });
+    const later = await cache.cachedMergedSearch('q', async () => ok('other'), cache.PREVIEW_TTL_MS + 1);
+    expect(later.hits[0].key).toBe('k');
+    expect(later.hits[0].previewUrl).toBeUndefined();
     cache.flushSearchCache();
     expect(fs.readFileSync(path.join(process.env.SETARCHITECT_DATA_DIR!, 'search', 'query-cache.json'), 'utf8')).not.toContain('dzcdn');
   });

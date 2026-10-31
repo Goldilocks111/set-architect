@@ -68,9 +68,11 @@ describe('provider breaker', () => {
     expect(b.cooldownUntil('musicbrainz', 1)).toBe(b.MB_BACKOFF_MS);
   });
 
-  it('ignores network errors and timeouts', async () => {
+  it('counts timeouts into the failure streak but ignores plain network errors', async () => {
     const b = await load();
-    for (let i = 0; i < 5; i++) b.recordFailure('deezer', new Error('timed out'), 0);
+    for (let i = 0; i < 5; i++) b.recordFailure('deezer', new Error('fetch failed'), 0);
     expect(b.cooldownUntil('deezer', 1)).toBe(0);
+    for (let i = 0; i < 3; i++) b.recordFailure('deezer', new Error('deezer search timed out after 1200ms'), 0);
+    expect(b.cooldownUntil('deezer', 1)).toBe(b.STREAK_COOLDOWN_MS);
   });
 });
