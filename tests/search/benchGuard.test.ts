@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   BenchThrottled,
+  filterAllowed,
+  mergedQueryGapMs,
+  missingRequired,
+  requiredProviders,
   REQUEST_BUDGET,
   budgetFor,
   dayKey,
@@ -236,5 +240,58 @@ describe('PARTIAL status for bench-side throttling', () => {
     const summary = degradedSummary(perQuery);
     expect(summary.invalid).toEqual(['itunes']);
     expect(runStatus({ ...{ degradedInvalid: [], errored: 0, total: 10, budgetExceeded: false }, throttledPartial: summary.invalid })).toMatch(/^PARTIAL/);
+  });
+});
+
+describe('merged target pacing (C1)', () => {
+  it('does not refuse a stage-2 refined call right after a fast stage-1 call', async () => {
+    let t = 1_000;
+    const p = { name: 'deezer', configured: () => true, search: async () => [] as any[] };
+    const refused: string[] = [];
+    // merged target: per-call gap is 0, rate is enforced per query
+    const g = guardProvider(p, { gate: new RequestGate(100), breaker: null, gapMs: 0, now: () => t, onThrottle: (e) => refused.push(e.provider) });
+    await g.search('stage 1');
+    t += 120; // stage 1 answered in 120 ms, far below the 340 ms per-call gap
+    await expect(g.search('stage 2 refined')).resolves.toEqual([]);
+    expect(refused).toEqual([]);
+  });
+  it('paces at query level: at least 680 ms, or two gaps of the slowest provider', () => {
+    const gaps = { spotify: 340, deezer: 340, musicbrainz: 1100, itunes: 3100 };
+    expect(mergedQueryGapMs(['spotify', 'deezer'], gaps)).toBe(680);
+    expect(mergedQueryGapMs(['spotify', 'deezer', 'musicbrainz'], gaps)).toBe(2200);
+    expect(mergedQueryGapMs(['spotify', 'itunes'], gaps)).toBe(6200);
+    expect(mergedQueryGapMs([], gaps)).toBe(680);
+  });
+});
+
+describe('provider selection knobs (C2)', () => {
+  const list = [{ name: 'spotify' }, { name: 'deezer' }, { name: 'itunes' }, { name: 'musicbrainz' }];
+  it('honors SEARCH_PROVIDERS', () => {
+    expect(filterAllowed(list, 'spotify, deezer').map((p) => p.name)).toEqual(['spotify', 'deezer']);
+    expect(filterAllowed(list, undefined)).toHaveLength(4);
+    expect(filterAllowed(list, '')).toHaveLength(4);
+  });
+  it('treats BENCH_BUDGET_<P>=0 as zero, not as unset', () => {
+    expect(budgetFor('spotify', { BENCH_BUDGET_SPOTIFY: '0' })).toBe(0);
+    expect(budgetFor('spotify', { BENCH_BUDGET_SPOTIFY: '' })).toBe(150);
+    expect(budgetFor('spotify', { BENCH_BUDGET_SPOTIFY: 'abc' })).toBe(150);
+    const g = new RequestGate(budgetFor('spotify', { BENCH_BUDGET_SPOTIFY: '0' }));
+    expect(g.take()).toBe(false);
+  });
+});
+
+describe('required providers (I1)', () => {
+  it('defaults to spotify and deezer and honors BENCH_REQUIRED', () => {
+    expect(requiredProviders({})).toEqual(['spotify', 'deezer']);
+    expect(requiredProviders({ BENCH_REQUIRED: 'deezer' })).toEqual(['deezer']);
+    expect(requiredProviders({ BENCH_REQUIRED: '' })).toEqual([]);
+  });
+  it('flags a required provider that did not participate as INVALID', () => {
+    const missing = missingRequired(['spotify', 'deezer'], ['deezer', 'musicbrainz']);
+    expect(missing).toEqual(['spotify']);
+    expect(runStatus({ degradedInvalid: [], errored: 0, total: 130, budgetExceeded: false, requiredMissing: missing })).toBe(
+      'INVALID (required provider missing: spotify)',
+    );
+    expect(missingRequired(['spotify'], ['spotify'])).toEqual([]);
   });
 });

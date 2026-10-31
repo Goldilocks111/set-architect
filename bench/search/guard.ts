@@ -89,8 +89,39 @@ export function saveDailyCounts(store: DailyStore, day: string, counts: Record<s
 }
 
 export function budgetFor(name: string, env: Record<string, string | undefined> = process.env): number | undefined {
-  const o = Number(env[`BENCH_BUDGET_${name.toUpperCase()}`]);
-  return Number.isFinite(o) && o > 0 ? o : REQUEST_BUDGET[name];
+  const raw = env[`BENCH_BUDGET_${name.toUpperCase()}`];
+  if (raw !== undefined && raw.trim() !== '') {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return REQUEST_BUDGET[name];
+}
+
+/** SEARCH_PROVIDERS="spotify,deezer" restricts the provider set, exactly as the app's defaultProviders() does. */
+export function filterAllowed<P extends { name: string }>(list: P[], spec: string | undefined): P[] {
+  const allow = spec?.split(',').map((s) => s.trim()).filter(Boolean);
+  return allow?.length ? list.filter((p) => allow.includes(p.name)) : list;
+}
+
+export const DEFAULT_REQUIRED = 'spotify,deezer';
+
+export function requiredProviders(env: Record<string, string | undefined> = process.env): string[] {
+  const spec = env.BENCH_REQUIRED ?? DEFAULT_REQUIRED;
+  return spec.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+/** Required providers that did not take part in the run. */
+export function missingRequired(required: string[], participating: string[]): string[] {
+  return required.filter((r) => !participating.includes(r));
+}
+
+/**
+ * Query-level pacing for the merged target: the merger may call each provider twice per query
+ * (stage 1 and the refined stage 2), so a query must not start sooner than two provider gaps
+ * after the previous one. Per-call gaps are not enforced inside the merger.
+ */
+export function mergedQueryGapMs(providerNames: string[], gaps: Record<string, number>, floorMs = 680): number {
+  return Math.max(floorMs, ...providerNames.map((n) => 2 * (gaps[n] ?? 340)));
 }
 
 /**
@@ -149,11 +180,14 @@ export function runStatus(o: {
   total: number;
   budgetExceeded: boolean;
   rateLimitedUntil?: number;
+  /** Required providers that did not take part in a merged run. */
+  requiredMissing?: string[];
   /** Providers the harness itself refused on >10% of queries. */
   throttledPartial?: string[];
 }): string {
   if (o.rateLimitedUntil) return `ABORTED (rate-limited until ${new Date(o.rateLimitedUntil).toLocaleString()})`;
   if (o.budgetExceeded) return 'ABORTED (budget)';
+  if (o.requiredMissing?.length) return `INVALID (required provider missing: ${o.requiredMissing.join(', ')})`;
   if (o.degradedInvalid.length) return `INVALID (degraded >10%: ${o.degradedInvalid.join(', ')})`;
   if (o.errored > DEGRADED_INVALID_RATE * o.total) return 'INVALID (>10% errored)';
   if (o.throttledPartial?.length) {

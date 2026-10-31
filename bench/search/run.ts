@@ -1,7 +1,25 @@
-import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MergedSearchResponse, SearchProvider, SearchResult } from '../../src/lib/search/types';
-import { BenchThrottled, RequestGate, budgetFor, dayKey, degradedSummary, guardProvider, isRateLimited, loadDailyCounts, runStatus, saveDailyCounts, selectSingleProviders, type Breaker } from './guard';
+import {
+  BenchThrottled,
+  RequestGate,
+  budgetFor,
+  dayKey,
+  degradedSummary,
+  filterAllowed,
+  guardProvider,
+  isRateLimited,
+  loadDailyCounts,
+  mergedQueryGapMs,
+  missingRequired,
+  requiredProviders,
+  runStatus,
+  saveDailyCounts,
+  selectSingleProviders,
+  type Breaker,
+} from './guard';
 import { hitDetail, versionRank, percentile, type BenchTrack, type BenchVersionCase } from './score';
 
 try {
@@ -11,12 +29,25 @@ try {
 }
 
 const here = __dirname;
+const argv = process.argv.slice(2);
+const dryRun = argv.includes('--dry-run');
+if (dryRun) {
+  // the merger consults the app's persisted breaker; a dry run must neither read nor write the real one
+  process.env.SETARCHITECT_DATA_DIR = mkdtempSync(join(tmpdir(), 'bench-dry-'));
+}
+const named = argv.filter((a) => !a.startsWith('--'));
 const DEFAULT_GAP_MS = 340; // <= 3 req/s
-const GAP_MS: Record<string, number> = { itunes: 3100, spotify: 340, deezer: 340, musicbrainz: 1100, merged: 340 };
+const GAP_MS: Record<string, number> = { itunes: 3100, spotify: 340, deezer: 340, musicbrainz: 1100 };
 const gates = new Map<string, RequestGate>();
 let breaker: Breaker | null = null;
 const tracks: BenchTrack[] = JSON.parse(readFileSync(join(here, 'tracks.json'), 'utf8'));
 const versions: BenchVersionCase[] = JSON.parse(readFileSync(join(here, 'versions.json'), 'utf8'));
+
+interface Timing {
+  stage1Ms: number;
+  totalMs: number;
+  stage2: boolean;
+}
 
 interface Target {
   name: string;
@@ -24,9 +55,33 @@ interface Target {
   degraded?: string[][];
   /** Per-query providers the harness itself refused to call (budget, pacing, breaker). */
   throttled?: string[][];
+  /** Minimum gap between queries. */
   gapMs?: number;
+  /** Merged target: stage timings reported by mergedSearch via onTiming. */
+  timings?: Timing[];
+  participating?: string[];
+  requiredMissing?: string[];
   run(query: string): Promise<Array<{ artist: string; title?: string; baseTitle?: string; version: SearchResult['version']; durationMs?: number; provider?: string; providers?: string[] }>>;
 }
+
+const stubProvider = (name: SearchResult['provider']): SearchProvider => ({
+  name,
+  configured: () => true,
+  async search(q) {
+    await sleep(25);
+    return [
+      {
+        provider: name,
+        providerId: `stub-${q}`,
+        artist: 'Stub Artist',
+        artists: ['Stub Artist'],
+        title: q,
+        version: { baseTitle: q, kind: 'original', featuring: [] },
+        durationMs: 200_000,
+      },
+    ];
+  },
+});
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -38,24 +93,26 @@ async function tryImport(path: string): Promise<any | null> {
   }
 }
 
-let providerList: SearchProvider[] = [];
-
-async function loadTargets(): Promise<Target[]> {
+async function loadTargets(): Promise<{ targets: Target[]; skipped: string[] }> {
   const targets: Target[] = [];
+  const skipped: string[] = [];
   const prov = await tryImport('../../src/lib/search/providers/index');
-  if (!prov) {
-    console.log('providers not available (src/lib/search/providers/index.ts missing or failed to load); skipping provider targets');
-  } else {
-    const list: SearchProvider[] =
-      typeof prov.getProviders === 'function' ? prov.getProviders()
-      : Array.isArray(prov.searchProviders) ? prov.searchProviders
-      : Array.isArray(prov.providers) ? prov.providers
-      : Array.isArray(prov.default) ? prov.default
-      : [];
-    if (list.length === 0) console.log('providers module loaded but exposes no providers (expected searchProviders[])');
-    console.log(`configured providers: ${list.filter((p) => p.configured()).map((p) => p.name).join(', ') || 'none'}`);
-    breaker = await tryImport('../../src/lib/search/breaker');
-    if (!breaker) console.log('breaker.ts not available; cooldowns will not be shared with the app');
+  let list: SearchProvider[] =
+    typeof prov?.getProviders === 'function' ? prov.getProviders()
+    : Array.isArray(prov?.searchProviders) ? prov.searchProviders
+    : Array.isArray(prov?.providers) ? prov.providers
+    : Array.isArray(prov?.default) ? prov.default
+    : [];
+  if (!prov || list.length === 0) console.log('providers not available (src/lib/search/providers/index.ts missing or empty)');
+  list = filterAllowed(list, process.env.SEARCH_PROVIDERS);
+  if (dryRun) list = list.map((p) => stubProvider(p.name));
+
+  breaker = dryRun ? null : await tryImport('../../src/lib/search/breaker');
+  if (!breaker && !dryRun) console.log('breaker.ts not available; cooldowns will not be shared with the app');
+
+  let persist = () => {};
+  let today: Record<string, number> = {};
+  if (!dryRun) {
     const dd = await tryImport('../../src/lib/dataDir');
     const dailyFile: string | null = dd ? dd.dataDir('search', 'bench-requests.json') : null;
     const day = dayKey();
@@ -63,52 +120,56 @@ async function loadTargets(): Promise<Target[]> {
       read: () => (dailyFile && existsSync(dailyFile) ? readFileSync(dailyFile, 'utf8') : null),
       write: (t: string) => dailyFile && writeFileSync(dailyFile, t),
     };
-    const today = loadDailyCounts(store, day);
-    const persist = () => saveDailyCounts(store, day, Object.fromEntries([...gates].map(([k, g]) => [k, g.count])));
-    for (const p of list) gates.set(p.name, new RequestGate(budgetFor(p.name), today[p.name] ?? 0, persist));
-
-    const { run, skipped } = selectSingleProviders(list, breaker);
-    for (const k of skipped) {
-      console.log(`skipping provider ${k.name}: ${k.reason}${k.until ? ` until ${new Date(k.until).toLocaleString()}` : ''}`);
-    }
-    for (const p of run) {
-      const g = guardProvider(p, { gate: gates.get(p.name)!, breaker, gapMs: 0 });
-      targets.push({
-        name: p.name,
-        run: async (q) => (await g.search(q, { limit: 10 })).map((r: SearchResult) => ({ ...r, baseTitle: r.version.baseTitle })),
-      });
-    }
-    providerList = list;
+    today = loadDailyCounts(store, day);
+    persist = () => saveDailyCounts(store, day, Object.fromEntries([...gates].map(([k, g]) => [k, g.count])));
   }
-  const merge = await tryImport('../../src/lib/search/merge');
-  if (!merge) {
-    console.log('merge.ts not available; skipping merged target');
-  } else {
-    const fn: ((q: string, o?: { providers?: SearchProvider[] }) => Promise<MergedSearchResponse>) | undefined =
-      merge.mergedSearch ?? merge.searchMerged ?? merge.search ?? merge.default;
-    if (typeof fn !== 'function') console.log('merge module loaded but exports no search function (searchMerged/mergedSearch/search)');
-    else {
+  for (const p of list) gates.set(p.name, new RequestGate(budgetFor(p.name), today[p.name] ?? 0, persist));
+
+  const wantedNames = named.length ? named : ['merged'];
+
+  // single-provider targets: only when named explicitly
+  const { run, skipped: sk } = selectSingleProviders(list, breaker);
+  for (const k of sk) {
+    if (wantedNames.includes(k.name)) skipped.push(`${k.name}: ${k.reason}${k.until ? ` until ${new Date(k.until).toLocaleString()}` : ''}`);
+  }
+  for (const p of run) {
+    if (!wantedNames.includes(p.name)) continue;
+    const g = guardProvider(p, { gate: gates.get(p.name)!, breaker, gapMs: 0 });
+    targets.push({
+      name: p.name,
+      gapMs: dryRun ? 0 : GAP_MS[p.name] ?? DEFAULT_GAP_MS,
+      run: async (q) => (await g.search(q, { limit: 10 })).map((r: SearchResult) => ({ ...r, baseTitle: r.version.baseTitle })),
+    });
+  }
+
+  if (wantedNames.includes('merged')) {
+    const merge = await tryImport('../../src/lib/search/merge');
+    const fn: ((q: string, o?: { providers?: SearchProvider[]; onTiming?: (t: Timing) => void }) => Promise<MergedSearchResponse>) | undefined =
+      merge?.mergedSearch ?? merge?.searchMerged ?? merge?.search ?? merge?.default;
+    if (typeof fn !== 'function') {
+      skipped.push('merged: merge.ts missing or exports no mergedSearch');
+    } else {
       const degraded: string[][] = [];
       const throttled: string[][] = [];
+      const timings: Timing[] = [];
       let now = new Set<string>();
-      const usable = providerList.filter((p) => p.configured() && (breaker?.cooldownUntil(p.name) ?? 0) <= Date.now());
+      const usable = list.filter((p) => p.configured() && (breaker?.cooldownUntil(p.name) ?? 0) <= Date.now());
+      // rate is enforced per query (outer gap), not per call: the merger may legitimately call a provider twice
       const wrapped = usable.map((p) =>
-        guardProvider(p, {
-          gate: gates.get(p.name)!,
-          breaker,
-          gapMs: GAP_MS[p.name] ?? DEFAULT_GAP_MS,
-          onThrottle: (e) => now.add(e.provider),
-        }),
+        guardProvider(p, { gate: gates.get(p.name)!, breaker, gapMs: 0, onThrottle: (e) => now.add(e.provider) }),
       );
-      console.log(`merged target providers: ${wrapped.map((p) => p.name).join(', ') || 'none'}`);
+      const participating = wrapped.map((p) => p.name);
       targets.push({
         name: 'merged',
         degraded,
         throttled,
-        gapMs: Math.max(GAP_MS.merged, ...wrapped.map((p) => GAP_MS[p.name] ?? DEFAULT_GAP_MS)),
+        timings,
+        participating,
+        requiredMissing: missingRequired(requiredProviders(), participating),
+        gapMs: dryRun ? 0 : mergedQueryGapMs(participating, GAP_MS),
         run: async (q) => {
           now = new Set();
-          const res = await fn(q, { providers: wrapped });
+          const res = await fn(q, { providers: wrapped, onTiming: (t) => timings.push(t) });
           degraded.push((res.degraded ?? []).filter((n) => !now.has(n)));
           throttled.push([...now]);
           return res.hits.map((h) => ({ ...h, baseTitle: h.baseTitle }));
@@ -116,11 +177,21 @@ async function loadTargets(): Promise<Target[]> {
       });
     }
   }
-  return targets;
+
+  console.log('--- pre-flight plan ---');
+  console.log(`mode: ${dryRun ? 'DRY RUN (all providers stubbed, zero network, nothing persisted)' : 'live'}`);
+  console.log(`targets: ${wantedNames.join(', ')}${named.length ? '' : ' (default: merged only)'}`);
+  console.log(`providers (SEARCH_PROVIDERS=${process.env.SEARCH_PROVIDERS ?? 'all'}): ${list.map((p) => `${p.name}${p.configured() ? '' : '(unconfigured)'}`).join(', ') || 'none'}`);
+  console.log(`required for merged (BENCH_REQUIRED): ${requiredProviders().join(', ') || 'none'}`);
+  console.log(`budgets, used today / budget: ${list.map((p) => `${p.name} ${gates.get(p.name)!.count}/${budgetFor(p.name) ?? '-'}`).join(', ')}`);
+  for (const k of skipped) console.log(`skipped ${k}`);
+  for (const t of targets) {
+    if (t.participating) console.log(`merged participating: ${t.participating.join(', ') || 'none'}${t.requiredMissing?.length ? `  MISSING REQUIRED: ${t.requiredMissing.join(', ')}` : ''}; query gap ${t.gapMs} ms`);
+  }
+  return { targets, skipped };
 }
 
 const pct = (n: number, d: number) => (d === 0 ? 'n/a' : `${((100 * n) / d).toFixed(1)}%`);
-const only = process.argv.slice(2);
 
 const sumGates = () => [...gates.values()].reduce((a, g) => a + g.count, 0);
 
@@ -133,7 +204,7 @@ async function runTarget(t: Target) {
   let rateLimitedUntil = 0;
   const timed = async (q: string) => {
     if (budgetExceeded || rateLimitedUntil) return { res: [], error: 'target aborted' };
-    const wait = last + (t.gapMs ?? GAP_MS[t.name] ?? DEFAULT_GAP_MS) - Date.now();
+    const wait = last + (t.gapMs ?? DEFAULT_GAP_MS) - Date.now();
     if (wait > 0) await sleep(wait);
     last = Date.now();
     const t0 = performance.now();
@@ -203,8 +274,21 @@ async function runTarget(t: Target) {
     throttledByBench: '',
     secondaryOnlyHits: 0,
     extrasHits: 0,
+    participating: t.participating?.join(', ') ?? '',
+    stage1P50: 'n/a' as string | number,
+    stage1P95: 'n/a' as string | number,
+    totalP50: 'n/a' as string | number,
+    totalP95: 'n/a' as string | number,
+    stage2Queries: 'n/a' as string | number,
     status: 'ok',
   };
+  if (t.timings?.length) {
+    summary.stage1P50 = Math.round(percentile(t.timings.map((x) => x.stage1Ms), 50));
+    summary.stage1P95 = Math.round(percentile(t.timings.map((x) => x.stage1Ms), 95));
+    summary.totalP50 = Math.round(percentile(t.timings.map((x) => x.totalMs), 50));
+    summary.totalP95 = Math.round(percentile(t.timings.map((x) => x.totalMs), 95));
+    summary.stage2Queries = t.timings.filter((x) => x.stage2).length;
+  }
   const dg = t.degraded ? degradedSummary(t.degraded) : { text: '', invalid: [] as string[] };
   summary.degraded = dg.text;
   const secondary = trackRows.filter((r) => r.via?.startsWith('subset-secondary-only'));
@@ -227,30 +311,33 @@ async function runTarget(t: Target) {
     total: tracks.length + versions.length,
     budgetExceeded,
     rateLimitedUntil: rateLimitedUntil || undefined,
+    requiredMissing: t.requiredMissing,
     throttledPartial: t.throttled ? degradedSummary(t.throttled).invalid : [],
   });
-  const dir = join(here, 'results');
-  mkdirSync(dir, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  writeFileSync(join(dir, `${stamp}-${t.name}.json`), JSON.stringify({ summary, trackRows, versionRows }, null, 2));
+  if (!dryRun) {
+    const dir = join(here, 'results');
+    mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    writeFileSync(join(dir, `${stamp}-${t.name}.json`), JSON.stringify({ summary, trackRows, versionRows }, null, 2));
+  }
   return summary;
 }
 
 async function main() {
   console.log(`bench: ${tracks.length} tracks, ${versions.length} version cases`);
-  const targets = await loadTargets();
-  if (targets.length === 0) {
-    console.log('No targets to run. Build src/lib/search/providers/index.ts and/or merge.ts first.');
-    return;
-  }
-  const rows = [];
+  const { targets, skipped } = await loadTargets();
+  const rows: Array<Record<string, unknown>> = skipped.map((k) => ({ target: k.split(':')[0], status: `NOT RUN (${k})` }));
   for (const t of targets) {
-    if (only.length && !only.includes(t.name)) continue;
+    if (t.requiredMissing?.length && !dryRun) {
+      rows.push({ target: t.name, status: runStatus({ degradedInvalid: [], errored: 0, total: 1, budgetExceeded: false, requiredMissing: t.requiredMissing }) + ' - NOT RUN' });
+      continue;
+    }
     console.log(`running ${t.name}...`);
     rows.push(await runTarget(t));
   }
-  console.table(rows);
-  console.log(`today's request totals (${dayKey()}): ${[...gates].map(([k, g]) => `${k} ${g.count}/${budgetFor(k) ?? '-'}`).join(', ')}`);
+  if (rows.length === 0) console.log('Nothing to run.');
+  else console.table(rows);
+  console.log(`today's request totals (${dayKey()}${dryRun ? ', dry run, not persisted' : ''}): ${[...gates].map(([k, g]) => `${k} ${g.count}/${budgetFor(k) ?? '-'}`).join(', ')}`);
 }
 
 main().catch((e) => {
