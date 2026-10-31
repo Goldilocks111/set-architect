@@ -2,7 +2,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { mergedSearch, PROVIDER_TIMEOUT_MS, providerQuery, resetProviderBudgets, uniqueKeys } from '@/lib/search/merge';
+import { mergedSearch, PROVIDER_TIMEOUT_MS, PROVIDER_TIMEOUTS, providerQuery, resetProviderBudgets, uniqueKeys } from '@/lib/search/merge';
 import { THROTTLE_COOLDOWN_MS } from '@/lib/search/breaker';
 import { parseVersion } from '@/lib/search/version';
 import { HttpError } from '@/lib/http';
@@ -172,6 +172,7 @@ describe('mergedSearch: degradation (review focus 4)', () => {
 
   it('uses a 1.2s per-provider timeout by default', async () => {
     expect(PROVIDER_TIMEOUT_MS).toBe(1200);
+    expect(PROVIDER_TIMEOUTS.musicbrainz).toBe(2500);
     vi.useFakeTimers();
     const p = mergedSearch('cola', {
       providers: [prov('spotify', () => new Promise(() => {})), prov('deezer', [res('deezer', 'CamelPhat', 'Cola')])],
@@ -182,6 +183,16 @@ describe('mergedSearch: degradation (review focus 4)', () => {
     expect(settled).toBe(false);
     await vi.advanceTimersByTimeAsync(200);
     expect((await p).degraded).toEqual(['spotify']);
+  });
+
+  it('gives MusicBrainz 2.5s by default while the others keep 1.2s', async () => {
+    vi.useFakeTimers();
+    const mb = prov('musicbrainz' as Name, () => new Promise((r) => setTimeout(() => r([res('musicbrainz', 'CamelPhat', 'Cola (radio edit)')]), 2000)));
+    const p = mergedSearch('camelphat cola radio edit', { providers: [prov('spotify', [res('spotify', 'CamelPhat', 'Cola')]), mb] });
+    await vi.advanceTimersByTimeAsync(2100);
+    const out = await p;
+    expect(out.degraded).toEqual([]);
+    expect(out.hits.some((h) => h.version.kind === 'radio')).toBe(true);
   });
 
   it('skips providers that are not configured without degrading', async () => {

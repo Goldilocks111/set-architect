@@ -6,6 +6,8 @@ import { parseVersion } from './version';
 import type { MergedHit, MergedSearchResponse, ParsedVersion, SearchProvider, SearchResult, VersionKind } from './types';
 
 export const PROVIDER_TIMEOUT_MS = 1200;
+/** MusicBrainz answered in 300–2100ms when probed; it only runs in round two, for version discovery. */
+export const PROVIDER_TIMEOUTS: Partial<Record<SearchResult['provider'], number>> = { musicbrainz: 2500 };
 
 /**
  * Calls allowed per provider per rolling minute. Apple documents roughly 20/min for the iTunes Search API
@@ -430,7 +432,6 @@ export async function mergedSearch(
   opts: { providers?: SearchProvider[]; timeoutMs?: number } = {}
 ): Promise<MergedSearchResponse> {
   const providers = (opts.providers ?? defaultProviders()).filter((p) => p.configured());
-  const timeoutMs = opts.timeoutMs ?? PROVIDER_TIMEOUT_MS;
   const degraded = new Set<SearchResult['provider']>();
   const q = parseQuery(query);
 
@@ -440,7 +441,11 @@ export async function mergedSearch(
         try {
           if (cooldownUntil(p.name)) throw new Error(`${p.name} cooling down after throttling`);
           if (!takeBudget(p.name)) throw new Error(`${p.name} over its request budget`);
-          const rs = await withTimeout(p.search(providerQuery(p.name, text)), timeoutMs, `${p.name} search`);
+          const rs = await withTimeout(
+            p.search(providerQuery(p.name, text)),
+            opts.timeoutMs ?? PROVIDER_TIMEOUTS[p.name] ?? PROVIDER_TIMEOUT_MS,
+            `${p.name} search`
+          );
           recordSuccess(p.name);
           return rs;
         } catch (err) {
