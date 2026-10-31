@@ -23,7 +23,7 @@ const creds = () => {
   return id && secret ? { id, secret } : undefined;
 };
 
-async function getToken(force = false): Promise<string> {
+export async function getToken(force = false): Promise<string> {
   if (!force && cached && Date.now() < cached.expiresAt) return cached.token;
   const c = creds();
   if (!c) throw new Error('spotify not configured');
