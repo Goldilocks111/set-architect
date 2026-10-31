@@ -35,15 +35,97 @@ export function selectSingleProviders<P extends { name: string; configured(): bo
   return { run, skipped };
 }
 
-/** Counts requests against a hard per-run budget. */
+/** Thrown instead of calling a provider when the harness's own budget, pacing or breaker forbids it. */
+export class BenchThrottled extends Error {
+  constructor(public provider: string, public reason: 'budget' | 'pacing' | 'breaker') {
+    super(`${provider} throttled by bench (${reason})`);
+  }
+}
+
+/** Counts requests against a hard budget; `initial` carries today's earlier usage. */
 export class RequestGate {
-  count = 0;
-  constructor(private readonly budget: number | undefined) {}
+  count: number;
+  constructor(
+    private readonly budget: number | undefined,
+    initial = 0,
+    private readonly onTake?: (count: number) => void,
+  ) {
+    this.count = initial;
+  }
   take(): boolean {
     if (this.budget !== undefined && this.count >= this.budget) return false;
     this.count++;
+    this.onTake?.(this.count);
     return true;
   }
+}
+
+/** Local calendar day, e.g. 2026-11-01. */
+export function dayKey(d = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+export interface DailyStore {
+  read(): string | null;
+  write(text: string): void;
+}
+
+export function loadDailyCounts(store: DailyStore, day: string): Record<string, number> {
+  try {
+    const j = JSON.parse(store.read() ?? '{}') as { day?: string; counts?: Record<string, number> };
+    return j.day === day && j.counts ? j.counts : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveDailyCounts(store: DailyStore, day: string, counts: Record<string, number>): void {
+  try {
+    store.write(JSON.stringify({ day, counts }));
+  } catch {
+    // best-effort; the in-memory gate still holds for this run
+  }
+}
+
+export function budgetFor(name: string, env: Record<string, string | undefined> = process.env): number | undefined {
+  const o = Number(env[`BENCH_BUDGET_${name.toUpperCase()}`]);
+  return Number.isFinite(o) && o > 0 ? o : REQUEST_BUDGET[name];
+}
+
+/**
+ * Wraps a provider so every call is gated by the shared budget, the breaker and a minimum gap.
+ * A refused call throws BenchThrottled (never reaches the network); a 429 opens the shared breaker.
+ */
+export function guardProvider<P extends { name: string; configured(): boolean; search(q: string, o?: any): Promise<any> }>(
+  p: P,
+  o: { gate: RequestGate; breaker: Breaker | null; gapMs: number; onThrottle?: (e: BenchThrottled) => void; now?: () => number },
+): P {
+  const now = o.now ?? Date.now;
+  let last = -Infinity;
+  const refuse = (reason: BenchThrottled['reason']): never => {
+    const e = new BenchThrottled(p.name, reason);
+    o.onThrottle?.(e);
+    throw e;
+  };
+  return {
+    ...p,
+    name: p.name,
+    configured: () => p.configured(),
+    search: async (q: string, opts?: any) => {
+      const t = now();
+      if ((o.breaker?.cooldownUntil(p.name, t) ?? 0) > t) refuse('breaker');
+      if (t - last < o.gapMs) refuse('pacing');
+      if (!o.gate.take()) refuse('budget');
+      last = t;
+      try {
+        return await p.search(q, opts);
+      } catch (err) {
+        if (isRateLimited(p.name, err)) o.breaker?.recordFailure(p.name, err, t);
+        throw err;
+      }
+    },
+  } as P;
 }
 
 export function degradedSummary(perQuery: string[][]): { text: string; invalid: string[] } {

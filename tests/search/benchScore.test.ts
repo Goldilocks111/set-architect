@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isHit, hitRank, versionCorrect, normalize, type BenchTrack, type BenchVersionCase } from '../../bench/search/score';
+import { isHit, hitRank, hitDetail, artistRule, versionCorrect, normalize, type BenchTrack, type BenchVersionCase } from '../../bench/search/score';
 
 const track = (artist: string, title: string): BenchTrack => ({
   id: 't', artist, title, releaseYear: 2020, bucket: 'classic', query: `${artist} ${title}`, source: 'x',
@@ -134,5 +134,47 @@ describe('duration window', () => {
   });
   it('ignores duration when the result has none', () => {
     expect(versionCorrect(c, [{ artist: 'Fisher', version: v('Rain', 'extended') }])).toBe(true);
+  });
+});
+
+describe('combined and lead-only artist credits', () => {
+  const hit = (want: string, got: string, aliases?: Record<string, string[]>) =>
+    isHit({ ...track(want, 'Cola'), aliases }, [{ artist: got, baseTitle: 'Cola' }]);
+  it('accepts combined credit strings from providers that do not comma-list', () => {
+    expect(hit('CamelPhat, Elderbrook', 'CamelPhat & Elderbrook')).toBe(true);
+    expect(hit('CamelPhat, Elderbrook', 'CamelPhat x Elderbrook')).toBe(true);
+    expect(hit('CamelPhat, Elderbrook', 'CamelPhat and Elderbrook')).toBe(true);
+  });
+  it('keeps a credited duo whole and tolerates extra featured artists', () => {
+    expect(hit('Above & Beyond', 'Above & Beyond & Richard Bedford')).toBe(true);
+    expect(hit('Above & Beyond', 'Above')).toBe(false);
+    expect(hit('Above & Beyond', 'Beyond & Richard Bedford')).toBe(false);
+  });
+  it('accepts a lead-only credit (Deezer lists the main artist)', () => {
+    expect(hit('Skrillex, Solomun', 'Skrillex')).toBe(true);
+    expect(hit('Dombresky, Disco Dom', 'Dombresky')).toBe(true);
+  });
+  it('still rejects a secondary-only credit and impostors', () => {
+    expect(hit('CamelPhat, Elderbrook', 'Elderbrook')).toBe(false);
+    expect(hit('Skrillex, Solomun', 'Solomun')).toBe(false);
+    expect(hit('Disclosure', 'Disclosure Fan Club')).toBe(false);
+    expect(hit('Disclosure', 'Tribute to Disclosure')).toBe(false);
+    expect(hit('Chase & Status', 'Status Quo')).toBe(false);
+  });
+  it('supports per-fixture aliases and reports the rule used', () => {
+    const al = { 'Rüfüs Du Sol': ['RÜFÜS'] };
+    expect(hit('Rüfüs Du Sol', 'RÜFÜS', al)).toBe(true);
+    expect(hit('Rüfüs Du Sol', 'RÜFÜS')).toBe(false);
+    expect(artistRule('Rüfüs Du Sol', 'RÜFÜS', al)).toBe('alias');
+    expect(artistRule('Rüfüs Du Sol', 'RÜFÜS DU SOL')).toBe('exact');
+    expect(artistRule('CamelPhat, Elderbrook', 'CamelPhat')).toBe('lead-subset');
+    expect(artistRule('CamelPhat, Elderbrook', 'Elderbrook, CamelPhat')).toBe('exact');
+    expect(hitDetail(track('Fisher', 'Cola'), [{ artist: 'Fisher', baseTitle: 'Cola' }])).toEqual({ rank: 0, via: 'exact' });
+  });
+  it('ignores soundtrack tags on both sides', () => {
+    const got = 'Pusher (feat. Gesaffelstein) [From GTAVI: Original Score]';
+    expect(isHit(track('Justice', 'Pusher'), [{ artist: 'Justice', baseTitle: got }])).toBe(true);
+    expect(isHit(track('Justice', 'Pusher [From X]'), [{ artist: 'Justice', baseTitle: 'Pusher' }])).toBe(true);
+    expect(isHit(track('Justice', 'Pusher'), [{ artist: 'Justice', baseTitle: 'Pusher (Part 2)' }])).toBe(false);
   });
 });

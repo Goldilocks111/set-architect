@@ -803,7 +803,12 @@
     "releaseYear": 2015,
     "bucket": "classic",
     "query": "Rüfüs Du Sol Innerbloom",
-    "source": "https://en.wikipedia.org/wiki/Innerbloom"
+    "source": "https://en.wikipedia.org/wiki/Innerbloom",
+    "aliases": {
+      "Rüfüs Du Sol": [
+        "RÜFÜS"
+      ]
+    }
   },
   {
     "id": "c-calvin-harris-feel-so-close",
@@ -924,12 +929,17 @@
   },
   {
     "id": "c-three-drives-greece-2000",
-    "artist": "Three Drives",
+    "artist": "Three Drives On A Vinyl",
     "title": "Greece 2000",
     "releaseYear": 1997,
     "bucket": "classic",
     "query": "Three Drives Greece 2000",
-    "source": "https://en.wikipedia.org/wiki/Greece_2000"
+    "source": "https://en.wikipedia.org/wiki/Greece_2000",
+    "aliases": {
+      "Three Drives On A Vinyl": [
+        "Three Drives"
+      ]
+    }
   },
   {
     "id": "c-zombie-nation-kernkraft-400",

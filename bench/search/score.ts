@@ -9,6 +9,8 @@ export interface BenchTrack {
   bucket: 'classic' | 'recent';
   query: string;
   source: string;
+  /** Alternate catalog spellings per credited artist, e.g. { "Rüfüs Du Sol": ["RÜFÜS"] }. */
+  aliases?: Record<string, string[]>;
 }
 
 export interface BenchVersionCase {
@@ -18,6 +20,7 @@ export interface BenchVersionCase {
   /** Known recording length; when set and a result carries a duration, they must agree within DURATION_WINDOW_MS. */
   durationMs?: number;
   source: string;
+  aliases?: Record<string, string[]>;
 }
 
 const FEAT = /[(\[]?\s*\b(?:feat|ft|featuring)\b\.?\s[^)\]]*[)\]]?/gi;
@@ -43,31 +46,82 @@ export const DURATION_WINDOW_MS = 10_000;
 
 const compact = (s: string) => s.replace(/ /g, '');
 
+export type ArtistRule = 'exact' | 'lead-subset' | 'alias';
+
 /**
- * The expected lead artist (first comma-separated name) must equal one of the result's
- * comma-separated artists exactly. A duo name joined by "&"/"and" matches either as a whole
- * name or when every member is listed as its own artist.
+ * Credited fixture artists (comma-separated, lead first) map every accepted spelling to a credit index.
+ * The result string is split on ",", "&", "and", "x" only where the pieces are credited artists, so a
+ * credited duo such as "Above & Beyond" stays whole unless both halves are credited on their own.
+ * HIT = the lead artist is credited on the result. Other credited artists may be missing (Deezer lists
+ * only the main artist) and extra uncredited artists may appear (iTunes joins featured artists).
+ * A lead that is merely part of a longer name ("Disclosure Fan Club") never matches.
  */
-function artistMatches(expected: string, actual: string): boolean {
-  const lead = normalize(expected.split(',')[0]);
-  if (!lead) return false;
-  const have = new Set(
-    actual
-      .replace(FEAT, ' ')
-      .split(',')
-      .map((p) => compact(normalize(p)))
-      .filter(Boolean),
-  );
-  if (have.has(compact(lead))) return true;
-  const members = lead.split(/ and /).map(compact).filter(Boolean);
-  return members.length > 1 && members.every((m) => have.has(m));
+export function artistRule(
+  expected: string,
+  actual: string,
+  aliases: Record<string, string[]> = {},
+): ArtistRule | null {
+  const credits = expected.split(',').map((c) => c.trim()).filter(Boolean);
+  if (credits.length === 0) return null;
+  const spell = new Map<string, { credit: number; alias: boolean }>();
+  credits.forEach((c, i) => {
+    spell.set(compact(normalize(c)), { credit: i, alias: false });
+    for (const a of aliases[c] ?? []) {
+      const k = compact(normalize(a));
+      if (!spell.has(k)) spell.set(k, { credit: i, alias: true });
+    }
+  });
+
+  // credited names that themselves contain a delimiter are re-joined from adjacent pieces (longest first)
+  const joined = actual
+    .replace(FEAT, ' ')
+    .split(/\s*(?:,|&|\band\b|\bx\b)\s*/i).map((w) => normalize(w)).filter(Boolean);
+  const found = new Map<number, boolean>();
+  let i = 0;
+  while (i < joined.length) {
+    let took = false;
+    for (let len = joined.length - i; len >= 1 && !took; len--) {
+      const key = compact(joined.slice(i, i + len).join(' and '));
+      const hit = spell.get(key);
+      if (hit) {
+        found.set(hit.credit, (found.get(hit.credit) ?? false) || hit.alias);
+        i += len;
+        took = true;
+      }
+    }
+    if (!took) i++;
+  }
+  if (!found.has(0)) return null;
+  if ([...found.values()].some(Boolean)) return 'alias';
+  return found.size === credits.length ? 'exact' : 'lead-subset';
 }
 
+function artistMatches(expected: string, actual: string, aliases?: Record<string, string[]>): boolean {
+  return artistRule(expected, actual, aliases) !== null;
+}
+
+const SOUNDTRACK_TAG = /\s*[(\[]\s*from\b[^)\]]*[)\]]/gi;
+
 function titleMatches(expected: string, actual: { baseTitle?: string; title?: string }): boolean {
-  const want = normalize(expected);
-  const wantBase = normalize(stripQualifier(expected));
-  const got = normalize(actual.baseTitle ?? stripQualifier(actual.title ?? ''));
+  const clean = (s: string) => normalize(s.replace(SOUNDTRACK_TAG, ' '));
+  const want = clean(expected);
+  const wantBase = clean(stripQualifier(expected));
+  const got = clean(actual.baseTitle ?? stripQualifier(actual.title ?? ''));
   return got !== '' && (got === want || got === wantBase);
+}
+
+/** Index of the first match within topN, and which artist rule accepted it. */
+export function hitDetail(
+  t: BenchTrack,
+  results: Array<{ artist: string; baseTitle?: string; title?: string }>,
+  topN = 5,
+): { rank: number; via: ArtistRule } | null {
+  const top = results.slice(0, topN);
+  for (let i = 0; i < top.length; i++) {
+    const via = artistRule(t.artist, top[i].artist, t.aliases);
+    if (via && titleMatches(t.title, top[i])) return { rank: i, via };
+  }
+  return null;
 }
 
 /** Index of the first match within topN, or -1. */
@@ -76,7 +130,7 @@ export function hitRank(
   results: Array<{ artist: string; baseTitle?: string; title?: string }>,
   topN = 5,
 ): number {
-  return results.slice(0, topN).findIndex((r) => artistMatches(t.artist, r.artist) && titleMatches(t.title, r));
+  return hitDetail(t, results, topN)?.rank ?? -1;
 }
 
 export function isHit(
@@ -84,7 +138,7 @@ export function isHit(
   results: Array<{ artist: string; baseTitle?: string; title?: string }>,
   topN = 5,
 ): boolean {
-  return hitRank(t, results, topN) >= 0;
+  return hitDetail(t, results, topN) !== null;
 }
 
 type VersionResult = { artist: string; version: ParsedVersion; durationMs?: number };
@@ -92,7 +146,7 @@ type VersionResult = { artist: string; version: ParsedVersion; durationMs?: numb
 /** Index of the first result within the top 3 that is the exact expected recording, or -1. */
 export function versionRank(c: BenchVersionCase, results: VersionResult[]): number {
   return results.slice(0, 3).findIndex((r) => {
-    if (!artistMatches(c.expect.artist, r.artist)) return false;
+    if (!artistMatches(c.expect.artist, r.artist, c.aliases)) return false;
     if (normalize(r.version.baseTitle) !== normalize(c.expect.baseTitle)) return false;
     if (r.version.kind !== c.expect.kind) return false;
     if (c.expect.remixer) {
