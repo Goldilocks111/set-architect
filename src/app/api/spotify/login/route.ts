@@ -6,6 +6,18 @@ const SCOPES = 'playlist-read-private playlist-read-collaborative playlist-modif
 
 export async function GET(request: Request) {
   if (!spotifyConfigured()) return Response.json({ error: 'spotify not configured' }, { status: 503 });
+  // The state cookie must live on the SAME origin Spotify redirects back to. If the user
+  // opened the app on a different origin (localhost vs 127.0.0.1), hop there first.
+  // NOTE: next dev rewrites request.url's origin (e.g. to localhost), so compare the real
+  // Host header against the callback origin's host instead of new URL(request.url).origin.
+  const requestHost = request.headers.get('host');
+  const callbackHost = new URL(redirectUri(request)).host;
+  if (requestHost !== callbackHost) {
+    return new Response(null, {
+      status: 302,
+      headers: { Location: `${new URL(redirectUri(request)).origin}/api/spotify/login` },
+    });
+  }
   const state = randomBytes(16).toString('hex');
   const url = new URL('https://accounts.spotify.com/authorize');
   url.search = new URLSearchParams({

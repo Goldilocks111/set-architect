@@ -26,14 +26,22 @@ export async function GET(request: Request) {
 
   if (params.get('error')) return res(home(request, '?spotify=denied'));
   const code = params.get('code');
-  if (!code || !sameState(params.get('state'), expected)) return res(home(request, '?spotify=error'));
+  if (!code || !sameState(params.get('state'), expected)) {
+    console.error('[spotify callback] state check failed', {
+      hasCode: !!code,
+      hasStateParam: !!params.get('state'),
+      hasStateCookie: !!expected,
+    });
+    return res(home(request, '?spotify=error-state'));
+  }
 
   try {
     const cookie = await exchangeCode(code, redirectUri(request));
     const r = res(home(request, '?spotify=connected'));
     r.headers.append('Set-Cookie', cookie);
     return r;
-  } catch {
-    return res(home(request, '?spotify=error'));
+  } catch (e) {
+    console.error('[spotify callback] token exchange failed:', (e as Error).message);
+    return res(home(request, '?spotify=error-exchange'));
   }
 }
