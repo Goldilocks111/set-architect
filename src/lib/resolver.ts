@@ -1,11 +1,14 @@
 import { trackKeyOf, type Track } from '@/types/track';
 import { searchDemoTracks } from './demo';
 import { withTimeout } from './http';
+import { analysePreview, ANALYSIS_TIMEOUT_MS } from './analysis/previewAnalysis';
+import { acousticbrainzAdapter } from './sources/acousticbrainz';
 import { deezerAdapter, deezerSearch } from './sources/deezer';
 import { getSongBpmAdapter } from './sources/getsongbpm';
 import { itunesAdapter, itunesSearch } from './sources/itunes';
 import { lastfmConfigured, lastfmSimilar, type SimilarItem } from './sources/lastfm';
 import { listenbrainzSimilar } from './sources/listenbrainz';
+import { musicbrainzAdapter } from './sources/musicbrainz';
 import { reccobeatsAdapter } from './sources/reccobeats';
 import { soundstatAdapter } from './sources/soundstat';
 import { spotifyAdapter } from './sources/spotify';
@@ -22,6 +25,8 @@ const ADAPTERS: SourceAdapter[] = [
   getSongBpmAdapter,
   soundstatAdapter,
   reccobeatsAdapter,
+  musicbrainzAdapter, // slow + 1 req/s: last, fills whatever is still missing
+  acousticbrainzAdapter, // needs the mbid from musicbrainz
   youtubeAdapter,
 ];
 
@@ -40,19 +45,33 @@ export async function resolveTrack(
     track.spotifyId = hints.spotifyId;
     track.sources.spotifyId = 'caller';
   }
+  let deezerPreview: string | undefined;
   for (const adapter of ADAPTERS) {
     try {
       if (!adapter.configured()) continue;
-      const partial = await withTimeout(adapter.enrich({ ...track }), ADAPTER_TIMEOUT_MS, adapter.name);
+      const partial = await withTimeout(adapter.enrich({ ...track }), adapter.timeoutMs ?? ADAPTER_TIMEOUT_MS, adapter.name);
+      if (adapter.name === 'deezer') deezerPreview = partial?.previewUrl;
       const overrides = OVERRIDES[adapter.name] ?? [];
       for (const [field, value] of Object.entries(partial ?? {}) as Array<[keyof Track, unknown]>) {
         if (value === undefined || value === null || field === 'sources' || field === 'id') continue;
         if (track[field] !== undefined && !overrides.includes(field)) continue;
         (track as unknown as Record<string, unknown>)[field] = value;
-        track.sources[field] = adapter.name;
+        track.sources[field] = adapter.fieldLabels?.[field] ?? adapter.name;
       }
     } catch {
       // a failing adapter is skipped; resolution continues with the rest
+    }
+  }
+  // Last resort: estimate tempo from the Deezer preview (never iTunes: Apple's terms restrict preview use).
+  if (track.bpm === undefined && deezerPreview) {
+    try {
+      const partial = await withTimeout(analysePreview(track.id, deezerPreview), ANALYSIS_TIMEOUT_MS, 'preview-analysis');
+      if (partial.bpm !== undefined) {
+        track.bpm = partial.bpm;
+        track.sources.bpm = 'preview-analysis';
+      }
+    } catch {
+      // analysis is best-effort
     }
   }
   return track;

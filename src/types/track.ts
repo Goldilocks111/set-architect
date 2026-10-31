@@ -11,6 +11,7 @@ export interface Track {
   danceability?: number; // 0..1
   popularity?: number; // 0..100
   isrc?: string;
+  mbid?: string; // MusicBrainz recording id (via musicbrainz adapter); AcousticBrainz keys off it
   spotifyId?: string; // when known (via Spotify search adapter); SoundStat/ReccoBeats key off it
   spotifyUrl?: string; // open.spotify.com link for link-out
   previewUrl?: string;

@@ -21,7 +21,8 @@ Copy `.env.example` to `.env` and fill in what you want. Real values live only i
 | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | Leaves demo mode: accounts, saved sets, free-tier limits (one saved set, 20 suggestions per UTC day). Apply `supabase/migrations/` first. |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_PRO` (plus `NEXT_PUBLIC_APP_URL`) | Billing: checkout, customer portal, webhook, Pro plan removes free limits. |
-| `GETSONGBPM_API_KEY` | Real BPM and key lookups. The builder footer then shows the required getsongbpm.com backlink automatically. |
+| _(none needed)_ | BPM, key, danceability and an energy estimate now work with zero keys for most catalogue tracks: MusicBrainz maps the track to a recording ID and AcousticBrainz (a frozen 2022 snapshot, CC0) supplies tempo and key. Energy from this route is a loudness-based estimate and is recorded as `acousticbrainz-estimate` in the track's provenance. Tracks neither knows about get a tempo estimated from the Deezer 30-second preview (decoded in memory, never stored; cached in `data/index/analysis.json`). |
+| `GETSONGBPM_API_KEY` | Optional enhancer: real BPM and key lookups that take priority over the keyless sources. The builder footer then shows the required getsongbpm.com backlink automatically. |
 | `LASTFM_API_KEY` | Track similarity for suggestions. |
 | `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` | Spotify catalog search (client credentials): resolves each track's Spotify ID and adds an "Open in Spotify" link. That ID is what activates ReccoBeats, which then supplies energy and danceability for free. |
 | `SOUNDSTAT_API_KEY` | Energy, danceability, and better BPM/key. Needs a Spotify ID, so it comes alive once the Spotify credentials above are set. ReccoBeats (keyless) covers the same fields when this key is absent. |
@@ -46,7 +47,7 @@ Etiquette: requests are spaced 2 to 4 seconds apart (jittered, and the gap also 
 ## Architecture
 
 - `src/engine/` pure scoring logic: Camelot key distance, BPM compatibility, energy arc fit, and the suggestion ranker. No I/O.
-- `src/lib/sources/` one adapter per external provider (GetSongBPM, Last.fm, SoundStat, ReccoBeats, Deezer, iTunes, YouTube, ListenBrainz), each self-disabling without its key. `src/lib/resolver.ts` combines them into a single track record.
+- `src/lib/sources/` one adapter per external provider (GetSongBPM, MusicBrainz, AcousticBrainz, Last.fm, SoundStat, ReccoBeats, Deezer, iTunes, YouTube, ListenBrainz), each self-disabling without its key. `src/lib/resolver.ts` combines them into a single track record.
 - `src/lib/adjacency/` the "what follows what" index: JSON store, demo seed generator, loader.
 - `scripts/scraper/` the CLI that fills the adjacency index.
 - `src/app/` Next.js App Router: the builder page, `/api/search`, `/api/suggest`, `/api/playlists`, `/api/stripe/*`, auth and admin pages. `src/components/` is the builder UI.
@@ -64,6 +65,6 @@ Etiquette: requests are spaced 2 to 4 seconds apart (jittered, and the gap also 
 
 Set Architect combines several generous data sources:
 
-- BPM and key data by [GetSongBPM](https://getsongbpm.com) — thank you for the free API.
+- BPM and key data by [GetSongBPM](https://getsongbpm.com) — thank you for the free API. Keyless fallback data from [MusicBrainz](https://musicbrainz.org) (CC0) and the [AcousticBrainz](https://acousticbrainz.org) archive (CC0).
 - Track previews provided courtesy of [iTunes / Apple Music](https://www.apple.com/itunes/); catalog search and popularity via [Deezer](https://www.deezer.com); similar-track data via [Last.fm](https://www.last.fm) and [ListenBrainz](https://listenbrainz.org).
 - Set co-occurrence ideas inspired by the DJ community on [1001Tracklists](https://www.1001tracklists.com) (indexed politely and locally; see docs/research/ for the etiquette rules).

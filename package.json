@@ -14,6 +14,8 @@
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.118.0",
     "cheerio": "^1.2.0",
+    "mpg123-decoder": "^1.0.3",
+    "music-tempo": "^1.0.3",
     "next": "16.4.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",

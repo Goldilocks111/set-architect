@@ -28,3 +28,15 @@ export function energyTo10(e: number): number | undefined {
   if (typeof e !== 'number' || !Number.isFinite(e)) return undefined;
   return Math.min(10, Math.max(1, Math.round(e * 9) + 1));
 }
+
+const PC_BY_NAME: Record<string, number> = {
+  C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11,
+};
+
+/** Essentia-style key ("C#", "Bb") + scale ("major"/"minor") → Camelot. */
+export function keyScaleToCamelot(key: string, scale: string): string | undefined {
+  const pc = PC_BY_NAME[key];
+  if (pc === undefined) return undefined;
+  if (scale !== 'major' && scale !== 'minor') return undefined;
+  return toCamelot(pc, scale === 'major' ? 1 : 0);
+}

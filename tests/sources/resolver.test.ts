@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { adapterHealth, resolveTrack, searchTracks } from '@/lib/resolver';
+import { configureMusicBrainzLimiter } from '@/lib/sources/musicbrainz';
 import { json, mockFetch } from './helpers';
 
 const deezerHit = { id: 1, title: 'T', rank: 500000, preview: 'dz-preview', artist: { name: 'A' } };
 const itunesHit = { trackId: 2, trackName: 'T', artistName: 'A', previewUrl: 'it-preview', trackViewUrl: 'it-url' };
 
 beforeEach(() => {
+  configureMusicBrainzLimiter(0);
   for (const k of ['SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET', 'GETSONGBPM_API_KEY', 'SOUNDSTAT_API_KEY', 'YOUTUBE_API_KEY', 'LASTFM_API_KEY'])
     vi.stubEnv(k, '');
 });
@@ -160,5 +162,33 @@ describe('adapterHealth', () => {
     expect(h.soundstat).toBe(true);
     expect(h.getsongbpm).toBe(false);
     expect(h.lastfm).toBe(false);
+  });
+});
+
+describe('resolveTrack metadata chain', () => {
+  it('deezer isrc -> musicbrainz mbid -> acousticbrainz bpm/key, with estimate provenance', async () => {
+    mockFetch([
+      ['api.deezer.com/track', () => json({ ...deezerHit, isrc: 'ISRC1' })],
+      ['api.deezer.com/search', () => json({ data: [deezerHit] })],
+      ['itunes.apple.com', () => json({ results: [] })],
+      ['musicbrainz.org/ws/2/isrc/ISRC1', () => json({ recordings: [{ id: 'mb-1' }] })],
+      ['acousticbrainz.org/api/v1/low-level', () =>
+        json({ 'mb-1': { '0': { rhythm: { bpm: 126.04 }, tonal: { key_key: 'A', key_scale: 'minor' }, lowlevel: { average_loudness: 0.5 } } } })],
+      ['acousticbrainz.org/api/v1/high-level', () => json({})],
+    ]);
+    const t = await resolveTrack('A', 'T');
+    expect(t.mbid).toBe('mb-1');
+    expect(t.sources.mbid).toBe('musicbrainz');
+    expect(t.bpm).toBe(126);
+    expect(t.sources.bpm).toBe('acousticbrainz');
+    expect(t.camelot).toBe('8A');
+    expect(t.energy).toBe(6);
+    expect(t.sources.energy).toBe('acousticbrainz-estimate');
+  });
+
+  it('lists musicbrainz and acousticbrainz after reccobeats in adapter health', () => {
+    const names = adapterHealth().map((a) => a.name);
+    expect(names.indexOf('musicbrainz')).toBeGreaterThan(names.indexOf('reccobeats'));
+    expect(names.indexOf('acousticbrainz')).toBeGreaterThan(names.indexOf('musicbrainz'));
   });
 });
