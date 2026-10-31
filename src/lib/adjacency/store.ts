@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { trackKeyOf, type AdjacencyLookup } from '../../types/track';
+import { rekeyLegacy, rekeyRecord, TRACK_KEY_VERSION } from '../keyMigration';
 
 export interface TrackRef {
   artist: string;
@@ -29,6 +30,8 @@ interface EdgeSides {
 
 export interface AdjacencyData {
   version: 1;
+  /** trackKeyOf normalization the keys were written with (absent = 1); see keyMigration.ts. */
+  keyVersion?: number;
   tracklists: Record<string, number>; // id -> track count
   names: Record<string, TrackRef>; // trackKey -> display artist/title
   edges: Record<string, EdgeSides>; // trackKey -> neighbors by side
@@ -36,7 +39,7 @@ export interface AdjacencyData {
   playCounts?: Record<string, number>;
 }
 
-export const emptyData = (): AdjacencyData => ({ version: 1, tracklists: {}, names: {}, edges: {} });
+export const emptyData = (): AdjacencyData => ({ version: 1, keyVersion: TRACK_KEY_VERSION, tracklists: {}, names: {}, edges: {} });
 
 export function addEdge(data: AdjacencyData, from: string, to: string, count = 1): void {
   const bump = (key: string, side: keyof EdgeSides, other: string) => {
@@ -66,11 +69,53 @@ export function statsOf(data: AdjacencyData): AdjacencyStats {
   };
 }
 
+/**
+ * Re-keys an index written with an older trackKeyOf. Each key is recomputed from its stored display name
+ * (falling back to the key itself); entries that now share a key are merged: edge counts summed per side,
+ * edges that became self-loops dropped, play counts by maximum (the same sets were counted under each title).
+ */
+export function migrateKeys(data: AdjacencyData): AdjacencyData {
+  if ((data.keyVersion ?? 1) >= TRACK_KEY_VERSION) return data;
+  const memo = new Map<string, string>();
+  const rekey = (k: string) => {
+    let nk = memo.get(k);
+    if (nk === undefined) {
+      const n = data.names[k];
+      nk = n ? trackKeyOf(n.artist, n.title) : rekeyLegacy(k);
+      memo.set(k, nk);
+    }
+    return nk;
+  };
+  const names: Record<string, TrackRef> = {};
+  for (const [k, n] of Object.entries(data.names)) {
+    const nk = rekey(k);
+    // keep the display name whose key did not change (the plain title) when several collapse together
+    if (!names[nk] || k === nk) names[nk] = n;
+  }
+  const edges: Record<string, EdgeSides> = {};
+  for (const [k, e] of Object.entries(data.edges)) {
+    const nk = rekey(k);
+    for (const side of ['before', 'after'] as const) {
+      for (const [other, count] of Object.entries(e[side])) {
+        const no = rekey(other);
+        if (no === nk) continue;
+        const target = (edges[nk] ??= { before: {}, after: {} });
+        target[side][no] = (target[side][no] ?? 0) + count;
+      }
+    }
+  }
+  const out: AdjacencyData = { ...data, keyVersion: TRACK_KEY_VERSION, names, edges };
+  if (data.playCounts) out.playCounts = rekeyRecord(data.playCounts, Math.max, rekey);
+  return out;
+}
+
 export function readData(file: string): AdjacencyData {
   if (!existsSync(file)) return emptyData();
   const parsed = JSON.parse(readFileSync(file, 'utf8')) as AdjacencyData;
   if (parsed.version !== 1) throw new Error(`Unsupported adjacency file version in ${file}`);
-  return parsed;
+  const migrated = migrateKeys(parsed);
+  if (migrated !== parsed) writeData(file, migrated);
+  return migrated;
 }
 
 export function writeData(file: string, data: AdjacencyData): void {

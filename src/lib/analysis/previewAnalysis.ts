@@ -5,6 +5,7 @@ import { MPEGDecoder } from 'mpg123-decoder';
 import MusicTempo from 'music-tempo';
 import { fetchWithTimeout } from '../http';
 import type { Track } from '@/types/track';
+import { rekeyRecord, TRACK_KEY_VERSION } from '../keyMigration';
 
 const CACHE_FILE = dataDir('index', 'analysis.json');
 const MAX_BYTES = 2_000_000; // a 30s preview is ~500KB; refuse anything much larger
@@ -74,18 +75,33 @@ export async function analyseMp3(bytes: Uint8Array): Promise<Analysis | undefine
   }
 }
 
-async function readCache(): Promise<Record<string, Analysis>> {
+/** Stored inside the cache object; never a trackKey (those always contain "|"). */
+const KEY_VERSION_FIELD = '__keyVersion';
+
+export async function readCache(file = CACHE_FILE): Promise<Record<string, Analysis>> {
+  let raw: Record<string, unknown>;
   try {
-    return JSON.parse(await fs.readFile(CACHE_FILE, 'utf8')) as Record<string, Analysis>;
+    raw = JSON.parse(await fs.readFile(file, 'utf8')) as Record<string, unknown>;
   } catch {
     return {};
   }
+  const version = typeof raw[KEY_VERSION_FIELD] === 'number' ? (raw[KEY_VERSION_FIELD] as number) : 1;
+  delete raw[KEY_VERSION_FIELD];
+  let cache = raw as Record<string, Analysis>;
+  if (version < TRACK_KEY_VERSION) {
+    // keys written with an older trackKeyOf: re-key once; on a collision the first analysis is kept
+    cache = rekeyRecord(cache, (a) => a);
+    await writeCache(cache, file);
+  }
+  return cache;
 }
 
-async function writeCache(cache: Record<string, Analysis>): Promise<void> {
+async function writeCache(cache: Record<string, Analysis>, file = CACHE_FILE): Promise<void> {
   try {
-    await fs.mkdir(path.dirname(CACHE_FILE), { recursive: true });
-    await fs.writeFile(CACHE_FILE, JSON.stringify(cache));
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    const tmp = `${file}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify({ ...cache, [KEY_VERSION_FIELD]: TRACK_KEY_VERSION }));
+    await fs.rename(tmp, file);
   } catch {
     // cache is best-effort (read-only filesystems on serverless hosts)
   }

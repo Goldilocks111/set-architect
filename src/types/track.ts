@@ -66,7 +66,7 @@ const SAME_TRACK_WORDS = new Set([
 ]);
 
 /** "(Extended)", "[2014 Remaster]", "Radio Edit": yes. "(Mark Knight Remix)", "(Dub Mix)": no. */
-function isSameTrackQualifier(inner: string): boolean {
+export function isSameTrackQualifier(inner: string): boolean {
   const words = inner.split(/[^a-z0-9]+/).filter(Boolean);
   return words.length > 0 && words.every((w) => SAME_TRACK_WORDS.has(w) || /^(19|20)\d\d$/.test(w));
 }

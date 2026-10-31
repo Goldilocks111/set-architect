@@ -5,6 +5,7 @@ import { BLOCK_STATUSES, SOFT_BLOCK_STATUS, FetchError, createFetcher, type Fetc
 import { BASE_URL, parseSearch } from '../../../scripts/scraper/parseSearch';
 import { parseTracklist } from '../../../scripts/scraper/parseTracklist';
 import { trackKeyOf } from '../../types/track';
+import { rekeyRecord, TRACK_KEY_VERSION } from '../keyMigration';
 import { JsonAdjacencyStore, type AdjacencyStore } from './store';
 
 export const SEARCHED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -19,6 +20,7 @@ export const LIVE_STATE_PATH = dataDir('index', 'live-state.json');
 interface LiveState {
   searched: Record<string, number>; // trackKey -> searched-at (ms)
   backoff: Record<string, number>; // trackKey -> backed off until (ms)
+  keyVersion?: number; // trackKeyOf normalization of the keys above (absent = 1)
   pausedUntil?: number; // whole queue stopped until (ms)
 }
 
@@ -89,19 +91,27 @@ export function createIngestor(deps: IngestorDeps) {
     try {
       if (existsSync(deps.statePath)) {
         const s = JSON.parse(readFileSync(deps.statePath, 'utf8')) as Partial<LiveState>;
-        return { searched: s.searched ?? {}, backoff: s.backoff ?? {}, pausedUntil: s.pausedUntil };
+        const state: LiveState = { searched: s.searched ?? {}, backoff: s.backoff ?? {}, pausedUntil: s.pausedUntil, keyVersion: s.keyVersion };
+        if ((s.keyVersion ?? 1) < TRACK_KEY_VERSION) {
+          // keys written with an older trackKeyOf: re-key once, keeping the later timestamp on collisions
+          state.searched = rekeyRecord(state.searched, Math.max);
+          state.backoff = rekeyRecord(state.backoff, Math.max);
+          state.keyVersion = TRACK_KEY_VERSION;
+          writeState(state);
+        }
+        return state;
       }
     } catch {
       /* corrupt state file: start fresh */
     }
-    return { searched: {}, backoff: {} };
+    return { searched: {}, backoff: {}, keyVersion: TRACK_KEY_VERSION };
   };
-  const writeState = (s: LiveState) => {
+  function writeState(s: LiveState) {
     mkdirSync(path.dirname(deps.statePath), { recursive: true });
     const tmp = `${deps.statePath}.tmp`;
     writeFileSync(tmp, JSON.stringify(s));
     renameSync(tmp, deps.statePath);
-  };
+  }
   const update = (fn: (s: LiveState) => void) => {
     const s = readState();
     fn(s);
