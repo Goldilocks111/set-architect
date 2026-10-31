@@ -59,3 +59,10 @@ through subagents working off `docs/specs/build-plan.md`.
   runtime; Turbopack watched it -> infinite rebuild/Fast Refresh loop. Fixed with
   next.config watchOptions.ignored (also ignores data/cache + data/index). Lesson: never let
   runtime artifacts land in watched folders.
+- 2026-10-31 (V1.2): Spotify Connect (OAuth, playlist import, save-set-to-Spotify; security
+  review approved after hardening: fixed redirect_uri env override, api.spotify.com-only bearer,
+  playlist-id validation). Keyless BPM/key/energy via MusicBrainz→AcousticBrainz (API still live!)
+  + Deezer-preview tempo analysis (music-tempo + mpg123-decoder). Live per-track 1001TL ingestion
+  queue (one job at a time; HTTP 206 = soft-block → 60-min queue pause, gentler resume; index
+  grows over days). ALL runtime data moved to ~/.setarchitect (Turbopack has no watch-ignore —
+  runtime writes in repo cause rebuild loops). 304 tests green.
