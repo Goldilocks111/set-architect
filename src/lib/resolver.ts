@@ -3,9 +3,9 @@ import { searchDemoTracks } from './demo';
 import { withTimeout } from './http';
 import { analysePreview, ANALYSIS_TIMEOUT_MS } from './analysis/previewAnalysis';
 import { acousticbrainzAdapter } from './sources/acousticbrainz';
-import { deezerAdapter, deezerSearch } from './sources/deezer';
+import { deezerAdapter } from './sources/deezer';
 import { getSongBpmAdapter } from './sources/getsongbpm';
-import { itunesAdapter, itunesSearch } from './sources/itunes';
+import { itunesAdapter } from './sources/itunes';
 import { lastfmConfigured, lastfmSimilar, type SimilarItem } from './sources/lastfm';
 import { listenbrainzSimilar } from './sources/listenbrainz';
 import { musicbrainzAdapter } from './sources/musicbrainz';
@@ -14,6 +14,9 @@ import { soundstatAdapter } from './sources/soundstat';
 import { spotifyAdapter } from './sources/spotify';
 import type { SourceAdapter } from './sources/types';
 import { youtubeAdapter } from './sources/youtube';
+import { mergedSearch } from './search/merge';
+import { searchProviders } from './search/providers';
+import type { MergedHit } from './search/types';
 
 export const ADAPTER_TIMEOUT_MS = 4000;
 
@@ -77,17 +80,40 @@ export async function resolveTrack(
   return track;
 }
 
-export async function searchTracks(query: string): Promise<Track[]> {
-  let failures = 0;
-  for (const search of [deezerSearch, itunesSearch]) {
-    try {
-      const res = await withTimeout(search(query), ADAPTER_TIMEOUT_MS, 'search');
-      if (res.length) return res;
-    } catch {
-      failures++;
-    }
+/** Maps one merged search hit to a Track; the title keeps the version so enrichment finds this exact recording. */
+export function hitToTrack(hit: MergedHit): Track {
+  const label = hit.version.label;
+  const track: Track = {
+    id: (hit.isrc ? `isrc-${hit.isrc}` : `search-${hit.key}`).slice(0, 200),
+    artist: hit.artist,
+    title: label ? `${hit.baseTitle} (${label})` : hit.baseTitle,
+    sources: {},
+  };
+  const year = hit.releaseDate ? parseInt(hit.releaseDate.slice(0, 4), 10) : NaN;
+  const fields: Partial<Track> = {
+    version: label,
+    durationMs: hit.durationMs,
+    isrc: hit.isrc,
+    popularity: hit.popularity,
+    spotifyId: hit.spotifyId,
+    spotifyUrl: hit.spotifyUrl,
+    previewUrl: hit.previewUrl,
+    artworkUrl: hit.artworkUrl,
+    year: Number.isFinite(year) && year > 0 ? year : undefined,
+  };
+  for (const [field, value] of Object.entries(fields)) {
+    if (value === undefined) continue;
+    (track as unknown as Record<string, unknown>)[field] = value;
+    if (field !== 'version' && field !== 'durationMs') track.sources[field] = hit.providers.join('+');
   }
-  return failures === 2 ? searchDemoTracks(query) : [];
+  return track;
+}
+
+export async function searchTracks(query: string): Promise<Track[]> {
+  const providers = searchProviders.filter((p) => p.configured());
+  const { hits, degraded } = await mergedSearch(query, { providers });
+  if (!hits.length && degraded.length === providers.length) return searchDemoTracks(query);
+  return hits.map(hitToTrack);
 }
 
 export async function getSimilarTracks(artist: string, title: string): Promise<SimilarItem[]> {

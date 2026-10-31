@@ -5,6 +5,8 @@ export interface Track {
   artist: string;
   title: string;
   remix?: string;
+  version?: string; // version label from search ("Extended Mix", "Mark Knight Remix"); absent for plain originals
+  durationMs?: number;
   bpm?: number;
   camelot?: string; // "1A".."12A" / "1B".."12B"
   energy?: number; // 1..10 (Mixed In Key scale)

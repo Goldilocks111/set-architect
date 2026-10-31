@@ -128,18 +128,37 @@ describe('resolveTrack', () => {
 });
 
 describe('searchTracks', () => {
-  it('uses Deezer first', async () => {
-    mockFetch([['api.deezer.com', () => json({ data: [deezerHit] })]]);
-    expect((await searchTracks('x'))[0].id).toBe('deezer-1');
+  it('merges provider hits into one version-labelled track per recording', async () => {
+    mockFetch([
+      [
+        'api.deezer.com',
+        () =>
+          json({
+            data: [
+              { ...deezerHit, title: 'T', title_version: 'Extended Mix', isrc: 'GBAAA2400001', duration: 400 },
+              { ...deezerHit, id: 3, title: 'T (B Remix)', duration: 380 },
+            ],
+          }),
+      ],
+      ['itunes.apple.com', () => json({ results: [{ ...itunesHit, trackName: 'T (Extended Mix)', trackTimeMillis: 400_500 }] })],
+    ]);
+    // title-only: not a full answer from Deezer, so iTunes is asked as well
+    const res = await searchTracks('t');
+    expect(res).toHaveLength(2);
+    const ext = res.find((t) => t.version === 'Extended Mix')!;
+    expect(ext).toMatchObject({ id: 'isrc-GBAAA2400001', title: 'T (Extended Mix)', durationMs: 400_000, previewUrl: 'it-preview' });
+    expect(res.find((t) => t.version === 'B Remix')?.title).toBe('T (B Remix)');
   });
-  it('falls back to iTunes when Deezer fails', async () => {
+  it('still answers when one provider fails', async () => {
     mockFetch([
       ['api.deezer.com', () => json({}, 403)],
       ['itunes.apple.com', () => json({ results: [itunesHit] })],
     ]);
-    expect((await searchTracks('x'))[0].id).toBe('itunes-2');
+    const [t] = await searchTracks('a t');
+    expect(t).toMatchObject({ artist: 'A', title: 'T' });
+    expect(t.version).toBeUndefined();
   });
-  it('falls back to the demo seed when both fail', async () => {
+  it('falls back to the demo seed when every provider fails', async () => {
     mockFetch([]);
     const res = await searchTracks('Lane 8');
     expect(res.length).toBeGreaterThan(0);

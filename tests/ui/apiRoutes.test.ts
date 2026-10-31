@@ -34,6 +34,15 @@ describe('GET /api/search', () => {
     expect(body.tracks.map((t: { id: string }) => t.id)).toEqual(['x']);
   });
 
+  it('carries the version label and duration of each hit', async () => {
+    mocks.resolver.searchTracks.mockResolvedValue([
+      { id: 'x', artist: 'CamelPhat', title: 'Cola (Extended Mix)', version: 'Extended Mix', durationMs: 401_000, sources: {} },
+    ]);
+    const { GET } = await import('@/app/api/search/route');
+    const body = await (await GET(new Request('http://x/api/search?q=cola'))).json();
+    expect(body.tracks[0]).toMatchObject({ version: 'Extended Mix', durationMs: 401_000 });
+  });
+
   it('falls back to demo search when the resolver throws', async () => {
     mocks.resolver.searchTracks.mockRejectedValue(new Error('offline'));
     const { GET } = await import('@/app/api/search/route');

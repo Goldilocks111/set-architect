@@ -2,7 +2,8 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import type { Track } from '@/types/track';
-import { displayTitle, fmtBpm, fmtEnergy } from './trackFormat';
+import { fmtBpm, fmtEnergy } from './trackFormat';
+import VersionChip, { baseTitleOf, fmtDuration, groupVersions } from './VersionChip';
 
 interface Props {
   onAdd: (track: Track) => void;
@@ -46,7 +47,7 @@ export default function SearchBar({ onAdd, inSet }: Props) {
     };
   }, [query]);
 
-  const shown = results.slice(0, 8);
+  const shown = groupVersions(results).slice(0, 8);
 
   const add = (track: Track | undefined) => {
     if (!track || inSet.has(track.id)) return;
@@ -109,7 +110,7 @@ export default function SearchBar({ onAdd, inSet }: Props) {
                 const added = inSet.has(t.id);
                 return (
                   <li
-                    key={t.id}
+                    key={`${t.id}-${i}`}
                     id={`${listId}-${i}`}
                     role="option"
                     aria-selected={i === active}
@@ -124,10 +125,14 @@ export default function SearchBar({ onAdd, inSet }: Props) {
                     } ${added ? 'cursor-default opacity-45' : ''}`}
                   >
                     <div className="min-w-0">
-                      <div className="truncate text-sm text-[#E8E4DA]">{displayTitle(t)}</div>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-sm text-[#E8E4DA]">{t.remix ? `${baseTitleOf(t)} (${t.remix})` : baseTitleOf(t)}</span>
+                        <VersionChip label={t.version} />
+                      </div>
                       <div className="truncate text-xs text-[#8A8FA3]">{t.artist}</div>
                     </div>
                     <div className="flex gap-2 text-xs text-[#8A8FA3] tabular-nums">
+                      {fmtDuration(t.durationMs) && <span aria-label="Duration">{fmtDuration(t.durationMs)}</span>}
                       {added ? (
                         <span>In set</span>
                       ) : (
