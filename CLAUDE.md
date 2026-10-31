@@ -55,3 +55,7 @@ through subagents working off `docs/specs/build-plan.md`.
   danceability via ReccoBeats once SPOTIFY_CLIENT_ID/SECRET are set. "Suggestions don't change"
   user report root-caused: not a bug — added tracks lacked key/bpm/energy data; fixed by data
   wiring (GetSongBPM key + Spotify→ReccoBeats), engine/UI verified correct.
+- 2026-10-31: "Page keeps flickering" bug: Playwright MCP writes logs into ./.playwright-mcp at
+  runtime; Turbopack watched it -> infinite rebuild/Fast Refresh loop. Fixed with
+  next.config watchOptions.ignored (also ignores data/cache + data/index). Lesson: never let
+  runtime artifacts land in watched folders.
