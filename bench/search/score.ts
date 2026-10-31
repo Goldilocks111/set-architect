@@ -37,22 +37,26 @@ function stripQualifier(title: string): string {
   return title.replace(/\s*[(\[][^)\]]*[)\]]\s*$/, '').replace(/\s+-\s+[^-]*$/, '');
 }
 
-function artistParts(artist: string): string[] {
-  return normalize(artist)
-    .split(/\s+(?:and|x|vs)\s+|,/)
-    .map((p) => p.trim())
+function splitArtists(raw: string): string[] {
+  return raw
+    .replace(FEAT, ' ')
+    .split(/\s*(?:,|&|\band\b|\bx\b|\bvs\.?)\s*/i)
+    .map((p) => normalize(p))
     .filter(Boolean);
 }
 
+const compact = (s: string) => s.replace(/ /g, '');
+
 function artistMatches(expected: string, actual: string): boolean {
-  const have = ' ' + normalize(actual) + ' ';
-  const parts = artistParts(expected);
-  return parts.length > 0 && parts.some((p) => have.includes(' ' + p + ' '));
+  const want = splitArtists(expected);
+  const have = splitArtists(actual).map(compact);
+  const whole = ' ' + normalize(actual) + ' ';
+  return want.some((p) => have.includes(compact(p)) || whole.includes(' ' + p + ' '));
 }
 
 function titleMatches(expected: string, actual: { baseTitle?: string; title?: string }): boolean {
   const want = normalize(stripQualifier(expected));
-  const raw = actual.baseTitle ?? (actual.title ? stripQualifier(actual.title) : '');
+  const raw = stripQualifier(actual.baseTitle ?? actual.title ?? '');
   return want !== '' && normalize(raw) === want;
 }
 

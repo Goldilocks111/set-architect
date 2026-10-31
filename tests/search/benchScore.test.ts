@@ -64,3 +64,18 @@ describe('versionCorrect', () => {
     expect(versionCorrect(c, [{ artist: 'Fisher', version: v('Losing It', 'extended') }])).toBe(true);
   });
 });
+
+describe('scorer regressions', () => {
+  it('multi-artist match is order-independent', () => {
+    expect(isHit(track('Skrillex, Solomun', 'Rumpta'), [{ artist: 'Solomun, Skrillex', baseTitle: 'Rumpta' }])).toBe(true);
+  });
+  it('strips a trailing parenthetical from the provider baseTitle too', () => {
+    expect(isHit(track('Modjo', 'Lady (Hear Me Tonight)'), [{ artist: 'Modjo', baseTitle: 'Lady (Hear Me Tonight)' }])).toBe(true);
+    expect(isHit(track('Eiffel 65', 'Blue (Da Ba Dee)'), [{ artist: 'Eiffel 65', baseTitle: 'Blue (Da Ba Dee)' }])).toBe(true);
+    expect(isHit(track('Modjo', 'Lady (Hear Me Tonight)'), [{ artist: 'Modjo', title: 'Lady (Hear Me Tonight)' }])).toBe(true);
+  });
+  it('artist comparison ignores spaces', () => {
+    expect(isHit(track('Boys Noize, Brutalismus3000', 'X'), [{ artist: 'Brutalismus 3000', baseTitle: 'X' }])).toBe(true);
+    expect(isHit(track('Brutalismus 3000', 'X'), [{ artist: 'Boys Noize, Brutalismus3000', baseTitle: 'X' }])).toBe(true);
+  });
+});
