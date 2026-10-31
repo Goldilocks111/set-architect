@@ -49,3 +49,9 @@ through subagents working off `docs/specs/build-plan.md`.
   conrad-scherb/1001-tracklists-scraper — details in docs/research/1001tracklists-access.md.
   V1.1 scraper upgrade path: data-trackid adjacency keys + play_count enrichment.
 - 2026-10-31: .env created (gitignored); YOUTUBE_API_KEY copied over from market-research project.
+- 2026-10-31: Spotify adapter added (client-credentials, catalog search ONLY → spotifyId +
+  spotifyUrl link-out; deprecated endpoints never called). Sits between itunes and getsongbpm in
+  the resolver so ReccoBeats/SoundStat receive spotifyId in the same pass → free energy/
+  danceability via ReccoBeats once SPOTIFY_CLIENT_ID/SECRET are set. "Suggestions don't change"
+  user report root-caused: not a bug — added tracks lacked key/bpm/energy data; fixed by data
+  wiring (GetSongBPM key + Spotify→ReccoBeats), engine/UI verified correct.
