@@ -1,6 +1,7 @@
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MergedSearchResponse, SearchProvider, SearchResult } from '../../src/lib/search/types';
+import { RequestGate, REQUEST_BUDGET, degradedSummary, isRateLimited, runStatus, selectSingleProviders, type Breaker } from './guard';
 import { hitRank, versionRank, percentile, type BenchTrack, type BenchVersionCase } from './score';
 
 try {
@@ -12,9 +13,7 @@ try {
 const here = __dirname;
 const DEFAULT_GAP_MS = 340; // <= 3 req/s
 const GAP_MS: Record<string, number> = { itunes: 3100, spotify: 340, deezer: 340, merged: 340 };
-const BACKOFF_MS = 60_000;
-const REQUEST_BUDGET: Record<string, number> = { spotify: 150, deezer: 400, itunes: 150 };
-const DEGRADED_INVALID_RATE = 0.1;
+let breaker: Breaker | null = null;
 const tracks: BenchTrack[] = JSON.parse(readFileSync(join(here, 'tracks.json'), 'utf8'));
 const versions: BenchVersionCase[] = JSON.parse(readFileSync(join(here, 'versions.json'), 'utf8'));
 
@@ -49,11 +48,13 @@ async function loadTargets(): Promise<Target[]> {
       : [];
     if (list.length === 0) console.log('providers module loaded but exposes no providers (expected searchProviders[])');
     console.log(`configured providers: ${list.filter((p) => p.configured()).map((p) => p.name).join(', ') || 'none'}`);
-    for (const p of list) {
-      if (!p.configured()) {
-        console.log(`skipping provider ${p.name}: not configured`);
-        continue;
-      }
+    breaker = await tryImport('../../src/lib/search/breaker');
+    if (!breaker) console.log('breaker.ts not available; cooldowns will not be shared with the app');
+    const { run, skipped } = selectSingleProviders(list, breaker);
+    for (const k of skipped) {
+      console.log(`skipping provider ${k.name}: ${k.reason}${k.until ? ` until ${new Date(k.until).toLocaleString()}` : ''}`);
+    }
+    for (const p of run) {
       targets.push({
         name: p.name,
         run: async (q) => (await p.search(q, { limit: 10 })).map((r) => ({ ...r, baseTitle: r.version.baseTitle })),
@@ -89,40 +90,32 @@ const only = process.argv.slice(2);
 async function runTarget(t: Target) {
   const lat: number[] = [];
   let last = 0;
-  let requests = 0;
-  let aborted = false;
-  const budget = REQUEST_BUDGET[t.name];
+  const gate = new RequestGate(REQUEST_BUDGET[t.name]);
+  let budgetExceeded = false;
+  let rateLimitedUntil = 0;
   const timed = async (q: string) => {
-    if (aborted) return { res: [], error: 'request budget exceeded' };
-    const gap = GAP_MS[t.name] ?? DEFAULT_GAP_MS;
-    for (let attempt = 0; ; attempt++) {
-      if (budget !== undefined && requests >= budget) {
-        aborted = true;
-        console.log(`${t.name}: request budget ${budget} exceeded; aborting target`);
-        return { res: [], error: 'request budget exceeded' };
+    if (budgetExceeded || rateLimitedUntil) return { res: [], error: 'target aborted' };
+    if (!gate.take()) {
+      budgetExceeded = true;
+      console.log(`${t.name}: request budget ${REQUEST_BUDGET[t.name]} exceeded; aborting target`);
+      return { res: [], error: 'target aborted' };
+    }
+    const wait = last + (GAP_MS[t.name] ?? DEFAULT_GAP_MS) - Date.now();
+    if (wait > 0) await sleep(wait);
+    last = Date.now();
+    const t0 = performance.now();
+    try {
+      const res = await t.run(q);
+      lat.push(performance.now() - t0);
+      return { res, error: undefined as string | undefined };
+    } catch (e) {
+      lat.push(performance.now() - t0);
+      if (isRateLimited(t.name, e)) {
+        breaker?.recordFailure(t.name, e);
+        rateLimitedUntil = breaker?.cooldownUntil(t.name) || Date.now() + 5 * 60_000;
+        console.log(`${t.name}: rate-limited (HTTP ${(e as any).status}); aborting target, no retry. Unlocks ${new Date(rateLimitedUntil).toLocaleString()}`);
       }
-      requests++;
-      const wait = last + gap - Date.now();
-      if (wait > 0) await sleep(wait);
-      last = Date.now();
-      const t0 = performance.now();
-      try {
-        const res = await t.run(q);
-        lat.push(performance.now() - t0);
-        return { res, error: undefined as string | undefined };
-      } catch (e) {
-        const msg = String((e as Error).message ?? e);
-        const status = (e as any)?.status;
-        const limited = status === 429 || (t.name === 'itunes' && status === 403) || /\b429\b/.test(msg);
-        const maxRetries = t.name === 'itunes' ? 1 : t.name === 'spotify' ? 3 : 0;
-        if (limited && attempt < maxRetries) {
-          const wait = t.name === 'itunes' ? BACKOFF_MS : 30_000 * (attempt + 1);
-          console.log(`${t.name} rate-limited; backing off ${wait / 1000}s`);
-          await sleep(wait);
-          continue;
-        }
-        return { res: [], error: msg };
-      }
+      return { res: [], error: String((e as Error).message ?? e) };
     }
   };
 
@@ -167,19 +160,20 @@ async function runTarget(t: Target) {
     p50Ms: Math.round(percentile(lat, 50)),
     p95Ms: Math.round(percentile(lat, 95)),
     erroredQueries: [...trackRows, ...versionRows].filter((r) => r.error).length,
-    requests,
-    degraded: '' as string,
-    status: aborted ? 'ABORTED (budget)' : 'ok',
+    requests: gate.count,
+    degraded: '',
+    status: 'ok',
   };
-  if (t.degraded) {
-    const counts: Record<string, number> = {};
-    for (const d of t.degraded) for (const p of d) counts[p] = (counts[p] ?? 0) + 1;
-    const n = Math.max(1, t.degraded.length);
-    summary.degraded = Object.entries(counts).map(([p, c]) => `${p}:${c}/${n}`).join(' ') || 'none';
-    const bad = Object.entries(counts).filter(([, c]) => c / n > DEGRADED_INVALID_RATE).map(([p]) => p);
-    if (bad.length) summary.status = `INVALID (degraded >10%: ${bad.join(', ')})`;
-  }
-  if (summary.status === 'ok' && summary.erroredQueries > 0.1 * (tracks.length + versions.length)) summary.status = 'INVALID (>10% errored)';
+  const dg = t.degraded ? degradedSummary(t.degraded) : { text: '', invalid: [] as string[] };
+  summary.degraded = dg.text;
+  const erroredN = summary.erroredQueries;
+  summary.status = runStatus({
+    degradedInvalid: dg.invalid,
+    errored: erroredN,
+    total: tracks.length + versions.length,
+    budgetExceeded,
+    rateLimitedUntil: rateLimitedUntil || undefined,
+  });
   const dir = join(here, 'results');
   mkdirSync(dir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
