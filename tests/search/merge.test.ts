@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mergedSearch, PROVIDER_TIMEOUT_MS, providerQuery, resetProviderBudgets } from '@/lib/search/merge';
+import { mergedSearch, PROVIDER_TIMEOUT_MS, providerQuery, resetProviderBudgets, THROTTLE_COOLDOWN_MS } from '@/lib/search/merge';
 import { parseVersion } from '@/lib/search/version';
+import { HttpError } from '@/lib/http';
 import type { SearchProvider, SearchResult } from '@/lib/search/types';
 
 type Name = SearchResult['provider'];
@@ -325,6 +326,26 @@ describe('mergedSearch: provider etiquette and query shaping', () => {
     const { hits } = await mergedSearch('CamelPhat Elderbrook Cola ZHU Remix', { providers: [sp] });
     expect(sp.search.mock.calls.map((c) => c[0])).toEqual(['CamelPhat Elderbrook Cola ZHU Remix', 'Cola ZHU Remix']);
     expect(hits[0].version.remixer).toBe('ZHU');
+  });
+
+  it('stops calling a provider that answered 429 until the cooldown passes', async () => {
+    vi.useFakeTimers();
+    const sp = prov('spotify', async () => {
+      throw new HttpError(429, 'x');
+    });
+    const dz = prov('deezer', [res('deezer', 'CamelPhat', 'Cola')]);
+    expect((await mergedSearch('camelphat cola', { providers: [sp, dz] })).degraded).toEqual(['spotify']);
+    expect((await mergedSearch('camelphat cola', { providers: [sp, dz] })).degraded).toEqual(['spotify']);
+    expect(sp.search).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(THROTTLE_COOLDOWN_MS + 1);
+    await mergedSearch('camelphat cola', { providers: [sp, dz] });
+    expect(sp.search).toHaveBeenCalledTimes(2);
+  });
+
+  it('SEARCH_PROVIDERS restricts the default provider set', async () => {
+    vi.stubEnv('SEARCH_PROVIDERS', 'nobody');
+    expect(await mergedSearch('cola')).toEqual({ hits: [], degraded: [] });
+    vi.unstubAllEnvs();
   });
 
   it('drops soundtrack source tags from the base title', async () => {
