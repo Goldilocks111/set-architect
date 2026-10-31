@@ -26,7 +26,10 @@ export interface SpotifyPlaylistTrack {
 }
 
 async function call<T>(token: string, path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
-  const res = await fetch(path.startsWith('http') ? path : `${BASE}${path}`, {
+  const url = path.startsWith('http') ? path : `${BASE}${path}`;
+  // never send the bearer token anywhere but Spotify's API (pagination `next` links come from the response)
+  if (!url.startsWith(`${BASE}/`)) throw new Error('refusing to send Spotify token to a non-Spotify URL');
+  const res = await fetch(url, {
     method: init.method ?? 'GET',
     headers: {
       Authorization: `Bearer ${token}`,

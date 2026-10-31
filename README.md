@@ -39,7 +39,7 @@ The header's **Connect Spotify** button signs a user in with Spotify (authorizat
    - `http://localhost:3000/api/spotify/callback`
    - `http://localhost:3001/api/spotify/callback`
 
-   The redirect URI is derived from the request origin, so whichever port the dev server is on must be registered exactly. Add your production origin's `/api/spotify/callback` too when deploying.
+   The redirect URI is derived from the request origin, so whichever port the dev server is on must be registered exactly. In production, set `SPOTIFY_REDIRECT_URI` to the exact registered callback URL; it is then used verbatim instead of the request's Host-derived origin.
 3. Optional: set `SPOTIFY_COOKIE_SECRET` (any long random string). Tokens are stored only in an AES-256-GCM encrypted, httpOnly cookie; the key is derived from this secret, falling back to `SPOTIFY_CLIENT_SECRET`, then to a fixed dev-only value outside production. Production refuses to start the flow without one of the two secrets.
 
 Scopes requested: `playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private`. Only playlist and profile endpoints are called; Spotify's audio-features and recommendations endpoints are deprecated and never used.

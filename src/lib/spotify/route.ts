@@ -29,6 +29,7 @@ export async function withSpotify(
       );
     else res = Response.json({ error: 'Spotify request failed.' }, { status: 502 });
   }
+  res.headers.set('Cache-Control', 'no-store');
   if (session.setCookie) res.headers.append('Set-Cookie', session.setCookie);
   return res;
 }

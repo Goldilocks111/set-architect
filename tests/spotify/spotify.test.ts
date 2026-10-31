@@ -221,3 +221,40 @@ describe('routes', () => {
     expect(res.headers.get('set-cookie')).toMatch(new RegExp(`${SESSION_COOKIE}=;.*Max-Age=0`));
   });
 });
+
+describe('hardening', () => {
+  it('SPOTIFY_REDIRECT_URI overrides the request origin in login and callback', async () => {
+    process.env.SPOTIFY_REDIRECT_URI = 'https://app.example/api/spotify/callback';
+    try {
+      const res = await login(req('http://evil.test/api/spotify/login'));
+      expect(new URL(res.headers.get('location')!).searchParams.get('redirect_uri')).toBe(
+        'https://app.example/api/spotify/callback'
+      );
+      fetchMock.mockImplementation(() => json({ access_token: 'AT', refresh_token: 'RT', expires_in: 3600 }));
+      const cb = await callback(req('http://evil.test/api/spotify/callback?code=c&state=s', `${STATE_COOKIE}=s`));
+      expect(String(fetchMock.mock.calls[0][1].body)).toContain(
+        encodeURIComponent('https://app.example/api/spotify/callback')
+      );
+      expect(new URL(cb.headers.get('location')!).origin).toBe('https://app.example');
+    } finally {
+      delete process.env.SPOTIFY_REDIRECT_URI;
+    }
+  });
+  it('refuses to send the token to a non-Spotify pagination URL', async () => {
+    fetchMock.mockImplementationOnce(() => json({ items: [], next: 'https://evil.test/steal' }));
+    await expect(playlistTracks('tok', 'p')).rejects.toThrow(/non-Spotify/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it('rejects malformed playlist ids with 400', async () => {
+    const { GET: tracksRoute } = await import('@/app/api/spotify/playlists/[id]/tracks/route');
+    for (const id of ['..', 'a/b', 'short']) {
+      const res = await tracksRoute(req('http://x/', sessionCookie()), { params: Promise.resolve({ id }) });
+      expect(res.status).toBe(400);
+    }
+  });
+  it('marks authenticated responses no-store', async () => {
+    fetchMock.mockImplementation(() => json({ id: 'u', display_name: 'X' }));
+    const res = await status(req('http://x/api/spotify/status', sessionCookie()));
+    expect(res.headers.get('cache-control')).toBe('no-store');
+  });
+});

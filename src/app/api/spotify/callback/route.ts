@@ -1,10 +1,18 @@
+import { timingSafeEqual } from 'node:crypto';
 import { clearCookieHeader, readCookie, STATE_COOKIE } from '@/lib/spotify/cookie';
-import { exchangeCode, redirectUri } from '@/lib/spotify/session';
+import { appOrigin, exchangeCode, redirectUri } from '@/lib/spotify/session';
+
+function sameState(a: string | null, b: string | undefined): boolean {
+  if (!a || !b) return false;
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+}
 
 function home(request: Request, query = '') {
   return new Response(null, {
     status: 302,
-    headers: { Location: new URL(`/${query}`, request.url).toString() },
+    headers: { Location: new URL(`/${query}`, appOrigin(request)).toString() },
   });
 }
 
@@ -18,7 +26,7 @@ export async function GET(request: Request) {
 
   if (params.get('error')) return res(home(request, '?spotify=denied'));
   const code = params.get('code');
-  if (!code || !expected || params.get('state') !== expected) return res(home(request, '?spotify=error'));
+  if (!code || !sameState(params.get('state'), expected)) return res(home(request, '?spotify=error'));
 
   try {
     const cookie = await exchangeCode(code, redirectUri(request));

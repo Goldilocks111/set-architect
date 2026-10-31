@@ -15,7 +15,12 @@ export interface SpotifySession {
   setCookie?: string;
 }
 
-export const redirectUri = (request: Request) => `${new URL(request.url).origin}/api/spotify/callback`;
+/** SPOTIFY_REDIRECT_URI is used verbatim when set (production); otherwise the request origin (dev convenience). */
+export const redirectUri = (request: Request) =>
+  process.env.SPOTIFY_REDIRECT_URI || `${new URL(request.url).origin}/api/spotify/callback`;
+
+/** Origin to send the user back to after OAuth: the configured redirect URI's origin, else the request's. */
+export const appOrigin = (request: Request) => new URL(redirectUri(request)).origin;
 
 const creds = () => {
   const id = process.env.SPOTIFY_CLIENT_ID;
