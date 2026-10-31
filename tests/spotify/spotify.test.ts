@@ -123,7 +123,7 @@ describe('api mapping', () => {
         json({
           items: [
             {
-              item: {
+              track: {
                 id: 'abc',
                 name: 'Song',
                 popularity: 55,
@@ -133,10 +133,10 @@ describe('api mapping', () => {
                 },
               },
             },
-            { item: null },
-            { item: { id: 'loc', name: 'Local', is_local: true, artists: [] } },
+            { track: null },
+            { track: { id: 'loc', name: 'Local', is_local: true, artists: [] } },
           ],
-          next: 'https://api.spotify.com/v1/playlists/p/items?offset=100',
+          next: 'https://api.spotify.com/v1/playlists/p/tracks?offset=100',
         })
       )
       .mockImplementationOnce(() =>
@@ -253,6 +253,10 @@ describe('hardening', () => {
     } finally {
       delete process.env.SPOTIFY_REDIRECT_URI;
     }
+  });
+  it('maps a blocked (editorial/followed) playlist to a friendly 403', async () => {
+    fetchMock.mockImplementationOnce(() => new Response('', { status: 404 }));
+    await expect(playlistTracks('tok', 'p')).rejects.toMatchObject({ name: 'PlaylistBlockedError' });
   });
   it('refuses to send the token to a non-Spotify pagination URL', async () => {
     fetchMock.mockImplementationOnce(() => json({ items: [], next: 'https://evil.test/steal' }));

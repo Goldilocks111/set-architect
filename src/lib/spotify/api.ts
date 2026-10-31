@@ -74,24 +74,16 @@ interface RawTrack {
   artists?: Array<{ name: string }>;
 }
 
-// Spotify renamed playlist `/tracks` to `/items` (and the item's `track` field to `item`) for newer
-// apps; try the new shape first and fall back to the legacy one on 404.
 interface RawItem {
-  item?: RawTrack | null;
   track?: RawTrack | null;
 }
 
-async function withItemsFallback<T>(
-  token: string,
-  base: string,
-  init?: { method?: string; body?: unknown },
-  query = ''
-): Promise<T> {
-  try {
-    return await call<T>(token, `${base}/items${query}`, init);
-  } catch (err) {
-    if (err instanceof SpotifyApiError && err.status === 404) return call<T>(token, `${base}/tracks${query}`, init);
-    throw err;
+/** Thrown when Spotify blocks reading a playlist the user doesn't own (editorial/followed) —
+ * post-2024 apps can only read the user's OWN playlists. */
+export class PlaylistBlockedError extends SpotifyApiError {
+  constructor(status: number, path: string) {
+    super(status, path);
+    this.name = 'PlaylistBlockedError';
   }
 }
 
@@ -101,12 +93,19 @@ export async function playlistTracks(token: string, playlistId: string): Promise
   let first = true;
   let next: string | null = null;
   for (let page = 0; (first || next) && page < 10; page++) {
-    const d: { items?: RawItem[]; next?: string | null } = first
-      ? await withItemsFallback(token, base, undefined, '?limit=100')
-      : await call(token, next as string);
+    let d: { items?: RawItem[]; next?: string | null };
+    try {
+      d = first ? await call(token, `${base}/tracks?limit=100`) : await call(token, next as string);
+    } catch (err) {
+      // Spotify answers 404 (sometimes 403) for editorial/followed playlists on new apps.
+      if (first && err instanceof SpotifyApiError && (err.status === 404 || err.status === 403)) {
+        throw new PlaylistBlockedError(err.status, `${base}/tracks`);
+      }
+      throw err;
+    }
     first = false;
     for (const raw of d.items ?? []) {
-      const t = raw.item ?? raw.track;
+      const t = raw.track;
       // skip local files, removed tracks and podcast episodes: no usable Spotify id
       if (!t || !t.id || t.is_local || (t.type && t.type !== 'track') || !t.name) continue;
       out.push({
@@ -130,7 +129,7 @@ export async function createPlaylist(token: string, name: string, spotifyIds: st
   });
   const uris = spotifyIds.map((id) => `spotify:track:${id}`);
   for (let i = 0; i < uris.length; i += 100) {
-    await withItemsFallback(token, `/playlists/${pl.id}`, {
+    await call(token, `/playlists/${pl.id}/tracks`, {
       method: 'POST',
       body: { uris: uris.slice(i, i + 100) },
     });
