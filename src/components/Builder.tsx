@@ -9,6 +9,7 @@ import EnergyCurve from './EnergyCurve';
 import SavedSets from './SavedSets';
 import SearchBar from './SearchBar';
 import SetList from './SetList';
+import SpotifyConnect from './SpotifyConnect';
 import SuggestionBox from './SuggestionBox';
 import { loadLocal, saveLocal } from './persistence';
 import { initialPlaylistState, plannedLengthFor, playlistReducer } from './playlistReducer';
@@ -59,6 +60,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <SpotifyConnect tracks={tracks} onAdd={add} />{/* spotify-connect */}
           {!demo && <BillingActions />}
           {!demo && (
             <SavedSets tracks={tracks} template={template} onLoad={(p) => dispatch({ type: 'load', state: p })} />

@@ -30,6 +30,22 @@ Copy `.env.example` to `.env` and fill in what you want. Real values live only i
 
 Every music-data adapter disables itself when its key is empty. Previews come from iTunes (credited in the footer) with Deezer as fallback.
 
+## Connect your Spotify
+
+The header's **Connect Spotify** button signs a user in with Spotify (authorization-code flow, server-side) so they can import their playlists into the builder and save the current set back as a private Spotify playlist. It works in demo mode too; it is independent of Supabase.
+
+1. Set `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` in `.env` (same app as the catalog lookup).
+2. **Required manual step.** In the [Spotify developer dashboard](https://developer.spotify.com/dashboard), open your app, then Settings, then Redirect URIs, and add both:
+   - `http://localhost:3000/api/spotify/callback`
+   - `http://localhost:3001/api/spotify/callback`
+
+   The redirect URI is derived from the request origin, so whichever port the dev server is on must be registered exactly. Add your production origin's `/api/spotify/callback` too when deploying.
+3. Optional: set `SPOTIFY_COOKIE_SECRET` (any long random string). Tokens are stored only in an AES-256-GCM encrypted, httpOnly cookie; the key is derived from this secret, falling back to `SPOTIFY_CLIENT_SECRET`, then to a fixed dev-only value outside production. Production refuses to start the flow without one of the two secrets.
+
+Scopes requested: `playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private`. Only playlist and profile endpoints are called; Spotify's audio-features and recommendations endpoints are deprecated and never used.
+
+**Dev-mode cap:** a Spotify app in development mode only allows 5 users, who must each be added by email under the app's User Management. Anyone else gets a 403 at login or on the first API call. Lifting the cap needs Spotify's extended-quota review.
+
 ## Tracklist scraper
 
 The scraper builds the adjacency index (`data/index/`) from public DJ tracklists.
