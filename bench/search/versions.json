@@ -1,133 +1,180 @@
 [
   {
-    "id": "v-daft-punk-one-more-time-original",
-    "query": "Daft Punk One More Time",
+    "id": "v-dom-dolla-danger-danger-original",
+    "query": "Dom Dolla Solomun Skepta DANGER DANGER",
     "expect": {
-      "artist": "Daft Punk",
-      "baseTitle": "One More Time",
+      "artist": "Dom Dolla",
+      "baseTitle": "DANGER DANGER",
       "kind": "original"
     },
-    "source": "https://musicbrainz.org/recording/a78f0f7f-46fc-49c0-919c-a89f4ff9ecdb"
+    "source": "https://musicbrainz.org/recording/f1111d3c-e0d9-4a87-be59-b33c081afad5",
+    "durationMs": 180150
   },
   {
-    "id": "v-fisher-losing-it-original",
-    "query": "Fisher Losing It",
+    "id": "v-dom-dolla-danger-danger-extended",
+    "query": "Dom Dolla Solomun Skepta DANGER DANGER Extended Mix",
+    "expect": {
+      "artist": "Dom Dolla",
+      "baseTitle": "DANGER DANGER",
+      "kind": "extended"
+    },
+    "source": "https://musicbrainz.org/recording/53460bcf-b74a-4048-b38d-3d8ffa206c1b",
+    "durationMs": 295317
+  },
+  {
+    "id": "v-mau-p-just-a-little-bit-more-original",
+    "query": "Mau P Just A Little Bit More",
+    "expect": {
+      "artist": "Mau P",
+      "baseTitle": "Just A Little Bit More",
+      "kind": "original"
+    },
+    "source": "https://musicbrainz.org/recording/d8140961-1de7-4096-9f33-6508e0f503c8",
+    "durationMs": 214038
+  },
+  {
+    "id": "v-mau-p-just-a-little-bit-more-extended",
+    "query": "Mau P Just A Little Bit More Extended Mix",
+    "expect": {
+      "artist": "Mau P",
+      "baseTitle": "Just A Little Bit More",
+      "kind": "extended"
+    },
+    "source": "https://musicbrainz.org/recording/8b05fc1f-8955-4044-8148-bc36570d66f3",
+    "durationMs": 381221
+  },
+  {
+    "id": "v-mau-p-neck-original",
+    "query": "Mau P neck",
+    "expect": {
+      "artist": "Mau P",
+      "baseTitle": "neck",
+      "kind": "original"
+    },
+    "source": "https://musicbrainz.org/recording/654bf029-aa9a-444a-a726-2c882c8030f3",
+    "durationMs": 220465
+  },
+  {
+    "id": "v-mau-p-neck-extended",
+    "query": "Mau P neck Extended Mix",
+    "expect": {
+      "artist": "Mau P",
+      "baseTitle": "neck",
+      "kind": "extended"
+    },
+    "source": "https://musicbrainz.org/recording/4012f30a-ad93-42bd-8407-cf5c976cddc2",
+    "durationMs": 350000
+  },
+  {
+    "id": "v-anyma-bad-angel-extended",
+    "query": "Anyma LISA Bad Angel Extended Mix",
+    "expect": {
+      "artist": "Anyma",
+      "baseTitle": "Bad Angel",
+      "kind": "extended"
+    },
+    "source": "https://musicbrainz.org/recording/6c26efeb-c36d-4bcb-87c8-044a116e019d",
+    "durationMs": 247968
+  },
+  {
+    "id": "v-armin-van-buuren-techno-trance-extended",
+    "query": "Armin van Buuren Adam Beyer D-Shake Techno Trance Extended Mix",
+    "expect": {
+      "artist": "Armin van Buuren",
+      "baseTitle": "Techno Trance",
+      "kind": "extended"
+    },
+    "source": "https://musicbrainz.org/recording/7e829b7c-eaf6-49a9-9054-b751c6b49b5d",
+    "durationMs": 364254
+  },
+  {
+    "id": "v-anyma-out-of-my-body-extended",
+    "query": "Anyma EJAE Out of My Body Extended Mix",
+    "expect": {
+      "artist": "Anyma",
+      "baseTitle": "Out of My Body",
+      "kind": "extended"
+    },
+    "source": "https://musicbrainz.org/recording/b3671fa7-ee05-4f78-a317-d9037b1acf10",
+    "durationMs": 283148
+  },
+  {
+    "id": "v-fisher-rain-extended",
+    "query": "Fisher Rain Extended Mix",
     "expect": {
       "artist": "Fisher",
-      "baseTitle": "Losing It",
-      "kind": "original"
-    },
-    "source": "https://musicbrainz.org/recording/b49fffb3-a688-4a15-beb3-2654238ef6fd"
-  },
-  {
-    "id": "v-dom-dolla-san-frandisco-original",
-    "query": "Dom Dolla San Frandisco",
-    "expect": {
-      "artist": "Dom Dolla",
-      "baseTitle": "San Frandisco",
-      "kind": "original"
-    },
-    "source": "https://musicbrainz.org/recording/94a65fee-73f1-4c35-a6ed-d6ce923d4738"
-  },
-  {
-    "id": "v-zedd-clarity-original",
-    "query": "Zedd Clarity",
-    "expect": {
-      "artist": "Zedd",
-      "baseTitle": "Clarity",
-      "kind": "original"
-    },
-    "source": "https://musicbrainz.org/recording/b871d3e9-c6e6-4a69-b6c0-9277a64ce1d3"
-  },
-  {
-    "id": "v-stardust-music-sounds-better-with-you-original",
-    "query": "Stardust Music Sounds Better With You",
-    "expect": {
-      "artist": "Stardust",
-      "baseTitle": "Music Sounds Better With You",
-      "kind": "original"
-    },
-    "source": "https://musicbrainz.org/recording/118efa07-a45d-4c54-901a-bb6f5101eed7"
-  },
-  {
-    "id": "v-purple-disco-machine-hypnotized-original",
-    "query": "Purple Disco Machine Hypnotized",
-    "expect": {
-      "artist": "Purple Disco Machine",
-      "baseTitle": "Hypnotized",
-      "kind": "original"
-    },
-    "source": "https://musicbrainz.org/recording/bd577eff-651b-44db-ada7-8cd1c00ef961"
-  },
-  {
-    "id": "v-calvin-harris-feel-so-close-extended",
-    "query": "Calvin Harris Feel So Close Extended Mix",
-    "expect": {
-      "artist": "Calvin Harris",
-      "baseTitle": "Feel So Close",
+      "baseTitle": "Rain",
       "kind": "extended"
     },
-    "source": "https://musicbrainz.org/recording/18d130c9-778e-431a-b4d7-0d9ada844c65"
+    "source": "https://musicbrainz.org/recording/2979c79e-0df9-4f09-8b36-781a235d3df0",
+    "durationMs": 266793
   },
   {
-    "id": "v-gorgon-city-ready-for-your-love-extended",
-    "query": "Gorgon City Ready for Your Love Extended Mix",
+    "id": "v-john-summit-shadows-extended",
+    "query": "John Summit LAVINIA Shadows Extended Mix",
     "expect": {
-      "artist": "Gorgon City",
-      "baseTitle": "Ready for Your Love",
+      "artist": "John Summit",
+      "baseTitle": "Shadows",
       "kind": "extended"
     },
-    "source": "https://musicbrainz.org/recording/a870f1b0-87cf-46bf-941d-de4afb1d555a"
+    "source": "https://musicbrainz.org/recording/f62e9b8a-da3b-493b-b633-a4799fde4a91",
+    "durationMs": 254252
   },
   {
-    "id": "v-dom-dolla-san-frandisco-extended",
-    "query": "Dom Dolla San Frandisco Extended Mix",
+    "id": "v-john-summit-shadows-remix-edip",
+    "query": "John Summit LAVINIA Shadows EdiP Extended Remix",
     "expect": {
-      "artist": "Dom Dolla",
-      "baseTitle": "San Frandisco",
-      "kind": "extended"
+      "artist": "John Summit",
+      "baseTitle": "Shadows",
+      "kind": "remix",
+      "remixer": "EdiP"
     },
-    "source": "https://musicbrainz.org/recording/03ed8b0c-76e9-4ee3-86b1-2350bb2ec2e8"
+    "source": "https://musicbrainz.org/recording/f741c602-2baf-4e79-9efa-a33b5bdf09c2",
+    "durationMs": 358173
   },
   {
-    "id": "v-purple-disco-machine-hypnotized-extended",
-    "query": "Purple Disco Machine Hypnotized Extended Mix",
+    "id": "v-gordo-loco-loco-extended",
+    "query": "Gordo Reinier Zonneveld Loco Loco Extended Mix",
     "expect": {
-      "artist": "Purple Disco Machine",
-      "baseTitle": "Hypnotized",
+      "artist": "Gordo",
+      "baseTitle": "Loco Loco",
       "kind": "extended"
     },
-    "source": "https://musicbrainz.org/recording/c38e77ff-f10a-478e-a5c4-1228557eadc1"
+    "source": "https://musicbrainz.org/recording/567d535b-40ec-4302-9068-6234b0e24bdd",
+    "durationMs": 287244
   },
   {
-    "id": "v-disclosure-latch-extended",
-    "query": "Disclosure Latch Extended Version",
+    "id": "v-hugel-jamaican-bam-bam-extended",
+    "query": "Hugel Solto Jamaican Bam Bam Extended Mix",
     "expect": {
-      "artist": "Disclosure",
-      "baseTitle": "Latch",
+      "artist": "HUGEL",
+      "baseTitle": "Jamaican (Bam Bam)",
       "kind": "extended"
     },
-    "source": "https://musicbrainz.org/recording/8947d600-2316-4db7-820b-f93fe394f058"
+    "source": "https://musicbrainz.org/recording/fbfa6d3e-4533-4717-b63f-d54e93d4f9a6",
+    "durationMs": 300656
   },
   {
-    "id": "v-meduza-piece-of-your-heart-extended",
-    "query": "Meduza Piece of Your Heart Extended",
+    "id": "v-eli-brown-it-s-like-that-extended",
+    "query": "Eli Brown It's Like That Extended Mix",
     "expect": {
-      "artist": "Meduza",
-      "baseTitle": "Piece of Your Heart",
+      "artist": "Eli Brown",
+      "baseTitle": "It's Like That",
       "kind": "extended"
     },
-    "source": "https://musicbrainz.org/recording/8ed69409-f7fa-4ae3-8b05-b9861b0dae5a"
+    "source": "https://musicbrainz.org/recording/63067a7e-724e-4e86-b7c5-8e9a3dab8504",
+    "durationMs": 294021
   },
   {
-    "id": "v-camelphat-cola-extended",
-    "query": "CamelPhat Elderbrook Cola Club Mix",
+    "id": "v-chris-lake-la-noche-extended",
+    "query": "Chris Lake Skrillex Anita B Queen LA NOCHE Extended Mix",
     "expect": {
-      "artist": "CamelPhat",
-      "baseTitle": "Cola",
+      "artist": "Chris Lake",
+      "baseTitle": "LA NOCHE",
       "kind": "extended"
     },
-    "source": "https://musicbrainz.org/recording/b625993f-0338-4eee-a42e-25dda7c1e0cb"
+    "source": "https://musicbrainz.org/recording/0c5c794d-6342-4f39-883f-c8b53ae54595",
+    "durationMs": 257000
   },
   {
     "id": "v-camelphat-cola-radio",
@@ -137,67 +184,8 @@
       "baseTitle": "Cola",
       "kind": "radio"
     },
-    "source": "https://musicbrainz.org/recording/b498adfc-1a72-4e8c-b225-b2da016555e0"
-  },
-  {
-    "id": "v-swedish-house-mafia-don-t-you-worry-child-radio",
-    "query": "Swedish House Mafia Don't You Worry Child Radio Edit",
-    "expect": {
-      "artist": "Swedish House Mafia",
-      "baseTitle": "Don't You Worry Child",
-      "kind": "radio"
-    },
-    "source": "https://musicbrainz.org/recording/74322a22-a428-4ebe-8a2c-fb43ecc75cdc"
-  },
-  {
-    "id": "v-armand-van-helden-you-don-t-know-me-radio",
-    "query": "Armand van Helden You Don't Know Me Radio Edit",
-    "expect": {
-      "artist": "Armand van Helden",
-      "baseTitle": "You Don't Know Me",
-      "kind": "radio"
-    },
-    "source": "https://musicbrainz.org/recording/423bb753-9101-404e-8b60-ed4614c9176b"
-  },
-  {
-    "id": "v-fisher-losing-it-radio",
-    "query": "Fisher Losing It Radio Edit",
-    "expect": {
-      "artist": "Fisher",
-      "baseTitle": "Losing It",
-      "kind": "radio"
-    },
-    "source": "https://musicbrainz.org/recording/f0150d9f-1710-4313-b6e6-33763a2843e8"
-  },
-  {
-    "id": "v-duke-dumont-i-got-u-radio",
-    "query": "Duke Dumont I Got U Radio Edit",
-    "expect": {
-      "artist": "Duke Dumont",
-      "baseTitle": "I Got U",
-      "kind": "radio"
-    },
-    "source": "https://musicbrainz.org/recording/a35941bc-0615-42b8-a179-dd375b35a226"
-  },
-  {
-    "id": "v-zedd-clarity-radio",
-    "query": "Zedd Clarity Radio Edit",
-    "expect": {
-      "artist": "Zedd",
-      "baseTitle": "Clarity",
-      "kind": "radio"
-    },
-    "source": "https://musicbrainz.org/recording/cc4cd137-ae95-48a9-ba44-8eea65e091a3"
-  },
-  {
-    "id": "v-daft-punk-one-more-time-radio",
-    "query": "Daft Punk One More Time Radio Edit",
-    "expect": {
-      "artist": "Daft Punk",
-      "baseTitle": "One More Time",
-      "kind": "radio"
-    },
-    "source": "https://musicbrainz.org/recording/218d1372-917e-48f6-949d-b596e192d0b6"
+    "source": "https://musicbrainz.org/recording/b498adfc-1a72-4e8c-b225-b2da016555e0",
+    "durationMs": 223000
   },
   {
     "id": "v-camelphat-cola-remix-zhu",
@@ -222,17 +210,6 @@
     "source": "https://musicbrainz.org/recording/f1c9fa0b-53b5-47d3-9169-a33e17da622a"
   },
   {
-    "id": "v-camelphat-cola-remix-franky-rizardo",
-    "query": "CamelPhat Elderbrook Cola Franky Rizardo Remix",
-    "expect": {
-      "artist": "CamelPhat",
-      "baseTitle": "Cola",
-      "kind": "remix",
-      "remixer": "Franky Rizardo"
-    },
-    "source": "https://musicbrainz.org/recording/07b5e3f9-6249-448e-bcb0-3b124c883baf"
-  },
-  {
     "id": "v-calvin-harris-feel-so-close-remix-nero",
     "query": "Calvin Harris Feel So Close Nero Remix",
     "expect": {
@@ -242,6 +219,16 @@
       "remixer": "Nero"
     },
     "source": "https://musicbrainz.org/recording/860ef73d-16a4-496f-a214-19ca6622a087"
+  },
+  {
+    "id": "v-calvin-harris-feel-so-close-extended",
+    "query": "Calvin Harris Feel So Close Extended Mix",
+    "expect": {
+      "artist": "Calvin Harris",
+      "baseTitle": "Feel So Close",
+      "kind": "extended"
+    },
+    "source": "https://musicbrainz.org/recording/18d130c9-778e-431a-b4d7-0d9ada844c65"
   },
   {
     "id": "v-disclosure-latch-remix-joel-fletcher",
@@ -255,6 +242,17 @@
     "source": "https://musicbrainz.org/recording/025e162a-e997-43d5-8aa0-1d1fc3b02eb7"
   },
   {
+    "id": "v-disclosure-latch-extended",
+    "query": "Disclosure Sam Smith Latch Extended Version",
+    "expect": {
+      "artist": "Disclosure",
+      "baseTitle": "Latch",
+      "kind": "extended"
+    },
+    "source": "https://musicbrainz.org/recording/8947d600-2316-4db7-820b-f93fe394f058",
+    "durationMs": 257000
+  },
+  {
     "id": "v-duke-dumont-i-got-u-remix-mk",
     "query": "Duke Dumont I Got U MK Remix",
     "expect": {
@@ -263,18 +261,18 @@
       "kind": "remix",
       "remixer": "MK"
     },
-    "source": "https://musicbrainz.org/recording/8d108520-7c5c-418f-8e77-400b8eb1f561"
+    "source": "https://musicbrainz.org/recording/8d108520-7c5c-418f-8e77-400b8eb1f561",
+    "durationMs": 384000
   },
   {
-    "id": "v-duke-dumont-i-got-u-remix-w-w",
-    "query": "Duke Dumont I Got U W&W Remix",
+    "id": "v-duke-dumont-i-got-u-radio",
+    "query": "Duke Dumont I Got U Radio Edit",
     "expect": {
       "artist": "Duke Dumont",
       "baseTitle": "I Got U",
-      "kind": "remix",
-      "remixer": "W&W"
+      "kind": "radio"
     },
-    "source": "https://musicbrainz.org/recording/ccc1a6e0-230a-4fed-9bbb-f7e8b6810964"
+    "source": "https://musicbrainz.org/recording/a35941bc-0615-42b8-a179-dd375b35a226"
   },
   {
     "id": "v-zedd-clarity-remix-ti-sto",
@@ -288,6 +286,16 @@
     "source": "https://musicbrainz.org/recording/b26ffa63-7270-4842-bbba-45d71c4d0355"
   },
   {
+    "id": "v-zedd-clarity-radio",
+    "query": "Zedd Clarity Radio Edit",
+    "expect": {
+      "artist": "Zedd",
+      "baseTitle": "Clarity",
+      "kind": "radio"
+    },
+    "source": "https://musicbrainz.org/recording/cc4cd137-ae95-48a9-ba44-8eea65e091a3"
+  },
+  {
     "id": "v-purple-disco-machine-hypnotized-remix-roosevelt",
     "query": "Purple Disco Machine Hypnotized Roosevelt Remix",
     "expect": {
@@ -299,14 +307,23 @@
     "source": "https://musicbrainz.org/recording/26536b77-8f6c-4719-929f-2676beb007b5"
   },
   {
-    "id": "v-meduza-piece-of-your-heart-remix-lee-foss",
-    "query": "Meduza Piece of Your Heart Lee Foss Remix",
+    "id": "v-purple-disco-machine-hypnotized-extended",
+    "query": "Purple Disco Machine Hypnotized Extended Mix",
     "expect": {
-      "artist": "Meduza",
-      "baseTitle": "Piece of Your Heart",
-      "kind": "remix",
-      "remixer": "Lee Foss"
+      "artist": "Purple Disco Machine",
+      "baseTitle": "Hypnotized",
+      "kind": "extended"
     },
-    "source": "https://musicbrainz.org/recording/825938ad-5175-4e7b-a2fc-4e59a1a69d65"
+    "source": "https://musicbrainz.org/recording/c38e77ff-f10a-478e-a5c4-1228557eadc1"
+  },
+  {
+    "id": "v-swedish-house-mafia-don-t-you-worry-child-radio",
+    "query": "Swedish House Mafia Don't You Worry Child Radio Edit",
+    "expect": {
+      "artist": "Swedish House Mafia",
+      "baseTitle": "Don't You Worry Child",
+      "kind": "radio"
+    },
+    "source": "https://musicbrainz.org/recording/74322a22-a428-4ebe-8a2c-fb43ecc75cdc"
   }
 ]

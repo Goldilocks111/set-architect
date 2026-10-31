@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isHit, versionCorrect, normalize, type BenchTrack, type BenchVersionCase } from '../../bench/search/score';
+import { isHit, hitRank, versionCorrect, normalize, type BenchTrack, type BenchVersionCase } from '../../bench/search/score';
 
 const track = (artist: string, title: string): BenchTrack => ({
   id: 't', artist, title, releaseYear: 2020, bucket: 'classic', query: `${artist} ${title}`, source: 'x',
@@ -75,7 +75,64 @@ describe('scorer regressions', () => {
     expect(isHit(track('Modjo', 'Lady (Hear Me Tonight)'), [{ artist: 'Modjo', title: 'Lady (Hear Me Tonight)' }])).toBe(true);
   });
   it('artist comparison ignores spaces', () => {
-    expect(isHit(track('Boys Noize, Brutalismus3000', 'X'), [{ artist: 'Brutalismus 3000', baseTitle: 'X' }])).toBe(true);
+    expect(isHit(track('Brutalismus3000', 'X'), [{ artist: 'Brutalismus 3000', baseTitle: 'X' }])).toBe(true);
     expect(isHit(track('Brutalismus 3000', 'X'), [{ artist: 'Boys Noize, Brutalismus3000', baseTitle: 'X' }])).toBe(true);
+  });
+});
+
+describe('strict artist matching', () => {
+  const miss = (artist: string, want: string, got: string, title = 'Song') =>
+    expect(isHit(track(want, title), [{ artist: got, baseTitle: title }])).toBe(false);
+  it('rejects tribute / fan-club / sound-alike names that merely contain the artist', () => {
+    miss('Disclosure', 'Disclosure', 'Disclosure Fan Club');
+    miss('Disclosure', 'Disclosure', 'Tribute to Disclosure');
+    miss('Stardust', 'Stardust', 'Ziggy Stardust');
+    miss('Fisher', 'Fisher', 'The Fisher Kings');
+  });
+  it('keeps duo names whole', () => {
+    miss('Above & Beyond', 'Above & Beyond', 'Above');
+    miss('Above & Beyond', 'Above & Beyond', 'Beyond');
+    miss('Chase & Status', 'Chase & Status', 'Status Quo');
+    expect(isHit(track('Above & Beyond', 'Song'), [{ artist: 'Above & Beyond', baseTitle: 'Song' }])).toBe(true);
+    expect(isHit(track('Above & Beyond', 'Song'), [{ artist: 'Above, Beyond', baseTitle: 'Song' }])).toBe(true);
+  });
+  it('requires the lead artist, not a secondary one', () => {
+    miss('CamelPhat, Elderbrook', 'CamelPhat, Elderbrook', 'Elderbrook');
+    expect(isHit(track('CamelPhat, Elderbrook', 'Song'), [{ artist: 'Elderbrook, CamelPhat', baseTitle: 'Song' }])).toBe(true);
+  });
+  it('versionCorrect rejects a tribute act', () => {
+    const c: BenchVersionCase = { id: 'c', query: 'q', source: 'x', expect: { artist: 'CamelPhat', baseTitle: 'Cola', kind: 'original' } };
+    expect(versionCorrect(c, [{ artist: 'CamelPhat Tribute Band', version: v('Cola', 'original') }])).toBe(false);
+  });
+});
+
+describe('strict title matching', () => {
+  const t = (title: string) => track('Daft Punk', title);
+  it('does not strip a parsed baseTitle', () => {
+    expect(isHit(t('One More Time'), [{ artist: 'Daft Punk', baseTitle: 'One More Time (Mike Posner Cover)' }])).toBe(false);
+    expect(isHit(t('Deeper Love'), [{ artist: 'Daft Punk', baseTitle: 'Deeper Love (Part 2)' }])).toBe(false);
+    expect(isHit(t('Latch'), [{ artist: 'Daft Punk', baseTitle: 'Latch - Cover' }])).toBe(false);
+    expect(isHit(t('Latch'), [{ artist: 'Daft Punk', baseTitle: 'Latch (Karaoke Version)' }])).toBe(false);
+  });
+  it('still matches parenthetical titles that belong to the work', () => {
+    expect(isHit(track('Modjo', 'Lady (Hear Me Tonight)'), [{ artist: 'Modjo', baseTitle: 'Lady (Hear Me Tonight)' }])).toBe(true);
+    expect(isHit(track('Eiffel 65', 'Blue (Da Ba Dee)'), [{ artist: 'Eiffel 65', baseTitle: 'Blue (Da Ba Dee)' }])).toBe(true);
+  });
+  it('strips the qualifier only when falling back to a raw title', () => {
+    expect(isHit(t('Latch'), [{ artist: 'Daft Punk', title: 'Latch (Extended Mix)' }])).toBe(true);
+  });
+  it('reports the rank of the match', () => {
+    expect(hitRank(t('Latch'), [{ artist: 'x', baseTitle: 'y' }, { artist: 'Daft Punk', baseTitle: 'Latch' }])).toBe(1);
+  });
+});
+
+describe('duration window', () => {
+  const c: BenchVersionCase = { id: 'c', query: 'q', source: 'x', durationMs: 200000, expect: { artist: 'Fisher', baseTitle: 'Rain', kind: 'extended' } };
+  it('rejects a result whose duration is outside +-10s', () => {
+    expect(versionCorrect(c, [{ artist: 'Fisher', version: v('Rain', 'extended'), durationMs: 215000 }])).toBe(false);
+    expect(versionCorrect(c, [{ artist: 'Fisher', version: v('Rain', 'extended'), durationMs: 195000 }])).toBe(true);
+  });
+  it('ignores duration when the result has none', () => {
+    expect(versionCorrect(c, [{ artist: 'Fisher', version: v('Rain', 'extended') }])).toBe(true);
   });
 });

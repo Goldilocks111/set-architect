@@ -1,7 +1,7 @@
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MergedSearchResponse, SearchProvider, SearchResult } from '../../src/lib/search/types';
-import { isHit, versionCorrect, percentile, type BenchTrack, type BenchVersionCase } from './score';
+import { hitRank, versionRank, percentile, type BenchTrack, type BenchVersionCase } from './score';
 
 try {
   (process as any).loadEnvFile?.('.env');
@@ -18,7 +18,7 @@ const versions: BenchVersionCase[] = JSON.parse(readFileSync(join(here, 'version
 
 interface Target {
   name: string;
-  run(query: string): Promise<Array<{ artist: string; title?: string; baseTitle?: string; version: SearchResult['version'] }>>;
+  run(query: string): Promise<Array<{ artist: string; title?: string; baseTitle?: string; version: SearchResult['version']; durationMs?: number; provider?: string; providers?: string[] }>>;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -88,9 +88,12 @@ async function runTarget(t: Target) {
       } catch (e) {
         const msg = String((e as Error).message ?? e);
         const status = (e as any)?.status;
-        if (attempt === 0 && t.name === 'itunes' && (status === 429 || status === 403 || /\b(429|403)\b/.test(msg))) {
-          console.log('itunes rate-limited; backing off 60s');
-          await sleep(BACKOFF_MS);
+        const limited = status === 429 || (t.name === 'itunes' && status === 403) || /\b429\b/.test(msg);
+        const maxRetries = t.name === 'itunes' ? 1 : t.name === 'spotify' ? 3 : 0;
+        if (limited && attempt < maxRetries) {
+          const wait = t.name === 'itunes' ? BACKOFF_MS : 30_000 * (attempt + 1);
+          console.log(`${t.name} rate-limited; backing off ${wait / 1000}s`);
+          await sleep(wait);
           continue;
         }
         return { res: [], error: msg };
@@ -98,15 +101,32 @@ async function runTarget(t: Target) {
     }
   };
 
-  const trackRows: Array<{ id: string; bucket: string; hit: boolean; error?: string }> = [];
+  type Seen = { artist: string; title: string; version?: string; provider?: string; durationMs?: number };
+  const seen = (r: Awaited<ReturnType<Target['run']>>[number]): Seen => ({
+    artist: r.artist,
+    title: r.title ?? r.baseTitle ?? r.version.baseTitle,
+    version: r.version.label ?? r.version.kind,
+    provider: r.provider ?? r.providers?.join('+'),
+    durationMs: r.durationMs,
+  });
+
+  const trackRows: Array<{ id: string; bucket: string; hit: boolean; rank?: number; matched?: Seen; top3?: Seen[]; error?: string }> = [];
   for (const tr of tracks) {
     const { res, error } = await timed(tr.query);
-    trackRows.push({ id: tr.id, bucket: tr.bucket, hit: isHit(tr, res), error });
+    const rank = hitRank(tr, res);
+    trackRows.push({
+      id: tr.id, bucket: tr.bucket, hit: rank >= 0, error,
+      ...(rank >= 0 ? { rank: rank + 1, matched: seen(res[rank]) } : { top3: res.slice(0, 3).map(seen) }),
+    });
   }
-  const versionRows: Array<{ id: string; ok: boolean; error?: string }> = [];
+  const versionRows: Array<{ id: string; ok: boolean; rank?: number; matched?: Seen; top3?: Seen[]; error?: string }> = [];
   for (const c of versions) {
     const { res, error } = await timed(c.query);
-    versionRows.push({ id: c.id, ok: versionCorrect(c, res), error });
+    const rank = versionRank(c, res);
+    versionRows.push({
+      id: c.id, ok: rank >= 0, error,
+      ...(rank >= 0 ? { rank: rank + 1, matched: seen(res[rank]) } : { top3: res.slice(0, 3).map(seen) }),
+    });
   }
 
   const ok = (b?: string) => trackRows.filter((r) => (!b || r.bucket === b) && !r.error);
@@ -125,8 +145,8 @@ async function runTarget(t: Target) {
   };
   const dir = join(here, 'results');
   mkdirSync(dir, { recursive: true });
-  const date = new Date().toISOString().slice(0, 10);
-  writeFileSync(join(dir, `${date}-${t.name}.json`), JSON.stringify({ summary, trackRows, versionRows }, null, 2));
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  writeFileSync(join(dir, `${stamp}-${t.name}.json`), JSON.stringify({ summary, trackRows, versionRows }, null, 2));
   return summary;
 }
 
