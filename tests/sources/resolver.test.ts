@@ -6,7 +6,7 @@ const deezerHit = { id: 1, title: 'T', rank: 500000, preview: 'dz-preview', arti
 const itunesHit = { trackId: 2, trackName: 'T', artistName: 'A', previewUrl: 'it-preview', trackViewUrl: 'it-url' };
 
 beforeEach(() => {
-  for (const k of ['GETSONGBPM_API_KEY', 'SOUNDSTAT_API_KEY', 'YOUTUBE_API_KEY', 'LASTFM_API_KEY'])
+  for (const k of ['SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET', 'GETSONGBPM_API_KEY', 'SOUNDSTAT_API_KEY', 'YOUTUBE_API_KEY', 'LASTFM_API_KEY'])
     vi.stubEnv(k, '');
 });
 afterEach(() => {
@@ -16,6 +16,26 @@ afterEach(() => {
 });
 
 describe('resolveTrack', () => {
+  it('spotify supplies spotifyId in the same pass so reccobeats provides energy', async () => {
+    vi.stubEnv('SPOTIFY_CLIENT_ID', 'id');
+    vi.stubEnv('SPOTIFY_CLIENT_SECRET', 'secret');
+    mockFetch([
+      ['accounts.spotify.com', () => json({ access_token: 't', expires_in: 3600 })],
+      [
+        'api.spotify.com',
+        () => json({ tracks: { items: [{ id: 'SPX', artists: [{ name: 'A' }], external_urls: { spotify: 'https://open.spotify.com/track/SPX' } }] } }),
+      ],
+      ['api.reccobeats.com/v1/audio-features?ids=SPX', () => json({ content: [{ tempo: 124, energy: 1 }] })],
+      ['api.deezer.com', () => json({ data: [] })],
+      ['itunes.apple.com', () => json({ results: [] })],
+    ]);
+    const t = await resolveTrack('A', 'T');
+    expect(t.spotifyId).toBe('SPX');
+    expect(t.spotifyUrl).toBe('https://open.spotify.com/track/SPX');
+    expect(t.energy).toBe(10);
+    expect(t.sources.energy).toBe('reccobeats');
+  });
+
   it('merges partials: first source wins per field, with provenance', async () => {
     mockFetch([
       ['api.deezer.com/track', () => json({ ...deezerHit, isrc: 'ISRC1' })],

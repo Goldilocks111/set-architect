@@ -17,6 +17,12 @@ describe('reccobeats', () => {
     });
     expect(f).toHaveBeenCalledTimes(1);
   });
+  it('maps 0..1 energy onto the 1..10 scale, clamped', async () => {
+    for (const [raw, want] of [[0, 1], [0.5, 6], [0.9, 9], [1, 10]] as const) {
+      mockFetch([['/v1/audio-features', () => json({ content: [{ energy: raw, danceability: 0.4 }] })]]);
+      expect(await reccobeatsAdapter.enrich(base({ spotifyId: 'SP1' }))).toEqual({ energy: want, danceability: 0.4 });
+    }
+  });
   it('no spotifyId → {} without fetching', async () => {
     const f = mockFetch([]);
     expect(await reccobeatsAdapter.enrich(base())).toEqual({});

@@ -80,6 +80,19 @@ export default function SetRow({
         </div>
       </div>
       <div className="flex items-center gap-0.5 opacity-100 sm:opacity-40 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100">
+        {track.spotifyUrl && (
+          <a
+            href={track.spotifyUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Open ${title} in Spotify`}
+            className={`${iconBtn} max-sm:hidden`}
+          >
+            <svg aria-hidden viewBox="0 0 16 16" className="h-3.5 w-3.5 fill-current">
+              <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm3.2 10.1a.45.45 0 0 1-.62.15c-1.7-1.04-3.84-1.27-6.36-.7a.45.45 0 1 1-.2-.88c2.76-.63 5.14-.36 7.03.8.21.13.28.41.15.63zm.88-1.96a.56.56 0 0 1-.77.18c-1.94-1.2-4.9-1.54-7.2-.84a.56.56 0 0 1-.32-1.07c2.62-.8 5.88-.41 8.11.96.26.16.34.5.18.77zm.08-2.04C9.83 6.7 6 6.57 3.8 7.24a.67.67 0 1 1-.39-1.28c2.53-.77 6.76-.62 9.43 1 .32.19.42.6.23.92a.67.67 0 0 1-.91.23z" />
+            </svg>
+          </a>
+        )}
         <a
           href={youtubeHref(track)}
           target="_blank"

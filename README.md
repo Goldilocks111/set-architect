@@ -23,7 +23,8 @@ Copy `.env.example` to `.env` and fill in what you want. Real values live only i
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_PRO` (plus `NEXT_PUBLIC_APP_URL`) | Billing: checkout, customer portal, webhook, Pro plan removes free limits. |
 | `GETSONGBPM_API_KEY` | Real BPM and key lookups. The builder footer then shows the required getsongbpm.com backlink automatically. |
 | `LASTFM_API_KEY` | Track similarity for suggestions. |
-| `SOUNDSTAT_API_KEY` | Energy and danceability. Currently dormant: it needs a Spotify ID, and no Spotify-ID mapping source is wired yet (planned for V1.1). |
+| `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` | Spotify catalog search (client credentials): resolves each track's Spotify ID and adds an "Open in Spotify" link. That ID is what activates ReccoBeats, which then supplies energy and danceability for free. |
+| `SOUNDSTAT_API_KEY` | Energy, danceability, and better BPM/key. Needs a Spotify ID, so it comes alive once the Spotify credentials above are set. ReccoBeats (keyless) covers the same fields when this key is absent. |
 | `YOUTUBE_API_KEY` | Richer YouTube links. Without it, links fall back to YouTube search URLs. |
 
 Every music-data adapter disables itself when its key is empty. Previews come from iTunes (credited in the footer) with Deezer as fallback.

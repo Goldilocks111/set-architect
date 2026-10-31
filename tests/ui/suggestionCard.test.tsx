@@ -114,4 +114,19 @@ describe('<SuggestionCard />', () => {
     expect(screen.getByText(/previews provided courtesy of itunes/i)).toBeInTheDocument();
     vi.unstubAllGlobals();
   });
+
+  it('shows an Open in Spotify link only when spotifyUrl exists', () => {
+    const { rerender } = render(<SuggestionCard suggestion={base} onAdd={() => {}} />);
+    expect(screen.queryByText('Open in Spotify')).toBeNull();
+    rerender(
+      <SuggestionCard
+        suggestion={{ ...base, track: { ...base.track, spotifyUrl: 'https://open.spotify.com/track/x' } }}
+        onAdd={() => {}}
+      />
+    );
+    const a = screen.getByText('Open in Spotify').closest('a')!;
+    expect(a).toHaveAttribute('href', 'https://open.spotify.com/track/x');
+    expect(a).toHaveAttribute('target', '_blank');
+    expect(a.getAttribute('rel')).toContain('noopener');
+  });
 });

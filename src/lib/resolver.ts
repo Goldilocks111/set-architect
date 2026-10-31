@@ -8,6 +8,7 @@ import { lastfmConfigured, lastfmSimilar, type SimilarItem } from './sources/las
 import { listenbrainzSimilar } from './sources/listenbrainz';
 import { reccobeatsAdapter } from './sources/reccobeats';
 import { soundstatAdapter } from './sources/soundstat';
+import { spotifyAdapter } from './sources/spotify';
 import type { SourceAdapter } from './sources/types';
 import { youtubeAdapter } from './sources/youtube';
 
@@ -17,6 +18,7 @@ export const ADAPTER_TIMEOUT_MS = 4000;
 const ADAPTERS: SourceAdapter[] = [
   deezerAdapter,
   itunesAdapter,
+  spotifyAdapter, // before soundstat/reccobeats: they key off the spotifyId it supplies
   getSongBpmAdapter,
   soundstatAdapter,
   reccobeatsAdapter,

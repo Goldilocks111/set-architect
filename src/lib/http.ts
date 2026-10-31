@@ -2,6 +2,8 @@ export interface FetchOptions {
   timeoutMs?: number;
   retries?: number;
   headers?: Record<string, string>;
+  method?: string;
+  body?: string;
 }
 
 export class HttpError extends Error {
@@ -14,7 +16,7 @@ export const DEFAULT_TIMEOUT_MS = 4000;
 
 /** fetch with an abort timeout; retries once on network errors and 5xx (never on timeouts or 4xx). */
 export async function fetchWithTimeout(url: string, opts: FetchOptions = {}): Promise<Response> {
-  const { timeoutMs = DEFAULT_TIMEOUT_MS, retries = 1, headers } = opts;
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, retries = 1, headers, method, body } = opts;
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     const ctrl = new AbortController();
@@ -24,7 +26,7 @@ export async function fetchWithTimeout(url: string, opts: FetchOptions = {}): Pr
       ctrl.abort();
     }, timeoutMs);
     try {
-      const res = await fetch(url, { signal: ctrl.signal, headers });
+      const res = await fetch(url, { signal: ctrl.signal, headers, method, body });
       if (res.status >= 500 && attempt < retries) {
         lastErr = new HttpError(res.status, url);
         continue;

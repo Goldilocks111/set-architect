@@ -20,6 +20,7 @@ export function mapFeatures(f: RawFeatures): Partial<Track> {
     if (c) out.camelot = c;
   }
   if (typeof f.energy === 'number') {
+    // Spotify-style energy is 0..1; the engine uses the Mixed In Key 1..10 scale: round(1 + e*9), clamped.
     const e = energyTo10(f.energy);
     if (e !== undefined) out.energy = e;
   }

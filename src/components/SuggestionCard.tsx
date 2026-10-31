@@ -115,6 +115,16 @@ export default function SuggestionCard({ suggestion, onAdd }: Props) {
                 {lookup === 'loading' ? 'Finding preview…' : lookup === 'none' ? 'No preview found' : 'Find a preview'}
               </button>
             )}
+            {track.spotifyUrl && (
+              <a
+                href={track.spotifyUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-[12px] text-[#8A8FA3] underline-offset-2 hover:text-[#E8E4DA] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F2B33D]"
+              >
+                Open in Spotify
+              </a>
+            )}
             <a
               href={youtubeHref(track)}
               target="_blank"

@@ -33,6 +33,20 @@ describe('transitionParts', () => {
   });
 });
 
+describe('<SetList /> Spotify link-out', () => {
+  it('renders only for tracks with spotifyUrl', () => {
+    const withUrl = { ...full('a', '8A', 124, 5), spotifyUrl: 'https://open.spotify.com/track/a' };
+    render(
+      <SetList tracks={[withUrl, full('b', '8A', 124, 5)]} template="60min" plannedLength={15} onRemove={() => {}} onMove={() => {}} />
+    );
+    const links = screen.getAllByRole('link', { name: /in Spotify/i, hidden: true });
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute('href', 'https://open.spotify.com/track/a');
+    expect(links[0]).toHaveAttribute('target', '_blank');
+    expect(links[0].getAttribute('rel')).toContain('noopener');
+  });
+});
+
 describe('<SetList />', () => {
   it('renders rows with a transition badge between each pair, partial data shows placeholders', () => {
     const { container } = render(
