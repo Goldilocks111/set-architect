@@ -162,3 +162,22 @@ describe('fetchPage', () => {
     expect(sleeps).toEqual([2000]);
   });
 });
+
+describe('206 soft block and delay scale', () => {
+  it('throws on 206 without caching the body, so a later call refetches', async () => {
+    const f = vi.fn().mockResolvedValueOnce(mkResponse('<stripped>', 206)).mockResolvedValueOnce(mkResponse('<full>'));
+    const fetcher = make(f);
+    await expect(fetcher.get(TL)).rejects.toMatchObject({ status: 206 });
+    expect(await fetcher.get(TL)).toBe('<full>');
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  it('setDelayScale(2) doubles the minimum gap between requests', async () => {
+    const f = vi.fn().mockResolvedValue(mkResponse('x'));
+    const fetcher = make(f);
+    await fetcher.get(TL);
+    fetcher.setDelayScale!(2);
+    await fetcher.get(TL2);
+    expect(sleeps).toEqual([4000]);
+  });
+});

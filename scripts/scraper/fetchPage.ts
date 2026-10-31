@@ -22,6 +22,8 @@ export interface FetcherOptions {
 export interface Fetcher {
   get(url: string, opts?: { headers?: Record<string, string> }): Promise<string>;
   search(query: string): Promise<string>;
+  /** Multiplies the politeness delay (e.g. 2 after a cool-down); 1 restores normal pacing. */
+  setDelayScale?(scale: number): void;
 }
 
 interface CookieFile {
@@ -41,6 +43,8 @@ export class FetchError extends Error {
 }
 
 export const BLOCK_STATUSES = [401, 403, 429];
+/** 206 = the site's stripped-page soft block (no tracklist rows); never cached, treated as throttling. */
+export const SOFT_BLOCK_STATUS = 206;
 const MAX_REDIRECTS = 5;
 
 export function createFetcher(opts: FetcherOptions = {}): Fetcher {
@@ -50,6 +54,7 @@ export function createFetcher(opts: FetcherOptions = {}): Fetcher {
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const random = opts.random ?? Math.random;
+  let delayScale = 1;
 
   const readJar = (): CookieFile => {
     if (!existsSync(cookiePath)) return { cookies: {} };
@@ -92,7 +97,7 @@ export function createFetcher(opts: FetcherOptions = {}): Fetcher {
     let init = startInit;
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       if (jar.lastRequestAt !== undefined) {
-        const gap = MIN_DELAY_MS + random() * (MAX_DELAY_MS - MIN_DELAY_MS);
+        const gap = (MIN_DELAY_MS + random() * (MAX_DELAY_MS - MIN_DELAY_MS)) * delayScale;
         const wait = jar.lastRequestAt + gap - now();
         if (wait > 0) await sleep(wait);
       }
@@ -146,6 +151,9 @@ export function createFetcher(opts: FetcherOptions = {}): Fetcher {
   };
 
   return {
+    setDelayScale(scale) {
+      delayScale = scale > 0 ? scale : 1;
+    },
     async get(url, opts) {
       const safe = guard(url);
       return cached(`GET ${safe}`, () => live(safe, { method: 'GET', headers: opts?.headers }));

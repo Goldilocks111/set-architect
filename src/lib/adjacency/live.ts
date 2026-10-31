@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { BLOCK_STATUSES, FetchError, createFetcher, type Fetcher } from '../../../scripts/scraper/fetchPage';
+import { BLOCK_STATUSES, SOFT_BLOCK_STATUS, FetchError, createFetcher, type Fetcher } from '../../../scripts/scraper/fetchPage';
 import { BASE_URL, parseSearch } from '../../../scripts/scraper/parseSearch';
 import { parseTracklist } from '../../../scripts/scraper/parseTracklist';
 import { trackKeyOf } from '../../types/track';
@@ -9,6 +9,8 @@ import { JsonAdjacencyStore, type AdjacencyStore } from './store';
 export const SEARCHED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const BACKOFF_MS = 24 * 60 * 60 * 1000;
 export const QUEUE_PAUSE_MS = 30 * 60 * 1000;
+export const SOFT_PAUSE_MS = 60 * 60 * 1000;
+export const RESUME_DELAY_SCALE = 2;
 export const TOP_TRACKLISTS = 3;
 
 export const LIVE_STATE_PATH = path.join(process.cwd(), 'data', 'index', 'live-state.json');
@@ -37,7 +39,9 @@ interface Job {
   key: string;
 }
 
-const isBlock = (err: unknown) => err instanceof FetchError && BLOCK_STATUSES.includes(err.status);
+const isHardBlock = (err: unknown) => err instanceof FetchError && BLOCK_STATUSES.includes(err.status);
+const isSoftBlock = (err: unknown) => err instanceof FetchError && err.status === SOFT_BLOCK_STATUS;
+const isBlock = (err: unknown) => isHardBlock(err) || isSoftBlock(err);
 
 /** Picks the ajax-search hit matching the seed track and returns its play_count. */
 export function parsePlayCount(json: string, artist: string, title: string): number | undefined {
@@ -103,13 +107,19 @@ export function createIngestor(deps: IngestorDeps) {
     writeState(s);
   };
 
-  async function runJob(job: Job): Promise<void> {
+  /** Returns false when the job fetched nothing usable, so the key stays eligible for a retry. */
+  async function runJob(job: Job): Promise<boolean> {
     const results = parseSearch(await deps.fetcher.search(`${job.artist} ${job.title}`)).slice(0, TOP_TRACKLISTS);
+    let covered = 0;
     for (const r of results) {
-      if (await deps.store.hasTracklist(r.id)) continue;
+      if (await deps.store.hasTracklist(r.id)) {
+        covered++;
+        continue;
+      }
       try {
         const tl = parseTracklist(await deps.fetcher.get(r.url));
         await deps.store.ingest(tl.id, tl.tracks);
+        covered++;
         log(`live: indexed ${tl.id} (${tl.tracks.length} tracks) for ${job.key}`);
       } catch (err) {
         if (isBlock(err)) throw err;
@@ -127,6 +137,7 @@ export function createIngestor(deps: IngestorDeps) {
       if (isBlock(err)) throw err;
       log(`live: play_count lookup failed for ${job.key}: ${(err as Error).message}`);
     }
+    return results.length === 0 || covered > 0;
   }
 
   async function pump(): Promise<void> {
@@ -134,23 +145,32 @@ export function createIngestor(deps: IngestorDeps) {
       const job = queue.shift()!;
       pending.set(job.key, 'running');
       try {
-        await runJob(job);
+        // First job after a cool-down runs at double the politeness delay.
+        const resuming = readState().pausedUntil !== undefined;
+        if (resuming) update((s) => delete s.pausedUntil);
+        deps.fetcher.setDelayScale?.(resuming ? RESUME_DELAY_SCALE : 1);
+        const complete = await runJob(job);
         update((s) => {
-          s.searched[job.key] = now();
-          delete s.backoff[job.key];
+          if (complete) {
+            s.searched[job.key] = now();
+            delete s.backoff[job.key];
+          }
         });
       } catch (err) {
         log(`live: job failed for ${job.key}: ${(err as Error).message}`);
-        const block = isBlock(err);
+        const soft = isSoftBlock(err);
+        const hard = isHardBlock(err);
         update((s) => {
-          s.backoff[job.key] = now() + BACKOFF_MS;
-          if (block) s.pausedUntil = now() + QUEUE_PAUSE_MS;
+          if (!soft) s.backoff[job.key] = now() + BACKOFF_MS;
+          if (hard) s.pausedUntil = now() + QUEUE_PAUSE_MS;
+          if (soft) s.pausedUntil = now() + SOFT_PAUSE_MS;
         });
-        if (block) {
+        if (soft || hard) {
           for (const j of queue.splice(0)) pending.delete(j.key);
-          log('live: site is blocking requests; queue stopped for 30 minutes');
+          log(`live: site is throttling requests; queue stopped for ${soft ? 60 : 30} minutes`);
         }
       } finally {
+        deps.fetcher.setDelayScale?.(1);
         pending.delete(job.key);
       }
     }

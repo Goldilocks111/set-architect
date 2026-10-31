@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { FetchError, type Fetcher } from '../../scripts/scraper/fetchPage';
-import { BACKOFF_MS, QUEUE_PAUSE_MS, SEARCHED_TTL_MS, createIngestor, parsePlayCount } from '../../src/lib/adjacency/live';
+import { BACKOFF_MS, QUEUE_PAUSE_MS, SOFT_PAUSE_MS, SEARCHED_TTL_MS, createIngestor, parsePlayCount } from '../../src/lib/adjacency/live';
 import { JsonAdjacencyStore } from '../../src/lib/adjacency/store';
 import { trackKeyOf } from '../../src/types/track';
 
@@ -169,7 +169,7 @@ describe('partial failures', () => {
     const f: Fetcher = {
       ...fetcher,
       async get(url) {
-        if (url.includes('/tracklist/') && tl++ === 0) throw new FetchError(206, url);
+        if (url.includes('/tracklist/') && tl++ === 0) throw new FetchError(500, url);
         return fetcher.get(url);
       },
     };
@@ -178,5 +178,60 @@ describe('partial failures', () => {
     await live.whenIdle();
     expect(state().searched[trackKeyOf('Bicep', 'Glue')]).toBe(clock);
     expect(await store.hasTracklist('9ycgytk')).toBe(true);
+  });
+});
+
+describe('206 soft block', () => {
+  const soft = () => new FetchError(206, 'https://www.1001tracklists.com/tracklist/x/y.html');
+
+  it('aborts the job, pauses the queue 60 minutes and does not mark the key searched', async () => {
+    let tl = 0;
+    const f: Fetcher = {
+      ...fetcher,
+      async get(url) {
+        if (url.includes('/tracklist/') && tl++ === 1) throw soft();
+        return fetcher.get(url);
+      },
+    };
+    const live = createIngestor({ fetcher: f, store, statePath, now: () => clock });
+    await live.ensureNeighborsFor('Bicep', 'Glue');
+    await live.ensureNeighborsFor('Other', 'Track');
+    await live.whenIdle();
+    const s = state();
+    expect(s.pausedUntil).toBe(clock + SOFT_PAUSE_MS);
+    expect(s.searched[trackKeyOf('Bicep', 'Glue')]).toBeUndefined();
+    expect(s.backoff[trackKeyOf('Bicep', 'Glue')]).toBeUndefined();
+    expect(calls.filter((c) => c.includes('/tracklist/'))).toHaveLength(1); // second one threw (unrecorded); third never fetched
+    expect(calls.filter((c) => c.startsWith('search:'))).toHaveLength(1);
+    expect(await live.ensureNeighborsFor('Bicep', 'Glue')).toEqual({ digging: false });
+  });
+
+  it('a job that ingests zero tracklists leaves the key eligible for retry', async () => {
+    const f: Fetcher = {
+      ...fetcher,
+      async get(url) {
+        if (url.includes('/tracklist/')) throw new FetchError(500, url);
+        return fetcher.get(url);
+      },
+    };
+    const live = createIngestor({ fetcher: f, store, statePath, now: () => clock });
+    await live.ensureNeighborsFor('Bicep', 'Glue');
+    await live.whenIdle();
+    expect(state().searched[trackKeyOf('Bicep', 'Glue')]).toBeUndefined();
+    expect(await live.ensureNeighborsFor('Bicep', 'Glue')).toEqual({ digging: true });
+    await live.whenIdle();
+  });
+
+  it('runs the first job after a cool-down at double delay, then restores normal pacing', async () => {
+    writeFileSync(statePath, JSON.stringify({ searched: {}, backoff: {}, pausedUntil: clock - 1 }));
+    const scales: number[] = [];
+    const f: Fetcher = { ...fetcher, setDelayScale: (n) => void scales.push(n) };
+    const live = createIngestor({ fetcher: f, store, statePath, now: () => clock });
+    await live.ensureNeighborsFor('Bicep', 'Glue');
+    await live.whenIdle();
+    await live.ensureNeighborsFor('Other', 'Track');
+    await live.whenIdle();
+    expect(scales).toEqual([2, 1, 1, 1]);
+    expect(state().pausedUntil).toBeUndefined();
   });
 });
