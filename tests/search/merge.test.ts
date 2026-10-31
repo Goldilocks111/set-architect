@@ -363,3 +363,59 @@ describe('mergedSearch: provider etiquette and query shaping', () => {
     expect(hits[0].baseTitle).toBe('Pusher');
   });
 });
+
+describe('mergedSearch: MusicBrainz version discovery', () => {
+  const mbProv = (results: SearchResult[]) => prov('musicbrainz' as Name, results);
+
+  it('is not asked when the first round fully answers the query', async () => {
+    const mb = mbProv([]);
+    await mergedSearch('camelphat cola', { providers: [prov('spotify', [res('spotify', 'CamelPhat', 'Cola')]), mb] });
+    expect(mb.search).not.toHaveBeenCalled();
+  });
+
+  it('is not asked when no work was identified (half-typed query)', async () => {
+    const mb = mbProv([]);
+    await mergedSearch('cola cam', { providers: [prov('spotify', [res('spotify', 'Someone', 'Colab')]), mb] });
+    expect(mb.search).not.toHaveBeenCalled();
+  });
+
+  it('finds an asked version the streaming catalogs lack, via a work query with a version boost', async () => {
+    const mb = mbProv([
+      res('musicbrainz', 'Disclosure', 'Latch', { durationMs: 256_000 }),
+      res('musicbrainz', 'Disclosure', 'Latch (Extended Version)', { durationMs: 257_000 }),
+    ]);
+    const { hits } = await mergedSearch('Disclosure Latch Extended Version', {
+      providers: [prov('spotify', [res('spotify', ['Disclosure', 'Sam Smith'], 'Latch', { durationMs: 256_000, spotifyId: 's' })]), mb],
+    });
+    expect(mb.search).toHaveBeenCalledWith('+recording:"Latch" +artist:"Disclosure" recording:(extended version)^10');
+    expect(hits[0]).toMatchObject({ baseTitle: 'Latch', providers: ['musicbrainz'] });
+    expect(hits[0].version.kind).toBe('extended');
+    // the MusicBrainz copy of the original merges with Spotify's
+    expect(hits.find((h) => h.version.kind === 'original')?.providers).toEqual(['spotify', 'musicbrainz']);
+  });
+
+  it('merges a MusicBrainz recording with a streaming hit by ISRC', async () => {
+    const { hits } = await mergedSearch('meduza piece of your heart extended', {
+      providers: [
+        prov('deezer', [res('deezer', 'MEDUZA', 'Piece Of Your Heart', { isrc: 'DEUM1' })]),
+        prov('itunes', [res('itunes', 'MEDUZA & Goodboys', 'Piece of Your Heart (Extended Mix)', { durationMs: 427_000 })]),
+        mbProv([res('musicbrainz', 'Meduza', 'Piece of Your Heart (extended)', { isrc: 'DEUM2', durationMs: 427_741 })]),
+      ],
+    });
+    const ext = hits.filter((h) => h.version.kind === 'extended');
+    expect(ext).toHaveLength(1);
+    expect(ext[0].providers).toEqual(['itunes', 'musicbrainz']);
+  });
+
+  it('ranks a catalog-only recording below a streamable one of the same version', async () => {
+    const { hits } = await mergedSearch('zedd clarity radio edit', {
+      providers: [
+        prov('spotify', [res('spotify', 'Zedd', 'Clarity')]),
+        prov('itunes', [res('itunes', 'Zedd', 'Clarity (Radio Edit)', { durationMs: 265_000 })]),
+        mbProv([res('musicbrainz', 'Zedd', 'Clarity (radio edit)', { durationMs: 229_000 })]),
+      ],
+    });
+    const radios = hits.filter((h) => h.version.kind === 'radio');
+    expect(radios.map((h) => h.providers)).toEqual([['itunes'], ['musicbrainz']]);
+  });
+});

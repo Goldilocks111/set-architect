@@ -62,6 +62,12 @@ describe('provider breaker', () => {
     expect(b.cooldownUntil('deezer', 1)).toBe(b.STREAK_COOLDOWN_MS);
   });
 
+  it('backs MusicBrainz off on its 503 rate-limit answer', async () => {
+    const b = await load();
+    b.recordFailure('musicbrainz', new b.HttpError(503, 'u', 0), 0);
+    expect(b.cooldownUntil('musicbrainz', 1)).toBe(b.MB_BACKOFF_MS);
+  });
+
   it('ignores network errors and timeouts', async () => {
     const b = await load();
     for (let i = 0; i < 5; i++) b.recordFailure('deezer', new Error('timed out'), 0);

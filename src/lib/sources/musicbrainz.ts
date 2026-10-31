@@ -24,7 +24,7 @@ async function slot(): Promise<void> {
   if (at > now) await new Promise((r) => setTimeout(r, at - now));
 }
 
-async function mbGet<T>(path: string): Promise<T> {
+export async function mbGet<T>(path: string): Promise<T> {
   await slot();
   return fetchJson<T>(`${BASE}${path}`, {
     timeoutMs: 5000,
@@ -33,7 +33,7 @@ async function mbGet<T>(path: string): Promise<T> {
   });
 }
 
-const escapeLucene = (s: string) => s.replace(/(["\\])/g, '\\$1');
+export const escapeLucene = (s: string) => s.replace(/(["\\])/g, '\\$1');
 
 async function byIsrc(isrc: string): Promise<string | undefined> {
   const res = await mbGet<{ recordings?: Array<{ id?: string }> }>(`/isrc/${encodeURIComponent(isrc)}?fmt=json`);

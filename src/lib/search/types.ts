@@ -29,7 +29,7 @@ export interface ParsedVersion {
 
 /** One provider's hit, normalized. Providers fill what they know; nothing is invented. */
 export interface SearchResult {
-  provider: 'spotify' | 'deezer' | 'itunes';
+  provider: 'spotify' | 'deezer' | 'itunes' | 'musicbrainz';
   providerId: string;
   artist: string; // display string as the provider gives it (all main artists joined with ", ")
   artists: string[]; // individual main artists

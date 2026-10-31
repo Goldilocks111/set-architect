@@ -1,6 +1,7 @@
 import { withTimeout } from '@/lib/http';
 import { cooldownUntil, recordFailure, recordSuccess, resetBreakers } from './breaker';
 import { searchProviders } from './providers';
+import { musicbrainzWorkQuery } from './providers/musicbrainz';
 import { parseVersion } from './version';
 import type { MergedHit, MergedSearchResponse, ParsedVersion, SearchProvider, SearchResult, VersionKind } from './types';
 
@@ -270,6 +271,8 @@ function assess(g: Group, q: Query, hit: Omit<MergedHit, 'score' | 'key'>): Asse
     bestRank.set(m.r.provider, Math.max(bestRank.get(m.r.provider) ?? 0, b));
   }
   for (const b of bestRank.values()) s += b;
+  // Catalog-only recordings identify a real version but cannot be streamed: a streamable equivalent goes first.
+  if (g.members.every((m) => m.r.provider === 'musicbrainz')) s -= 10;
 
   s += (hit.popularity ?? 0) * 0.08;
   const year = hit.releaseDate ? parseInt(hit.releaseDate.slice(0, 4), 10) : NaN;
@@ -353,22 +356,33 @@ function rank(members: Member[], q: Query): Ranked[] {
   return out.sort((x, y) => y.hit.score - x.hit.score);
 }
 
-/**
- * A narrower second query once the first round has identified the work: its title plus the query words
- * that are not part of it. "CamelPhat Elderbrook Cola ZHU Remix" -> "Cola ZHU Remix", which Spotify finds
- * even though its credit for that remix leaves Elderbrook out.
- */
-function refinedQuery(query: string, ranked: Ranked[]): string | undefined {
+/** The best first-round hit naming both artist and title, and the query words that are not part of it. */
+function identifiedWork(query: string, ranked: Ranked[]): { best: Ranked; leftover: string[] } | undefined {
   const best = ranked.find((r) => r.a.work);
   if (!best) return undefined;
   const leftover = query.split(/\s+/).filter((w) => {
     const t = tokens(w);
     return t.length > 0 && !t.every((x) => best.a.workWords.has(x));
   });
-  if (!leftover.length) return undefined;
-  const refined = `${best.hit.baseTitle} ${leftover.join(' ')}`;
+  return { best, leftover };
+}
+
+/**
+ * A narrower second query once the first round has identified the work: its title plus the query words
+ * that are not part of it. "CamelPhat Elderbrook Cola ZHU Remix" -> "Cola ZHU Remix", which Spotify finds
+ * even though its credit for that remix leaves Elderbrook out.
+ */
+function refinedQuery(query: string, work: ReturnType<typeof identifiedWork>): string | undefined {
+  if (!work?.leftover.length) return undefined;
+  const refined = `${work.best.hit.baseTitle} ${work.leftover.join(' ')}`;
   return fold(refined) === fold(query) ? undefined : refined;
 }
+
+/** Providers consulted only when the first round has no full answer (rate-limited, or catalog-only). */
+const SECOND_ROUND_ONLY = new Set<SearchResult['provider']>(['itunes', 'musicbrainz']);
+
+/** Providers asked on every query; when all of them fail the search has effectively failed. */
+export const firstRoundProviders = (providers: SearchProvider[]) => providers.filter((p) => !SECOND_ROUND_ONLY.has(p.name));
 
 export async function mergedSearch(
   query: string,
@@ -398,16 +412,25 @@ export async function mergedSearch(
     return answers.flatMap((rs) => rs.map((r, i) => ({ r: withoutSourceTag(r), rank: i, total: rs.length })));
   };
 
-  // Rate-limited providers are held back for queries the others could not fully answer.
-  const primary = providers.filter((p) => PER_MINUTE_BUDGET[p.name] === undefined);
-  const scarce = providers.filter((p) => PER_MINUTE_BUDGET[p.name] !== undefined);
+  // iTunes (20/min) and MusicBrainz (1/s) are held back for queries the others could not fully answer.
+  const primary = firstRoundProviders(providers);
+  const itunes = providers.filter((p) => p.name === 'itunes');
+  const musicbrainz = providers.filter((p) => p.name === 'musicbrainz');
 
   let members = await ask(primary.map((p) => [p, query]));
   let ranked = rank(members, q);
   if (!ranked.some((r) => r.a.strong)) {
-    const refined = refinedQuery(query, ranked);
-    const calls: Array<[SearchProvider, string]> = scarce.map((p) => [p, query]);
+    const work = identifiedWork(query, ranked);
+    const refined = refinedQuery(query, work);
+    const calls: Array<[SearchProvider, string]> = itunes.map((p) => [p, query]);
     if (refined) calls.push(...primary.map((p): [SearchProvider, string] => [p, refined]));
+    // MusicBrainz lists every recording of a work, including versions the streaming catalogs lack. Without an
+    // identified work (e.g. a half-typed query) it would only queue behind its 1 req/s limit for nothing.
+    if (work) {
+      const lead = work.best.hit.artist.split(', ')[0];
+      const mbq = musicbrainzWorkQuery(work.best.hit.baseTitle, lead, work.leftover);
+      calls.push(...musicbrainz.map((p): [SearchProvider, string] => [p, mbq]));
+    }
     if (calls.length) {
       members = members.concat(await ask(calls));
       ranked = rank(members, q);

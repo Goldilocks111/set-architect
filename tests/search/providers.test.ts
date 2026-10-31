@@ -31,7 +31,7 @@ afterEach(() => {
 
 describe('registry', () => {
   it('lists spotify, deezer, itunes in order', () => {
-    expect(searchProviders.map((p) => p.name)).toEqual(['spotify', 'deezer', 'itunes']);
+    expect(searchProviders.map((p) => p.name)).toEqual(['spotify', 'deezer', 'itunes', 'musicbrainz']);
   });
 });
 

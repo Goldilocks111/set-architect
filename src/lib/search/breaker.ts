@@ -11,6 +11,7 @@ export const THROTTLE_COOLDOWN_MS = 5 * 60_000;
 export const FAILURE_STREAK = 3;
 export const STREAK_COOLDOWN_MS = 60_000;
 const MAX_COOLDOWN_MS = 24 * 3600_000;
+export const MB_BACKOFF_MS = 10_000;
 
 // Persisted so a server restart does not walk straight back into a provider's lockout.
 let until: Record<string, number> | null = null;
@@ -54,6 +55,8 @@ export function recordFailure(name: Name, err: unknown, now = Date.now()): void 
   if (err.status === 429) return open(name, err.retryAfterMs ?? THROTTLE_COOLDOWN_MS, now);
   // Apple signals its rate limit with a bare 403.
   if (name === 'itunes' && err.status === 403) return open(name, err.retryAfterMs ?? THROTTLE_COOLDOWN_MS, now);
+  // MusicBrainz answers 503 when a client exceeds 1 req/s.
+  if (name === 'musicbrainz' && err.status === 503) return open(name, Math.max(err.retryAfterMs ?? 0, MB_BACKOFF_MS), now);
   if (err.status === 403 || err.status >= 500) {
     const n = (streaks.get(name) ?? 0) + 1;
     if (n >= FAILURE_STREAK) open(name, STREAK_COOLDOWN_MS, now);
