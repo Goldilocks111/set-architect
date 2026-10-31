@@ -3,8 +3,16 @@ import { join } from 'node:path';
 import type { MergedSearchResponse, SearchProvider, SearchResult } from '../../src/lib/search/types';
 import { isHit, versionCorrect, percentile, type BenchTrack, type BenchVersionCase } from './score';
 
+try {
+  (process as any).loadEnvFile?.('.env');
+} catch {
+  // no .env: unconfigured providers are skipped below
+}
+
 const here = __dirname;
-const MIN_GAP_MS = 340; // <= 3 req/s per target
+const DEFAULT_GAP_MS = 340; // <= 3 req/s
+const GAP_MS: Record<string, number> = { itunes: 3100, spotify: 340, deezer: 340, merged: 340 };
+const BACKOFF_MS = 60_000;
 const tracks: BenchTrack[] = JSON.parse(readFileSync(join(here, 'tracks.json'), 'utf8'));
 const versions: BenchVersionCase[] = JSON.parse(readFileSync(join(here, 'versions.json'), 'utf8'));
 
@@ -36,6 +44,7 @@ async function loadTargets(): Promise<Target[]> {
       : Array.isArray(prov.default) ? prov.default
       : [];
     if (list.length === 0) console.log('providers module loaded but exposes no providers (expected searchProviders[])');
+    console.log(`configured providers: ${list.filter((p) => p.configured()).map((p) => p.name).join(', ') || 'none'}`);
     for (const p of list) {
       if (!p.configured()) {
         console.log(`skipping provider ${p.name}: not configured`);
@@ -52,7 +61,7 @@ async function loadTargets(): Promise<Target[]> {
     console.log('merge.ts not available; skipping merged target');
   } else {
     const fn: ((q: string) => Promise<MergedSearchResponse>) | undefined =
-      merge.searchMerged ?? merge.mergedSearch ?? merge.search ?? merge.default;
+      merge.mergedSearch ?? merge.searchMerged ?? merge.search ?? merge.default;
     if (typeof fn !== 'function') console.log('merge module loaded but exports no search function (searchMerged/mergedSearch/search)');
     else targets.push({ name: 'merged', run: async (q) => (await fn(q)).hits.map((h) => ({ ...h, baseTitle: h.baseTitle })) });
   }
@@ -60,22 +69,32 @@ async function loadTargets(): Promise<Target[]> {
 }
 
 const pct = (n: number, d: number) => (d === 0 ? 'n/a' : `${((100 * n) / d).toFixed(1)}%`);
+const only = process.argv.slice(2);
 
 async function runTarget(t: Target) {
   const lat: number[] = [];
   let last = 0;
   const timed = async (q: string) => {
-    const wait = last + MIN_GAP_MS - Date.now();
-    if (wait > 0) await sleep(wait);
-    last = Date.now();
-    const t0 = performance.now();
-    try {
-      const res = await t.run(q);
-      lat.push(performance.now() - t0);
-      return { res, error: undefined as string | undefined };
-    } catch (e) {
-      lat.push(performance.now() - t0);
-      return { res: [], error: String((e as Error).message ?? e) };
+    const gap = GAP_MS[t.name] ?? DEFAULT_GAP_MS;
+    for (let attempt = 0; ; attempt++) {
+      const wait = last + gap - Date.now();
+      if (wait > 0) await sleep(wait);
+      last = Date.now();
+      const t0 = performance.now();
+      try {
+        const res = await t.run(q);
+        lat.push(performance.now() - t0);
+        return { res, error: undefined as string | undefined };
+      } catch (e) {
+        const msg = String((e as Error).message ?? e);
+        const status = (e as any)?.status;
+        if (attempt === 0 && t.name === 'itunes' && (status === 429 || status === 403 || /\b(429|403)\b/.test(msg))) {
+          console.log('itunes rate-limited; backing off 60s');
+          await sleep(BACKOFF_MS);
+          continue;
+        }
+        return { res: [], error: msg };
+      }
     }
   };
 
@@ -90,17 +109,19 @@ async function runTarget(t: Target) {
     versionRows.push({ id: c.id, ok: versionCorrect(c, res), error });
   }
 
-  const hits = (b?: string) => trackRows.filter((r) => (!b || r.bucket === b) && r.hit).length;
-  const total = (b?: string) => trackRows.filter((r) => !b || r.bucket === b).length;
+  const ok = (b?: string) => trackRows.filter((r) => (!b || r.bucket === b) && !r.error);
+  const hits = (b?: string) => ok(b).filter((r) => r.hit).length;
+  const total = (b?: string) => ok(b).length;
+  const vOk = versionRows.filter((r) => !r.error);
   const summary = {
     target: t.name,
     hitOverall: pct(hits(), total()),
     hitClassic: pct(hits('classic'), total('classic')),
     hitRecent: pct(hits('recent'), total('recent')),
-    versionCorrect: pct(versionRows.filter((r) => r.ok).length, versionRows.length),
+    versionCorrect: pct(vOk.filter((r) => r.ok).length, vOk.length),
     p50Ms: Math.round(percentile(lat, 50)),
     p95Ms: Math.round(percentile(lat, 95)),
-    errors: [...trackRows, ...versionRows].filter((r) => r.error).length,
+    erroredQueries: [...trackRows, ...versionRows].filter((r) => r.error).length,
   };
   const dir = join(here, 'results');
   mkdirSync(dir, { recursive: true });
@@ -118,6 +139,7 @@ async function main() {
   }
   const rows = [];
   for (const t of targets) {
+    if (only.length && !only.includes(t.name)) continue;
     console.log(`running ${t.name}...`);
     rows.push(await runTarget(t));
   }
