@@ -59,14 +59,28 @@ export interface SimilarityLookup {
   ): Promise<Array<{ artist: string; title: string; match: number }>>;
 }
 
+/** Qualifier words that describe a length or mastering of the same recording, not a different track. */
+const SAME_TRACK_WORDS = new Set([
+  'original', 'extended', 'radio', 'club', 'edit', 'version', 'mix', 'remaster', 'remastered', 'short', 'single',
+  'album', 'main', 'long', 'full', 'length', 'explicit', 'clean', 'mono', 'stereo', 'digital',
+]);
+
+/** "(Extended)", "[2014 Remaster]", "Radio Edit": yes. "(Mark Knight Remix)", "(Dub Mix)": no. */
+function isSameTrackQualifier(inner: string): boolean {
+  const words = inner.split(/[^a-z0-9]+/).filter(Boolean);
+  return words.length > 0 && words.every((w) => SAME_TRACK_WORDS.has(w) || /^(19|20)\d\d$/.test(w));
+}
+
 /** Normalized join key used across scraper index, engine and resolver. */
 export function trackKeyOf(artist: string, title: string): string {
   const norm = (s: string) =>
     s
       .toLowerCase()
       .normalize('NFKD')
-      .replace(/[̀-ͯ]/g, '')
+      .replace(/[\u0300-\u036f]/g, '')
       .replace(/\(.*?(original mix|extended mix|radio edit).*?\)/g, '')
+      .replace(/[([]([^()[\]]*)[)\]]/g, (whole, inner: string) => (isSameTrackQualifier(inner) ? '' : whole))
+      .replace(/\s+[-–—]\s+([^-–—]*)$/, (whole, inner: string) => (isSameTrackQualifier(inner) ? '' : whole))
       .replace(/[^a-z0-9]+/g, ' ')
       .trim();
   return `${norm(artist)}|${norm(title)}`;

@@ -13,28 +13,46 @@ export const STREAK_COOLDOWN_MS = 60_000;
 const MAX_COOLDOWN_MS = 24 * 3600_000;
 export const MB_BACKOFF_MS = 10_000;
 
-// Persisted so a server restart does not walk straight back into a provider's lockout.
-let until: Record<string, number> | null = null;
+// Persisted and shared through one file by every process (dev server, bench, scripts): each reads
+// the file again when it changes and merges before writing, so nobody erases another's cooldown.
+let until: Record<string, number> = {};
+let seenMtimeMs = -1;
 const streaks = new Map<string, number>();
 
 const file = () => dataDir('search', 'provider-cooldowns.json');
 
-function load(): Record<string, number> {
-  if (until) return until;
+function readFile(): Record<string, number> {
   try {
-    until = JSON.parse(fs.readFileSync(file(), 'utf8')) as Record<string, number>;
+    const parsed = JSON.parse(fs.readFileSync(file(), 'utf8')) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, number>) : {};
   } catch {
-    until = {};
+    return {};
+  }
+}
+
+function load(): Record<string, number> {
+  let mtime: number;
+  try {
+    mtime = fs.statSync(file()).mtimeMs;
+  } catch {
+    mtime = 0; // no file (yet, or deleted as a manual reset)
+  }
+  if (mtime !== seenMtimeMs) {
+    seenMtimeMs = mtime;
+    until = mtime ? readFile() : {};
   }
   return until;
 }
 
 function open(name: Name, ms: number, now: number): void {
-  const state = load();
-  state[name] = Math.max(state[name] ?? 0, now + Math.min(ms, MAX_COOLDOWN_MS));
+  const merged = { ...readFile() };
+  for (const [k, v] of Object.entries(load())) merged[k] = Math.max(merged[k] ?? 0, v);
+  merged[name] = Math.max(merged[name] ?? 0, now + Math.min(ms, MAX_COOLDOWN_MS));
+  until = merged;
   streaks.delete(name);
   try {
-    fs.writeFileSync(file(), JSON.stringify(state));
+    fs.writeFileSync(file(), JSON.stringify(merged));
+    seenMtimeMs = fs.statSync(file()).mtimeMs;
   } catch {
     // persistence is best-effort; the in-memory breaker still holds
   }
@@ -71,11 +89,42 @@ export function recordFailure(name: Name, err: unknown, now = Date.now()): void 
 }
 
 export function resetBreakers(): void {
-  until = null;
+  until = {};
+  seenMtimeMs = -1;
   streaks.clear();
   try {
     fs.rmSync(file(), { force: true });
   } catch {
     // nothing persisted
   }
+}
+
+/**
+ * Calls allowed per provider per rolling minute, in this process. Apple documents roughly 20/min for the iTunes
+ * Search API and answers 403 for minutes after it is exceeded. Spotify's dev-mode quota locked the app out for
+ * ~14h once; the app (search + enrichment together) stays under 30/min. The Spotify budget is opt-in per call
+ * (`app`), so the benchmark, which paces itself, measures search unthrottled.
+ */
+export const PER_MINUTE_BUDGET: Partial<Record<Name, number>> = { itunes: 20 };
+export const APP_PER_MINUTE_BUDGET: Partial<Record<Name, number>> = { spotify: 30 };
+const recentCalls = new Map<string, number[]>();
+
+function take(key: string, limit: number, now: number): boolean {
+  const calls = (recentCalls.get(key) ?? []).filter((t) => now - t < 60_000);
+  const ok = calls.length < limit;
+  if (ok) calls.push(now);
+  recentCalls.set(key, calls);
+  return ok;
+}
+
+/** False when the provider's budget for the last minute is spent; otherwise records the call. */
+export function takeBudget(name: Name, opts: { app?: boolean } = {}, now = Date.now()): boolean {
+  const limit = PER_MINUTE_BUDGET[name];
+  if (limit !== undefined && !take(name, limit, now)) return false;
+  const appLimit = opts.app ? APP_PER_MINUTE_BUDGET[name] : undefined;
+  return appLimit === undefined || take(`app:${name}`, appLimit, now);
+}
+
+export function resetBudgets(): void {
+  recentCalls.clear();
 }

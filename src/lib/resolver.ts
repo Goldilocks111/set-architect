@@ -15,10 +15,14 @@ import { spotifyAdapter } from './sources/spotify';
 import type { SourceAdapter } from './sources/types';
 import { youtubeAdapter } from './sources/youtube';
 import { cachedMergedSearch } from './search/cache';
+import { cooldownUntil, recordFailure, recordSuccess, takeBudget } from './search/breaker';
 import { defaultProviders, firstRoundProviders, mergedSearch } from './search/merge';
 import type { MergedHit } from './search/types';
 
 export const ADAPTER_TIMEOUT_MS = 4000;
+
+const GUARDED = new Set<string>(['spotify', 'deezer', 'itunes', 'musicbrainz']);
+const isGuarded = (name: string): name is MergedHit['providers'][number] => GUARDED.has(name);
 
 // youtube is appended last: keyless it only builds a search URL, so it costs nothing.
 const ADAPTERS: SourceAdapter[] = [
@@ -50,9 +54,14 @@ export async function resolveTrack(
   }
   let deezerPreview: string | undefined;
   for (const adapter of ADAPTERS) {
+    const guarded = isGuarded(adapter.name) ? adapter.name : undefined;
     try {
       if (!adapter.configured()) continue;
+      // Enrichment shares the search providers' breaker and the app's Spotify budget: one add or a
+      // suggestion refresh must not walk back into a lockout.
+      if (guarded && (cooldownUntil(guarded) || !takeBudget(guarded, { app: true }))) continue;
       const partial = await withTimeout(adapter.enrich({ ...track }), adapter.timeoutMs ?? ADAPTER_TIMEOUT_MS, adapter.name);
+      if (guarded) recordSuccess(guarded);
       if (adapter.name === 'deezer') deezerPreview = partial?.previewUrl;
       const overrides = OVERRIDES[adapter.name] ?? [];
       for (const [field, value] of Object.entries(partial ?? {}) as Array<[keyof Track, unknown]>) {
@@ -61,7 +70,8 @@ export async function resolveTrack(
         (track as unknown as Record<string, unknown>)[field] = value;
         track.sources[field] = adapter.fieldLabels?.[field] ?? adapter.name;
       }
-    } catch {
+    } catch (err) {
+      if (guarded) recordFailure(guarded, err);
       // a failing adapter is skipped; resolution continues with the rest
     }
   }
@@ -80,11 +90,16 @@ export async function resolveTrack(
   return track;
 }
 
+/** Stable across searches: the ISRC, else the merge key without the per-response "#n" collision suffix. */
+export function trackIdOf(hit: MergedHit): string {
+  return (hit.isrc ? `isrc-${hit.isrc}` : `search-${hit.key.replace(/#\d+$/, '')}`).slice(0, 200);
+}
+
 /** Maps one merged search hit to a Track; the title keeps the version so enrichment finds this exact recording. */
-export function hitToTrack(hit: MergedHit): Track {
+export function hitToTrack(hit: MergedHit, id = trackIdOf(hit)): Track {
   const label = hit.version.label;
   const track: Track = {
-    id: (hit.isrc ? `isrc-${hit.isrc}` : `search-${hit.key}`).slice(0, 200),
+    id,
     artist: hit.artist,
     title: label ? `${hit.baseTitle} (${label})` : hit.baseTitle,
     sources: {},
@@ -111,11 +126,17 @@ export function hitToTrack(hit: MergedHit): Track {
 
 export async function searchTracks(query: string): Promise<Track[]> {
   const providers = defaultProviders().filter((p) => p.configured());
-  const { hits, degraded } = await cachedMergedSearch(query, (q) => mergedSearch(q, { providers }));
+  const { hits, degraded } = await cachedMergedSearch(query, (q) => mergedSearch(q, { providers, appBudget: true }));
   const first = firstRoundProviders(providers);
   const asked = first.length ? first : providers;
   if (!hits.length && asked.length && asked.every((p) => degraded.includes(p.name))) return searchDemoTracks(query);
-  return hits.map(hitToTrack);
+  const used = new Set<string>();
+  return hits.map((hit) => {
+    let id = trackIdOf(hit);
+    if (used.has(id)) id = `search-${hit.key}`.slice(0, 200); // a genuine collision keeps its suffix
+    used.add(id);
+    return hitToTrack(hit, id);
+  });
 }
 
 export async function getSimilarTracks(artist: string, title: string): Promise<SimilarItem[]> {

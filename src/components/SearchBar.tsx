@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { Track } from '@/types/track';
 import { fmtBpm, fmtEnergy } from './trackFormat';
+import { isInSet } from './recordingKeys';
 import VersionChip, { baseTitleOf, fmtDuration, groupVersions } from './VersionChip';
 
 interface Props {
@@ -11,6 +12,9 @@ interface Props {
 }
 
 type Status = 'idle' | 'loading' | 'done' | 'error';
+
+/** Shorter queries match nothing useful and would still spend provider quota. */
+export const MIN_QUERY_CHARS = 3;
 
 export default function SearchBar({ onAdd, inSet }: Props) {
   const [query, setQuery] = useState('');
@@ -22,7 +26,7 @@ export default function SearchBar({ onAdd, inSet }: Props) {
 
   useEffect(() => {
     const q = query.trim();
-    if (!q) {
+    if (q.length < MIN_QUERY_CHARS) {
       setResults([]);
       setStatus('idle');
       return;
@@ -50,7 +54,7 @@ export default function SearchBar({ onAdd, inSet }: Props) {
   const shown = groupVersions(results).slice(0, 8);
 
   const add = (track: Track | undefined) => {
-    if (!track || inSet.has(track.id)) return;
+    if (!track || isInSet(inSet, track)) return;
     onAdd(track);
     setQuery('');
     setResults([]);
@@ -98,7 +102,7 @@ export default function SearchBar({ onAdd, inSet }: Props) {
         {status === 'loading' && <span className="shrink-0 text-xs text-[#8A8FA3]">Searching…</span>}
       </div>
 
-      {query.trim() && (status === 'done' || status === 'error') && (
+      {query.trim().length >= MIN_QUERY_CHARS && (status === 'done' || status === 'error') && (
         <div className="absolute inset-x-0 top-full z-20 mt-1 overflow-hidden rounded-lg border border-[#2A2F3F] bg-[#1A1D28] shadow-2xl shadow-black/50">
           {status === 'error' && <p className="px-4 py-3 text-sm text-[#EE8B7A]">Search failed. Check your connection and try again.</p>}
           {status === 'done' && shown.length === 0 && (
@@ -107,7 +111,7 @@ export default function SearchBar({ onAdd, inSet }: Props) {
           {shown.length > 0 && (
             <ul id={listId} role="listbox" aria-label="Search results" className="max-h-80 overflow-y-auto py-1">
               {shown.map((t, i) => {
-                const added = inSet.has(t.id);
+                const added = isInSet(inSet, t);
                 return (
                   <li
                     key={t.id}

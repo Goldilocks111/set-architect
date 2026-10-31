@@ -8,6 +8,7 @@ import DemoBanner from './DemoBanner';
 import EnergyCurve from './EnergyCurve';
 import SavedSets from './SavedSets';
 import SearchBar from './SearchBar';
+import { recordingKeys } from './recordingKeys';
 import SetList from './SetList';
 import SpotifyConnect from './SpotifyConnect';
 import SuggestionBox from './SuggestionBox';
@@ -27,7 +28,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
   const [hydrated, setHydrated] = useState(false);
   const { tracks, template } = state;
   const plannedLength = plannedLengthFor(template);
-  const inSet = useMemo(() => new Set(tracks.map((t) => t.id)), [tracks]);
+  const inSet = useMemo(() => new Set(tracks.flatMap(recordingKeys)), [tracks]);
 
   useEffect(() => {
     const stored = loadLocal();

@@ -1,5 +1,5 @@
 import { withTimeout } from '@/lib/http';
-import { cooldownUntil, recordFailure, recordSuccess, resetBreakers } from './breaker';
+import { cooldownUntil, recordFailure, recordSuccess, resetBreakers, resetBudgets, takeBudget } from './breaker';
 import { searchProviders } from './providers';
 import { musicbrainzWorkQuery } from './providers/musicbrainz';
 import { parseVersion } from './version';
@@ -9,28 +9,8 @@ export const PROVIDER_TIMEOUT_MS = 1200;
 /** MusicBrainz answered in 300–2100ms when probed; it only runs in round two, for version discovery. */
 export const PROVIDER_TIMEOUTS: Partial<Record<SearchResult['provider'], number>> = { musicbrainz: 2500 };
 
-/**
- * Calls allowed per provider per rolling minute. Apple documents roughly 20/min for the iTunes Search API
- * and answers 403/429 for minutes after it is exceeded, so we stop asking before that happens.
- */
-const PER_MINUTE_BUDGET: Partial<Record<SearchResult['provider'], number>> = { itunes: 20 };
-const recentCalls = new Map<string, number[]>();
-
-function takeBudget(name: SearchResult['provider'], now = Date.now()): boolean {
-  const limit = PER_MINUTE_BUDGET[name];
-  if (limit === undefined) return true;
-  const calls = (recentCalls.get(name) ?? []).filter((t) => now - t < 60_000);
-  if (calls.length >= limit) {
-    recentCalls.set(name, calls);
-    return false;
-  }
-  calls.push(now);
-  recentCalls.set(name, calls);
-  return true;
-}
-
 export function resetProviderBudgets(): void {
-  recentCalls.clear();
+  resetBudgets();
   resetBreakers();
 }
 
@@ -390,7 +370,8 @@ function pick<K extends keyof SearchResult>(ms: Member[], field: K, order: Searc
 function toHit(g: Group): Omit<MergedHit, 'score'> {
   const ms = g.members;
   const v = g.version;
-  const isrc = [...g.isrcs][0] ?? [...g.anyIsrcs][0];
+  // smallest, not first-seen: the id must not depend on which provider answered first (R14 groups hold two)
+  const isrc = [...g.isrcs].sort()[0] ?? [...g.anyIsrcs].sort()[0];
   const primary = ms[0].r;
   const hit: Omit<MergedHit, 'score'> = {
     key:
@@ -502,8 +483,16 @@ export const firstRoundProviders = (providers: SearchProvider[]) => providers.fi
 
 export async function mergedSearch(
   query: string,
-  opts: { providers?: SearchProvider[]; timeoutMs?: number } = {}
+  opts: {
+    providers?: SearchProvider[];
+    timeoutMs?: number;
+    /** Live-app call: also spend the app-wide per-minute budgets (Spotify 30/min, shared with enrichment). */
+    appBudget?: boolean;
+    /** Called once per query with stage timings (benchmark: progressive-results decision). */
+    onTiming?: (t: { stage1Ms: number; totalMs: number; stage2: boolean }) => void;
+  } = {}
 ): Promise<MergedSearchResponse> {
+  const t0 = performance.now();
   const providers = (opts.providers ?? defaultProviders()).filter((p) => p.configured());
   const degraded = new Set<SearchResult['provider']>();
   const q = parseQuery(query);
@@ -513,7 +502,7 @@ export async function mergedSearch(
       calls.map(async ([p, text]) => {
         try {
           if (cooldownUntil(p.name)) throw new Error(`${p.name} cooling down after throttling`);
-          if (!takeBudget(p.name)) throw new Error(`${p.name} over its request budget`);
+          if (!takeBudget(p.name, { app: opts.appBudget })) throw new Error(`${p.name} over its request budget`);
           const rs = await withTimeout(
             p.search(providerQuery(p.name, text)),
             opts.timeoutMs ?? PROVIDER_TIMEOUTS[p.name] ?? PROVIDER_TIMEOUT_MS,
@@ -540,11 +529,14 @@ export async function mergedSearch(
 
   let members = await ask(primary.map((p) => [p, query]));
   let ranked = rank(members, q);
+  const stage1Ms = performance.now() - t0;
+  let stage2 = false;
   if (!ranked.some((r) => r.a.strong)) {
     // a provider that already failed or hung in this request is not asked again (it would cost a second timeout)
     const usable = (ps: SearchProvider[]) => ps.filter((p) => !degraded.has(p.name));
     const work = identifiedWork(query, ranked);
-    const refined = refinedQuery(query, work);
+    // a one-word query cannot be narrowed into "title + leftover"; don't spend first-round providers on it
+    const refined = query.trim().split(/\s+/).length >= 2 ? refinedQuery(query, work) : undefined;
     const calls: Array<[SearchProvider, string]> = itunes.map((p) => [p, query]);
     if (refined) calls.push(...usable(primary).map((p): [SearchProvider, string] => [p, refined]));
     // MusicBrainz lists every recording of a work, including versions the streaming catalogs lack. Without an
@@ -554,11 +546,13 @@ export async function mergedSearch(
       calls.push(...musicbrainz.map((p): [SearchProvider, string] => [p, mbq]));
     }
     if (calls.length) {
+      stage2 = true;
       members = members.concat(await ask(calls));
       ranked = rank(members, q);
     }
   }
 
+  opts.onTiming?.({ stage1Ms, totalMs: performance.now() - t0, stage2 });
   return {
     hits: uniqueKeys(groupByWork(ranked.map((r) => r.hit))),
     degraded: providers.map((p) => p.name).filter((n) => degraded.has(n)),

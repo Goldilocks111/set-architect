@@ -19,6 +19,12 @@ export function safeHttpUrl(v: unknown): string | undefined {
 const text = (v: unknown, max = MAX_TEXT) =>
   typeof v === 'string' && v.trim() && v.length <= max ? v : undefined;
 
+/** Only open.spotify.com links: the link-out must not point anywhere else. */
+function spotifyUrl(v: unknown): string | undefined {
+  const url = safeHttpUrl(v);
+  return url && url.startsWith('https://open.spotify.com/') ? url : undefined;
+}
+
 const numIn = (v: unknown, min: number, max: number) =>
   typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max ? v : undefined;
 
@@ -41,6 +47,9 @@ export function sanitizeTrack(v: unknown): Track | null {
     artist,
     title,
     remix: text(o.remix),
+    version: text(o.version, 100),
+    durationMs: numIn(o.durationMs, 1, 3_600_000),
+    spotifyUrl: spotifyUrl(o.spotifyUrl),
     bpm: numIn(o.bpm, 40, 250),
     camelot,
     energy: numIn(o.energy, 1, 10),

@@ -1,4 +1,5 @@
 import type { ArcTemplate, Track } from '@/types/track';
+import { isInSet, recordingKeys } from './recordingKeys';
 import { sanitizeTrack } from './trackSanitize';
 
 export interface PlaylistState {
@@ -38,9 +39,11 @@ export function enrichTrack(track: Track, fields: Partial<Track>): Track {
 
 export function playlistReducer(state: PlaylistState, action: PlaylistAction): PlaylistState {
   switch (action.type) {
-    case 'add':
-      if (state.tracks.some((t) => t.id === action.track.id)) return state;
+    case 'add': {
+      const existing = new Set(state.tracks.flatMap(recordingKeys));
+      if (isInSet(existing, action.track)) return state;
       return { ...state, tracks: [...state.tracks, action.track] };
+    }
     case 'remove':
       return { ...state, tracks: state.tracks.filter((t) => t.id !== action.id) };
     case 'reorder': {
