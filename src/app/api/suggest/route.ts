@@ -1,7 +1,8 @@
 import { plannedLengthFor } from '@/components/playlistReducer';
 import { sanitizeTrack } from '@/components/trackSanitize';
 import { isDemoMode } from '@/lib/demo';
-import type { ArcTemplate, Track } from '@/types/track';
+import type { ArcTemplate, Suggestion, Track } from '@/types/track';
+import { ensureNeighborsFor } from '@/lib/adjacency/live';
 import { assembleSuggestions, loadSuggestDeps } from './assemble';
 
 const MAX_PLAYLIST = 200;
@@ -48,7 +49,22 @@ export async function POST(request: Request) {
     }
   }
 
-  const result = await assembleSuggestions({ playlist, template, plannedLength }, await loadSuggestDeps());
+  // Fire-and-forget: ingestion runs in the background queue; this request uses whatever the index has now.
+  let digging = false;
+  const last = playlist[playlist.length - 1];
+  if (last) {
+    try {
+      digging = (await ensureNeighborsFor(last.artist, last.title)).digging;
+    } catch {
+      digging = false;
+    }
+  }
+
+  const result: { suggestions: Suggestion[]; digging?: true } = await assembleSuggestions(
+    { playlist, template, plannedLength },
+    await loadSuggestDeps()
+  );
+  if (digging) result.digging = true;
 
   if (gatedUserId) {
     const { recordSuggestion, EntitlementsUnavailableError } = await import('@/lib/billing/entitlements');

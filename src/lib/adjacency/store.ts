@@ -32,6 +32,8 @@ export interface AdjacencyData {
   tracklists: Record<string, number>; // id -> track count
   names: Record<string, TrackRef>; // trackKey -> display artist/title
   edges: Record<string, EdgeSides>; // trackKey -> neighbors by side
+  /** trackKey -> number of 1001TL sets containing the track (from the ajax track search). */
+  playCounts?: Record<string, number>;
 }
 
 export const emptyData = (): AdjacencyData => ({ version: 1, tracklists: {}, names: {}, edges: {} });
@@ -105,6 +107,16 @@ export class JsonAdjacencyStore implements AdjacencyStore {
     data.tracklists[tracklistId] = keys.length;
     writeData(this.file, data);
     return true;
+  }
+
+  playCountOf(trackKey: string): number | undefined {
+    return this.load().playCounts?.[trackKey];
+  }
+
+  setPlayCount(trackKey: string, count: number): void {
+    const data = this.load();
+    (data.playCounts ??= {})[trackKey] = count;
+    writeData(this.file, data);
   }
 
   async getNeighbors(trackKey: string) {

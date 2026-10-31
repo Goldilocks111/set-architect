@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ArcTemplate, Suggestion, Track } from '@/types/track';
 import SuggestionCard from './SuggestionCard';
 import { displayTitle } from './trackFormat';
@@ -19,10 +19,14 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd }
   const [status, setStatus] = useState<Status>('loading');
   const [limitMessage, setLimitMessage] = useState('');
   const [retry, setRetry] = useState(0);
+  const [digging, setDigging] = useState(false);
   const last = tracks[tracks.length - 1];
+  const lastKey = last ? `${last.artist}|${last.title}` : '';
+  const refetched = useRef(new Set<string>());
 
   useEffect(() => {
     const ctrl = new AbortController();
+    let refetchTimer: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(async () => {
       setStatus('loading');
       try {
@@ -40,15 +44,22 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd }
           return;
         }
         if (!res.ok) throw new Error(String(res.status));
-        const body = (await res.json()) as { suggestions: Suggestion[] };
+        const body = (await res.json()) as { suggestions: Suggestion[]; digging?: boolean };
         setSuggestions(body.suggestions ?? []);
         setStatus('done');
+        setDigging(body.digging === true);
+        // One re-fetch after ingestion has had time to land; the key changes with the track so it never loops.
+        if (body.digging && !refetched.current.has(lastKey)) {
+          refetched.current.add(lastKey);
+          refetchTimer = setTimeout(() => setRetry((r) => r + 1), 8000);
+        }
       } catch (e) {
         if ((e as Error).name !== 'AbortError') setStatus('error');
       }
     }, 150);
     return () => {
       clearTimeout(timer);
+      clearTimeout(refetchTimer);
       ctrl.abort();
     };
   }, [tracks, template, plannedLength, retry]);
@@ -61,6 +72,11 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd }
         </h2>
         {status === 'loading' && <span className="text-xs text-[#8A8FA3]">Scoring…</span>}
       </header>
+      {digging && (
+        <p className="mb-1 text-xs italic text-[#8A8FA3]">
+          Digging through real DJ sets… suggestions improve as sets are indexed
+        </p>
+      )}
       <p className="mb-2 text-[13px] text-[#8A8FA3]">
         {last ? (
           <>

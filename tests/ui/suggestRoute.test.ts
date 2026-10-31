@@ -292,3 +292,48 @@ describe('loadSuggestDeps demo-adjacency fallback (M3)', () => {
     expect(args.candidates.some((c) => c.id === seed[1].id)).toBe(true);
   });
 });
+
+describe('live co-occurrence integration', () => {
+  it('route reports digging:true only when an ingest job is queued for the last track', async () => {
+    vi.resetModules();
+    const ensure = vi.fn();
+    vi.doMock('@/lib/adjacency/live', () => ({ ensureNeighborsFor: ensure }));
+    const { POST } = await import('@/app/api/suggest/route');
+    const call = () =>
+      POST(new Request('http://x/api/suggest', { method: 'POST', body: JSON.stringify({ playlist: [last], template: '60min' }) }));
+    ensure.mockResolvedValueOnce({ digging: true });
+    const a = await (await call()).json();
+    expect(a.digging).toBe(true);
+    expect(ensure).toHaveBeenCalledWith(last.artist, last.title);
+    ensure.mockResolvedValueOnce({ digging: false });
+    expect('digging' in (await (await call()).json())).toBe(false);
+    ensure.mockRejectedValueOnce(new Error('x'));
+    expect((await call()).status).toBe(200);
+    vi.doUnmock('@/lib/adjacency/live');
+  });
+
+  it('adds a log-scaled "In N DJ sets" bonus only when play_count data exists', async () => {
+    const key = trackKeyOf('Outside', 'Neighbor');
+    const neighbor: Track = { ...seed[2], id: 'ext-pc', artist: 'Outside', title: 'Neighbor' };
+    const run = (playCountOf?: (k: string) => number | undefined) =>
+      assembleSuggestions(
+        { playlist: [last], template: '60min', plannedLength: 15 },
+        {
+          loadAdjacency: async () => ({
+            getNeighbors: async () => [{ trackKey: key, count: 2, direction: 'after' as const }],
+            pairCount: 1,
+            trackCount: 1,
+            playCountOf,
+          }),
+          resolveTrack: async () => neighbor,
+          suggestNext: (a) => [{ track: neighbor, score: 0.5, reasons: [] }].slice(0, a.adjacency ? 1 : 0),
+        }
+      );
+    const without = (await run()).suggestions[0];
+    const withPc = (await run((k) => (k === key ? 100 : undefined))).suggestions[0];
+    expect(without.reasons.some((r) => /DJ set/.test(r.label))).toBe(false);
+    expect(withPc.reasons.some((r) => r.label === 'In 100 DJ sets')).toBe(true);
+    expect(withPc.score).toBeGreaterThan(without.score);
+    expect(withPc.score - without.score).toBeLessThanOrEqual(0.05);
+  });
+});

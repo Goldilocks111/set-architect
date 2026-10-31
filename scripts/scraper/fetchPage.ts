@@ -20,7 +20,7 @@ export interface FetcherOptions {
 }
 
 export interface Fetcher {
-  get(url: string): Promise<string>;
+  get(url: string, opts?: { headers?: Record<string, string> }): Promise<string>;
   search(query: string): Promise<string>;
 }
 
@@ -146,9 +146,9 @@ export function createFetcher(opts: FetcherOptions = {}): Fetcher {
   };
 
   return {
-    async get(url) {
+    async get(url, opts) {
       const safe = guard(url);
-      return cached(`GET ${safe}`, () => live(safe, { method: 'GET' }));
+      return cached(`GET ${safe}`, () => live(safe, { method: 'GET', headers: opts?.headers }));
     },
     async search(query) {
       const body = new URLSearchParams({ main_search: query, search_selection: '9' }).toString();

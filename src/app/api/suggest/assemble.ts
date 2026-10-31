@@ -13,7 +13,13 @@ export type AdjacencyHandle = {
   trackCount: number;
   /** Display artist/title the index recorded for a normalized trackKey. */
   nameOf?: (trackKey: string) => DisplayName | undefined;
+  /** Number of 1001TL sets a track appears in, when the live enrichment recorded it. */
+  playCountOf?: (trackKey: string) => number | undefined;
 };
+
+/** Max score added for DJ-set popularity; log-scaled so 1000+ sets saturates it. */
+export const PLAY_COUNT_MAX_BONUS = 0.05;
+export const playCountBonus = (n: number) => PLAY_COUNT_MAX_BONUS * Math.min(1, Math.log10(1 + n) / 3);
 
 /** Optional collaborators; anything missing, throwing or too slow degrades to the demo pool. */
 export interface SuggestDeps {
@@ -84,6 +90,7 @@ export async function assembleSuggestions(
   const adjacency = new Map<string, number>();
   const similarity = new Map<string, number>();
   const sampleKeys = new Set<string>();
+  let playCountOf: AdjacencyHandle['playCountOf'];
   const external: Array<{ artist: string; title: string; key: string }> = [];
   const deadline = Date.now() + (deps.budgetMs ?? SUGGEST_BUDGET_MS);
   const remaining = () => Math.max(0, deadline - Date.now());
@@ -99,6 +106,7 @@ export async function assembleSuggestions(
             (async () => {
               const handle = await deps.loadAdjacency!();
               nameOf = handle.nameOf;
+              playCountOf = handle.playCountOf;
               return handle.getNeighbors(lastKey);
             }),
           []
@@ -178,6 +186,19 @@ export async function assembleSuggestions(
     }
   }
 
+  if (playCountOf) {
+    let bonused = false;
+    for (const s of suggestions) {
+      const n = playCountOf(keyOf(s.track));
+      if (!n || n < 1 || sampleKeys.has(keyOf(s.track))) continue;
+      const bonus = playCountBonus(n);
+      s.score += bonus;
+      s.reasons.push({ kind: 'cooccurrence', label: `In ${n} DJ set${n === 1 ? '' : 's'}`, score: bonus / PLAY_COUNT_MAX_BONUS });
+      bonused = true;
+    }
+    if (bonused) suggestions.sort((a, b) => b.score - a.score);
+  }
+
   return { suggestions };
 }
 
@@ -214,6 +235,7 @@ export async function loadSuggestDeps(): Promise<SuggestDeps> {
         pairCount: real.pairCount,
         trackCount: real.trackCount,
         nameOf,
+        playCountOf: real.playCountOf,
         getNeighbors: async (key: string) => {
           const found = await real.getNeighbors(key);
           if (found.length) return found;
