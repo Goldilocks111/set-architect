@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { assembleSuggestions, displayFromKey, loadSuggestDeps, type SuggestDeps } from '@/app/api/suggest/assemble';
 import { demoTracks } from '@/lib/demo';
 import { trackKeyOf, type Track } from '@/types/track';
@@ -185,23 +185,30 @@ describe('neighbor display names (M1)', () => {
 });
 
 describe('time budget (M2)', () => {
+  afterEach(() => vi.useRealTimers());
   const never = <T,>() => new Promise<T>(() => {});
 
   it('caps hung adjacency and similarity lookups per call and still returns demo-pool suggestions', async () => {
-    const started = Date.now();
-    const res = await assembleSuggestions(
+    vi.useFakeTimers();
+    let res: Awaited<ReturnType<typeof assembleSuggestions>> | undefined;
+    const p = assembleSuggestions(
       { playlist: [last], template: '60min', plannedLength: 15 },
       { loadAdjacency: () => never(), getSimilarTracks: () => never(), callTimeoutMs: 50, budgetMs: 1000 }
-    );
-    expect(Date.now() - started).toBeLessThan(500);
-    expect(res.suggestions.length).toBeGreaterThan(0);
+    ).then((r) => (res = r));
+    // well inside the 1s budget: each hung lookup is cut at its 50ms cap
+    await vi.advanceTimersByTimeAsync(499);
+    vi.useRealTimers();
+    await p;
+    expect(res).toBeDefined();
+    expect(res!.suggestions.length).toBeGreaterThan(0);
   });
 
   it('drops resolves that miss the overall budget but keeps those that finished', async () => {
     const fast: Track = { id: 'fast', artist: 'Fast', title: 'One', bpm: 122, camelot: '9A', energy: 5, sources: {} };
     const suggestNext = vi.fn((_args: unknown) => []);
-    const started = Date.now();
-    await assembleSuggestions(
+    vi.useFakeTimers();
+    let done = false;
+    const p = assembleSuggestions(
       { playlist: [last], template: '60min', plannedLength: 15 },
       {
         getSimilarTracks: async () => [
@@ -212,8 +219,11 @@ describe('time budget (M2)', () => {
         budgetMs: 150,
         suggestNext,
       }
-    );
-    expect(Date.now() - started).toBeLessThan(600);
+    ).then(() => (done = true));
+    await vi.advanceTimersByTimeAsync(599);
+    expect(done).toBe(true);
+    vi.useRealTimers();
+    await p;
     const { candidates } = suggestNext.mock.calls[0][0] as { candidates: Track[] };
     const ids = candidates.map((c) => c.id);
     expect(ids).toContain('fast');

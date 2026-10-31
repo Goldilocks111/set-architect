@@ -146,13 +146,16 @@ describe('mergedSearch: accents (review focus 3)', () => {
 
 describe('mergedSearch: degradation (review focus 4)', () => {
   it('a provider that times out is reported as degraded, the rest still answer', async () => {
-    const { hits, degraded } = await mergedSearch('cola', {
+    vi.useFakeTimers();
+    const p = mergedSearch('cola', {
       timeoutMs: 30,
       providers: [
         prov('spotify', [res('spotify', 'CamelPhat', 'Cola')]),
         prov('itunes', () => new Promise(() => {})),
       ],
     });
+    await vi.advanceTimersByTimeAsync(30);
+    const { hits, degraded } = await p;
     expect(degraded).toEqual(['itunes']);
     expect(hits).toHaveLength(1);
   });
@@ -502,14 +505,18 @@ describe('mergedSearch: review fix round 1', () => {
   });
 
   it('does not ask a provider again in round two after it hung in round one', async () => {
+    vi.useFakeTimers();
     const hung = prov('spotify', () => new Promise(() => {}));
-    const t0 = Date.now();
-    await mergedSearch('CamelPhat Cola ZHU Remix', {
+    let settled = false;
+    const p = mergedSearch('CamelPhat Cola ZHU Remix', {
       timeoutMs: 40,
       providers: [hung, prov('deezer', [res('deezer', 'CamelPhat', 'Cola')])],
-    });
+    }).then(() => (settled = true));
+    // one timeout, not two: the search is done once the first round's 40ms timeout has passed
+    await vi.advanceTimersByTimeAsync(40);
+    expect(settled).toBe(true);
+    await p;
     expect(hung.search).toHaveBeenCalledTimes(1);
-    expect(Date.now() - t0).toBeLessThan(80);
   });
 });
 

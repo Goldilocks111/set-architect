@@ -34,11 +34,17 @@ describe('musicbrainzAdapter', () => {
   });
 
   it('spaces requests at least one gap apart', async () => {
+    vi.useFakeTimers();
     configureMusicBrainzLimiter(200);
     const times: number[] = [];
     mockFetch([['/isrc/', () => (times.push(Date.now()), json({ recordings: [{ id: 'm' }] }))]]);
-    await Promise.all([musicbrainzAdapter.enrich(base({ isrc: 'A' })), musicbrainzAdapter.enrich(base({ isrc: 'B' }))]);
-    expect(times[1] - times[0]).toBeGreaterThanOrEqual(190);
+    const both = Promise.all([musicbrainzAdapter.enrich(base({ isrc: 'A' })), musicbrainzAdapter.enrich(base({ isrc: 'B' }))]);
+    await vi.advanceTimersByTimeAsync(199);
+    expect(times).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await both;
+    expect(times[1] - times[0]).toBe(200);
+    vi.useRealTimers();
   });
 
   it('skips when an mbid is already known', async () => {
