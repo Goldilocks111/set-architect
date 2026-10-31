@@ -1,5 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mergedSearch, PROVIDER_TIMEOUT_MS, providerQuery, resetProviderBudgets, THROTTLE_COOLDOWN_MS } from '@/lib/search/merge';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { mergedSearch, PROVIDER_TIMEOUT_MS, providerQuery, resetProviderBudgets } from '@/lib/search/merge';
+import { THROTTLE_COOLDOWN_MS } from '@/lib/search/breaker';
 import { parseVersion } from '@/lib/search/version';
 import { HttpError } from '@/lib/http';
 import type { SearchProvider, SearchResult } from '@/lib/search/types';
@@ -28,6 +32,10 @@ function prov(name: Name, results: SearchResult[] | (() => Promise<SearchResult[
 }
 
 const labels = (hits: Array<{ version: { label?: string } }>) => hits.map((h) => h.version.label ?? '');
+
+beforeAll(() => {
+  process.env.SETARCHITECT_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'merge-test-'));
+});
 
 afterEach(() => {
   vi.useRealTimers();

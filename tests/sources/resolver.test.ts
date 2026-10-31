@@ -1,12 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { adapterHealth, resolveTrack, searchTracks } from '@/lib/resolver';
 import { configureMusicBrainzLimiter } from '@/lib/sources/musicbrainz';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { clearSearchCache } from '@/lib/search/cache';
+import { resetProviderBudgets } from '@/lib/search/merge';
 import { json, mockFetch } from './helpers';
 
 const deezerHit = { id: 1, title: 'T', rank: 500000, preview: 'dz-preview', artist: { name: 'A' } };
 const itunesHit = { trackId: 2, trackName: 'T', artistName: 'A', previewUrl: 'it-preview', trackViewUrl: 'it-url' };
 
 beforeEach(() => {
+  process.env.SETARCHITECT_DATA_DIR ??= fs.mkdtempSync(path.join(os.tmpdir(), 'resolver-test-'));
+  clearSearchCache();
+  resetProviderBudgets();
   configureMusicBrainzLimiter(0);
   for (const k of ['SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET', 'GETSONGBPM_API_KEY', 'SOUNDSTAT_API_KEY', 'YOUTUBE_API_KEY', 'LASTFM_API_KEY'])
     vi.stubEnv(k, '');

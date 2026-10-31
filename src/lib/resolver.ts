@@ -14,6 +14,7 @@ import { soundstatAdapter } from './sources/soundstat';
 import { spotifyAdapter } from './sources/spotify';
 import type { SourceAdapter } from './sources/types';
 import { youtubeAdapter } from './sources/youtube';
+import { cachedMergedSearch } from './search/cache';
 import { mergedSearch } from './search/merge';
 import { searchProviders } from './search/providers';
 import type { MergedHit } from './search/types';
@@ -111,7 +112,7 @@ export function hitToTrack(hit: MergedHit): Track {
 
 export async function searchTracks(query: string): Promise<Track[]> {
   const providers = searchProviders.filter((p) => p.configured());
-  const { hits, degraded } = await mergedSearch(query, { providers });
+  const { hits, degraded } = await cachedMergedSearch(query, (q) => mergedSearch(q, { providers }));
   if (!hits.length && degraded.length === providers.length) return searchDemoTracks(query);
   return hits.map(hitToTrack);
 }

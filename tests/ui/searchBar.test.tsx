@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import SearchBar from '@/components/SearchBar';
 import { baseTitleOf, fmtDuration, groupVersions } from '@/components/VersionChip';
 import type { Track } from '@/types/track';
@@ -52,5 +52,29 @@ describe('SearchBar', () => {
 
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onAdd).toHaveBeenCalledWith(results[0]);
+  });
+
+  it('debounces typing by at least 300ms and only searches the settled query', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ tracks: [] })));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<SearchBar onAdd={vi.fn()} inSet={new Set()} />);
+    const input = screen.getByRole('combobox');
+    for (const q of ['c', 'co', 'col', 'cola']) {
+      fireEvent.change(input, { target: { value: q } });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+    }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150);
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toContain('q=cola');
+    vi.useRealTimers();
   });
 });

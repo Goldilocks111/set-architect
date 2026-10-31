@@ -40,7 +40,7 @@ export default function SearchBar({ onAdd, inSet }: Props) {
       } catch (e) {
         if ((e as Error).name !== 'AbortError') setStatus('error');
       }
-    }, 250);
+    }, 300);
     return () => {
       clearTimeout(timer);
       ctrl.abort();

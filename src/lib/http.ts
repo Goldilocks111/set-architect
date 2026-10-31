@@ -7,9 +7,17 @@ export interface FetchOptions {
 }
 
 export class HttpError extends Error {
-  constructor(public status: number, url: string) {
+  constructor(public status: number, url: string, public retryAfterMs?: number) {
     super(`HTTP ${status} for ${url}`);
   }
+}
+
+/** Retry-After as milliseconds (delta-seconds or HTTP-date); undefined when absent or unparseable. */
+export function parseRetryAfter(value: string | null, now = Date.now()): number | undefined {
+  if (!value) return undefined;
+  if (/^\d+$/.test(value.trim())) return Number(value.trim()) * 1000;
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? Math.max(0, at - now) : undefined;
 }
 
 export const DEFAULT_TIMEOUT_MS = 4000;
@@ -31,7 +39,7 @@ export async function fetchWithTimeout(url: string, opts: FetchOptions = {}): Pr
         lastErr = new HttpError(res.status, url);
         continue;
       }
-      if (!res.ok) throw new HttpError(res.status, url);
+      if (!res.ok) throw new HttpError(res.status, url, parseRetryAfter(res.headers.get('retry-after')));
       return res;
     } catch (err) {
       if (timedOut) throw new Error(`Timeout after ${timeoutMs}ms for ${url}`);

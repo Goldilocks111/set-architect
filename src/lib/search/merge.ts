@@ -1,4 +1,5 @@
-import { HttpError, withTimeout } from '@/lib/http';
+import { withTimeout } from '@/lib/http';
+import { cooldownUntil, recordFailure, recordSuccess, resetBreakers } from './breaker';
 import { searchProviders } from './providers';
 import { parseVersion } from './version';
 import type { MergedHit, MergedSearchResponse, ParsedVersion, SearchProvider, SearchResult, VersionKind } from './types';
@@ -25,19 +26,9 @@ function takeBudget(name: SearchResult['provider'], now = Date.now()): boolean {
   return true;
 }
 
-/** After a throttling answer a provider is left alone for this long instead of being hammered further. */
-export const THROTTLE_COOLDOWN_MS = 5 * 60_000;
-const coolingUntil = new Map<string, number>();
-
-function isThrottle(name: SearchResult['provider'], err: unknown): boolean {
-  if (!(err instanceof HttpError)) return false;
-  // Apple signals its rate limit with 403 as well as 429.
-  return err.status === 429 || (name === 'itunes' && err.status === 403);
-}
-
 export function resetProviderBudgets(): void {
   recentCalls.clear();
-  coolingUntil.clear();
+  resetBreakers();
 }
 
 /** Two recordings with the same name but lengths further apart than this are different edits. */
@@ -392,11 +383,13 @@ export async function mergedSearch(
     const answers = await Promise.all(
       calls.map(async ([p, text]) => {
         try {
-          if ((coolingUntil.get(p.name) ?? 0) > Date.now()) throw new Error(`${p.name} cooling down after throttling`);
+          if (cooldownUntil(p.name)) throw new Error(`${p.name} cooling down after throttling`);
           if (!takeBudget(p.name)) throw new Error(`${p.name} over its request budget`);
-          return await withTimeout(p.search(providerQuery(p.name, text)), timeoutMs, `${p.name} search`);
+          const rs = await withTimeout(p.search(providerQuery(p.name, text)), timeoutMs, `${p.name} search`);
+          recordSuccess(p.name);
+          return rs;
         } catch (err) {
-          if (isThrottle(p.name, err)) coolingUntil.set(p.name, Date.now() + THROTTLE_COOLDOWN_MS);
+          recordFailure(p.name, err);
           degraded.add(p.name);
           return [];
         }
