@@ -97,10 +97,16 @@ export function budgetFor(name: string, env: Record<string, string | undefined> 
  * Wraps a provider so every call is gated by the shared budget, the breaker and a minimum gap.
  * A refused call throws BenchThrottled (never reaches the network); a 429 opens the shared breaker.
  */
-export function guardProvider<P extends { name: string; configured(): boolean; search(q: string, o?: any): Promise<any> }>(
-  p: P,
+export interface GuardedProvider<N extends string, R> {
+  name: N;
+  configured(): boolean;
+  search(query: string, opts?: { limit?: number }): Promise<R>;
+}
+
+export function guardProvider<N extends string, R>(
+  p: GuardedProvider<N, R>,
   o: { gate: RequestGate; breaker: Breaker | null; gapMs: number; onThrottle?: (e: BenchThrottled) => void; now?: () => number },
-): P {
+): GuardedProvider<N, R> {
   const now = o.now ?? Date.now;
   let last = -Infinity;
   const refuse = (reason: BenchThrottled['reason']): never => {
@@ -109,10 +115,9 @@ export function guardProvider<P extends { name: string; configured(): boolean; s
     throw e;
   };
   return {
-    ...p,
     name: p.name,
     configured: () => p.configured(),
-    search: async (q: string, opts?: any) => {
+    search: async (q: string, opts?: { limit?: number }) => {
       const t = now();
       if ((o.breaker?.cooldownUntil(p.name, t) ?? 0) > t) refuse('breaker');
       if (t - last < o.gapMs) refuse('pacing');
@@ -125,7 +130,7 @@ export function guardProvider<P extends { name: string; configured(): boolean; s
         throw err;
       }
     },
-  } as P;
+  };
 }
 
 export function degradedSummary(perQuery: string[][]): { text: string; invalid: string[] } {
