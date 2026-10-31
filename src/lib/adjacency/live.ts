@@ -5,7 +5,7 @@ import { BLOCK_STATUSES, SOFT_BLOCK_STATUS, FetchError, createFetcher, type Fetc
 import { BASE_URL, parseSearch } from '../../../scripts/scraper/parseSearch';
 import { parseTracklist } from '../../../scripts/scraper/parseTracklist';
 import { trackKeyOf } from '../../types/track';
-import { rekeyRecord, TRACK_KEY_VERSION } from '../keyMigration';
+import { dropStaleKeys, TRACK_KEY_VERSION } from '../keyMigration';
 import { JsonAdjacencyStore, type AdjacencyStore } from './store';
 
 export const SEARCHED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -93,9 +93,9 @@ export function createIngestor(deps: IngestorDeps) {
         const s = JSON.parse(readFileSync(deps.statePath, 'utf8')) as Partial<LiveState>;
         const state: LiveState = { searched: s.searched ?? {}, backoff: s.backoff ?? {}, pausedUntil: s.pausedUntil, keyVersion: s.keyVersion };
         if ((s.keyVersion ?? 1) < TRACK_KEY_VERSION) {
-          // keys written with an older trackKeyOf: re-key once, keeping the later timestamp on collisions
-          state.searched = rekeyRecord(state.searched, Math.max);
-          state.backoff = rekeyRecord(state.backoff, Math.max);
+          // keys written with an older trackKeyOf: drop the ones that may be stale (cheap to rebuild)
+          state.searched = dropStaleKeys(state.searched);
+          state.backoff = dropStaleKeys(state.backoff);
           state.keyVersion = TRACK_KEY_VERSION;
           writeState(state);
         }

@@ -51,7 +51,9 @@ function open(name: Name, ms: number, now: number): void {
   until = merged;
   streaks.delete(name);
   try {
-    fs.writeFileSync(file(), JSON.stringify(merged));
+    const tmp = `${file()}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(merged));
+    fs.renameSync(tmp, file());
     seenMtimeMs = fs.statSync(file()).mtimeMs;
   } catch {
     // persistence is best-effort; the in-memory breaker still holds

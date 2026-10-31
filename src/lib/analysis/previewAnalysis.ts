@@ -5,7 +5,7 @@ import { MPEGDecoder } from 'mpg123-decoder';
 import MusicTempo from 'music-tempo';
 import { fetchWithTimeout } from '../http';
 import type { Track } from '@/types/track';
-import { rekeyRecord, TRACK_KEY_VERSION } from '../keyMigration';
+import { dropStaleKeys, TRACK_KEY_VERSION } from '../keyMigration';
 
 const CACHE_FILE = dataDir('index', 'analysis.json');
 const MAX_BYTES = 2_000_000; // a 30s preview is ~500KB; refuse anything much larger
@@ -89,8 +89,8 @@ export async function readCache(file = CACHE_FILE): Promise<Record<string, Analy
   delete raw[KEY_VERSION_FIELD];
   let cache = raw as Record<string, Analysis>;
   if (version < TRACK_KEY_VERSION) {
-    // keys written with an older trackKeyOf: re-key once; on a collision the first analysis is kept
-    cache = rekeyRecord(cache, (a) => a);
+    // keys written with an older trackKeyOf: drop the ones that may be stale (re-analysed on demand)
+    cache = dropStaleKeys(cache);
     await writeCache(cache, file);
   }
   return cache;

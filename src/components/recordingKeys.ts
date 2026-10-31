@@ -1,3 +1,4 @@
+import { parseVersion } from '@/lib/search/version';
 import { trackKeyOf, type Track } from '@/types/track';
 
 /**
@@ -6,7 +7,9 @@ import { trackKeyOf, type Track } from '@/types/track';
  * that was down), so the id alone would let the same recording be added twice.
  */
 export function recordingKeys(t: Pick<Track, 'id' | 'artist' | 'title' | 'isrc' | 'version'>): string[] {
-  const keys = [t.id, `rec:${trackKeyOf(t.artist, t.title)}|${(t.version ?? '').toLowerCase()}`];
+  // a track saved before version labels existed carries its version only in the title
+  const version = t.version ?? parseVersion(t.title, [t.artist]).label ?? '';
+  const keys = [t.id, `rec:${trackKeyOf(t.artist, t.title)}|${version.toLowerCase()}`];
   if (t.isrc) keys.push(`isrc:${t.isrc.toUpperCase()}`);
   return keys;
 }
