@@ -4,11 +4,10 @@ const nextConfig: NextConfig = {
   /* config options here */
   cacheComponents: true,
   partialPrefetching: true,
-  // Playwright MCP writes logs into .playwright-mcp/ at runtime; without this ignore,
-  // every write triggers a Turbopack rebuild -> Fast Refresh loop (page "flickers").
-  watchOptions: {
-    ignored: ["**/.playwright-mcp/**", "**/data/cache/**", "**/data/index/**"],
-  },
+  // NOTE: Turbopack (Next 16) has no watch-ignore option. Any runtime write inside the
+  // project triggers a rebuild -> Fast Refresh loop (page "flickers"). Therefore ALL
+  // runtime data (adjacency index, caches, analysis results) lives OUTSIDE the project,
+  // in ~/.setarchitect (see src/lib/dataDir.ts). Never write runtime files into the repo.
   turbopack: {
     rules: {
       "*.css": {

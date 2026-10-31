@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { dataDir } from '../../src/lib/dataDir';
 import { BASE_URL } from './parseSearch';
 
 export const USER_AGENT = 'SetArchitect/0.1 (personal research tool)';
@@ -48,8 +49,8 @@ export const SOFT_BLOCK_STATUS = 206;
 const MAX_REDIRECTS = 5;
 
 export function createFetcher(opts: FetcherOptions = {}): Fetcher {
-  const cacheDir = opts.cacheDir ?? path.join(process.cwd(), 'data', 'cache', '1001tl');
-  const cookiePath = opts.cookiePath ?? path.join(process.cwd(), 'data', 'cache', 'cookies.json');
+  const cacheDir = opts.cacheDir ?? dataDir('cache', '1001tl');
+  const cookiePath = opts.cookiePath ?? dataDir('cache', 'cookies.json');
   const doFetch = opts.fetchImpl ?? fetch;
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));

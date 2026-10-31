@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { dataDir } from '@/lib/dataDir';
 import { BLOCK_STATUSES, SOFT_BLOCK_STATUS, FetchError, createFetcher, type Fetcher } from '../../../scripts/scraper/fetchPage';
 import { BASE_URL, parseSearch } from '../../../scripts/scraper/parseSearch';
 import { parseTracklist } from '../../../scripts/scraper/parseTracklist';
@@ -13,7 +14,7 @@ export const SOFT_PAUSE_MS = 60 * 60 * 1000;
 export const RESUME_DELAY_SCALE = 2;
 export const TOP_TRACKLISTS = 3;
 
-export const LIVE_STATE_PATH = path.join(process.cwd(), 'data', 'index', 'live-state.json');
+export const LIVE_STATE_PATH = dataDir('index', 'live-state.json');
 
 interface LiveState {
   searched: Record<string, number>; // trackKey -> searched-at (ms)
@@ -220,7 +221,7 @@ function singleton(): Ingestor {
   const g = globalThis as unknown as Record<symbol, Ingestor | undefined>;
   return (g[GLOBAL_KEY] ??= createIngestor({
     fetcher: createFetcher(),
-    store: new JsonAdjacencyStore(path.join(process.cwd(), 'data', 'index', 'adjacency.json')),
+    store: new JsonAdjacencyStore(dataDir('index', 'adjacency.json')),
     statePath: LIVE_STATE_PATH,
     log: (line) => console.log(line),
   }));

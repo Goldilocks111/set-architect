@@ -1,11 +1,12 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { dataDir } from '@/lib/dataDir';
 import { MPEGDecoder } from 'mpg123-decoder';
 import MusicTempo from 'music-tempo';
 import { fetchWithTimeout } from '../http';
 import type { Track } from '@/types/track';
 
-const CACHE_FILE = path.join(process.cwd(), 'data', 'index', 'analysis.json');
+const CACHE_FILE = dataDir('index', 'analysis.json');
 const MAX_BYTES = 2_000_000; // a 30s preview is ~500KB; refuse anything much larger
 export const ANALYSIS_TIMEOUT_MS = 8000;
 

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { dataDir } from '@/lib/dataDir';
 import type { AdjacencyLookup } from '../../types/track';
 import { JsonAdjacencyStore } from './store';
 
@@ -6,7 +7,7 @@ export * from './store';
 export { ensureNeighborsFor, isDigging } from './live';
 export { buildDemoAdjacency, DEMO_ADJACENCY_PATH, DEMO_TRACKS_PATH } from './demo';
 
-export const ADJACENCY_PATH = path.join(process.cwd(), 'data', 'index', 'adjacency.json');
+export const ADJACENCY_PATH = dataDir('index', 'adjacency.json');
 
 export async function loadAdjacency(
   file: string = ADJACENCY_PATH
