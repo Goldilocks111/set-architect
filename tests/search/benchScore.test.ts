@@ -96,8 +96,7 @@ describe('strict artist matching', () => {
     expect(isHit(track('Above & Beyond', 'Song'), [{ artist: 'Above & Beyond', baseTitle: 'Song' }])).toBe(true);
     expect(isHit(track('Above & Beyond', 'Song'), [{ artist: 'Above, Beyond', baseTitle: 'Song' }])).toBe(true);
   });
-  it('requires the lead artist, not a secondary one', () => {
-    miss('CamelPhat, Elderbrook', 'CamelPhat, Elderbrook', 'Elderbrook');
+  it('accepts any credited artist, in any order', () => {
     expect(isHit(track('CamelPhat, Elderbrook', 'Song'), [{ artist: 'Elderbrook, CamelPhat', baseTitle: 'Song' }])).toBe(true);
   });
   it('versionCorrect rejects a tribute act', () => {
@@ -149,14 +148,18 @@ describe('combined and lead-only artist credits', () => {
     expect(hit('Above & Beyond', 'Above & Beyond & Richard Bedford')).toBe(true);
     expect(hit('Above & Beyond', 'Above')).toBe(false);
     expect(hit('Above & Beyond', 'Beyond & Richard Bedford')).toBe(false);
+    expect(hit('Above & Beyond', 'Richard Bedford')).toBe(false);
   });
   it('accepts a lead-only credit (Deezer lists the main artist)', () => {
     expect(hit('Skrillex, Solomun', 'Skrillex')).toBe(true);
     expect(hit('Dombresky, Disco Dom', 'Dombresky')).toBe(true);
   });
-  it('still rejects a secondary-only credit and impostors', () => {
-    expect(hit('CamelPhat, Elderbrook', 'Elderbrook')).toBe(false);
-    expect(hit('Skrillex, Solomun', 'Solomun')).toBe(false);
+  it('accepts a secondary-only credit but still rejects impostors', () => {
+    expect(hit('CamelPhat, Elderbrook', 'Elderbrook')).toBe(true);
+    expect(hit('Skrillex, Solomun', 'Solomun')).toBe(true);
+    expect(hit('Dombresky, Disco Dom', 'Disco Dom')).toBe(true);
+    expect(hit('Skrillex, Solomun', 'Solomun Fan Club')).toBe(false);
+    expect(hit('Skrillex, Solomun', 'Someone Else')).toBe(false);
     expect(hit('Disclosure', 'Disclosure Fan Club')).toBe(false);
     expect(hit('Disclosure', 'Tribute to Disclosure')).toBe(false);
     expect(hit('Chase & Status', 'Status Quo')).toBe(false);
@@ -167,7 +170,8 @@ describe('combined and lead-only artist credits', () => {
     expect(hit('Rüfüs Du Sol', 'RÜFÜS')).toBe(false);
     expect(artistRule('Rüfüs Du Sol', 'RÜFÜS', al)).toBe('alias');
     expect(artistRule('Rüfüs Du Sol', 'RÜFÜS DU SOL')).toBe('exact');
-    expect(artistRule('CamelPhat, Elderbrook', 'CamelPhat')).toBe('lead-subset');
+    expect(artistRule('CamelPhat, Elderbrook', 'CamelPhat')).toBe('subset-with-lead');
+    expect(artistRule('CamelPhat, Elderbrook', 'Elderbrook')).toBe('subset-secondary-only');
     expect(artistRule('CamelPhat, Elderbrook', 'Elderbrook, CamelPhat')).toBe('exact');
     expect(hitDetail(track('Fisher', 'Cola'), [{ artist: 'Fisher', baseTitle: 'Cola' }])).toEqual({ rank: 0, via: 'exact' });
   });

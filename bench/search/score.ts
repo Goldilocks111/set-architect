@@ -46,15 +46,16 @@ export const DURATION_WINDOW_MS = 10_000;
 
 const compact = (s: string) => s.replace(/ /g, '');
 
-export type ArtistRule = 'exact' | 'lead-subset' | 'alias';
+export type ArtistRule = 'exact' | 'subset-with-lead' | 'subset-secondary-only' | 'alias';
 
 /**
  * Credited fixture artists (comma-separated, lead first) map every accepted spelling to a credit index.
  * The result string is split on ",", "&", "and", "x" only where the pieces are credited artists, so a
  * credited duo such as "Above & Beyond" stays whole unless both halves are credited on their own.
- * HIT = the lead artist is credited on the result. Other credited artists may be missing (Deezer lists
- * only the main artist) and extra uncredited artists may appear (iTunes joins featured artists).
- * A lead that is merely part of a longer name ("Disclosure Fan Club") never matches.
+ * HIT = at least one credited artist is on the result. Other credited artists may be missing (Deezer lists
+ * a single artist) and extra uncredited artists may appear (iTunes joins featured artists). A credited name
+ * that is merely part of a longer name ("Disclosure Fan Club") never matches. Hits that rest on a
+ * non-lead credit alone are tagged 'subset-secondary-only' so they can be audited by hand.
  */
 export function artistRule(
   expected: string,
@@ -91,9 +92,10 @@ export function artistRule(
     }
     if (!took) i++;
   }
-  if (!found.has(0)) return null;
+  if (found.size === 0) return null;
   if ([...found.values()].some(Boolean)) return 'alias';
-  return found.size === credits.length ? 'exact' : 'lead-subset';
+  if (found.size === credits.length) return 'exact';
+  return found.has(0) ? 'subset-with-lead' : 'subset-secondary-only';
 }
 
 function artistMatches(expected: string, actual: string, aliases?: Record<string, string[]>): boolean {

@@ -201,10 +201,17 @@ async function runTarget(t: Target) {
     requests: t.name === 'merged' ? sumGates() - mergedStart : (gates.get(t.name)?.count ?? 0) - startCount,
     degraded: '',
     throttledByBench: '',
+    secondaryOnlyHits: 0,
     status: 'ok',
   };
   const dg = t.degraded ? degradedSummary(t.degraded) : { text: '', invalid: [] as string[] };
   summary.degraded = dg.text;
+  const secondary = trackRows.filter((r) => r.via === 'subset-secondary-only');
+  summary.secondaryOnlyHits = secondary.length;
+  if (secondary.length) {
+    console.log(`${t.name}: ${secondary.length} subset-secondary-only hit(s) to inspect by hand:`);
+    for (const r of secondary) console.log(`  ${r.id} <- ${r.matched?.artist} / ${r.matched?.title}`);
+  }
   if (t.throttled) summary.throttledByBench = degradedSummary(t.throttled).text;
   const erroredN = summary.erroredQueries;
   summary.status = runStatus({
