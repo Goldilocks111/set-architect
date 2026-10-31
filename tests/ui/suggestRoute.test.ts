@@ -1,0 +1,294 @@
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { assembleSuggestions, displayFromKey, loadSuggestDeps, type SuggestDeps } from '@/app/api/suggest/assemble';
+import { demoTracks } from '@/lib/demo';
+import { trackKeyOf, type Track } from '@/types/track';
+
+const mocks = vi.hoisted(() => ({
+  resolver: {
+    searchTracks: vi.fn(),
+    resolveTrack: vi.fn(),
+    getSimilarTracks: vi.fn(),
+  },
+  adjacency: {
+    loadAdjacency: vi.fn(),
+    readData: vi.fn(),
+    ADJACENCY_PATH: '/index/adjacency.json',
+    DEMO_ADJACENCY_PATH: '/seed/adjacency.demo.json',
+  },
+}));
+
+vi.mock('@/lib/resolver', () => mocks.resolver);
+vi.mock('@/lib/adjacency', () => mocks.adjacency);
+
+const seed = demoTracks();
+const last = seed[0];
+
+describe('assembleSuggestions (demo data, no external deps)', () => {
+  it('returns ≤10 suggestions, each with reasons, from the demo pool', async () => {
+    const res = await assembleSuggestions({ playlist: [last], template: '60min', plannedLength: 15 }, {});
+    expect(res.suggestions.length).toBeGreaterThan(0);
+    expect(res.suggestions.length).toBeLessThanOrEqual(10);
+    for (const s of res.suggestions) {
+      expect(s.reasons.length).toBeGreaterThan(0);
+      expect(Number.isFinite(s.score)).toBe(true);
+    }
+  });
+
+  it('never suggests a track already in the set (by id or by artist/title key)', async () => {
+    const dupWithOtherId: Track = { ...seed[1], id: 'resolved-xyz' };
+    const deps: SuggestDeps = {
+      getSimilarTracks: async () => [{ artist: seed[1].artist, title: seed[1].title, match: 0.9 }],
+      resolveTrack: async () => dupWithOtherId,
+    };
+    const res = await assembleSuggestions(
+      { playlist: [seed[1], last], template: '60min', plannedLength: 15 },
+      deps
+    );
+    const keys = res.suggestions.map((s) => trackKeyOf(s.track.artist, s.track.title));
+    expect(keys).not.toContain(trackKeyOf(seed[1].artist, seed[1].title));
+    expect(keys).not.toContain(trackKeyOf(last.artist, last.title));
+  });
+
+  it('works with an empty set (arc-start suggestions)', async () => {
+    const res = await assembleSuggestions({ playlist: [], template: '120min', plannedLength: 30 }, {});
+    expect(res.suggestions.length).toBe(10);
+  });
+
+  it('adds adjacency neighbors (after-direction) and similar tracks to candidates and passes maps', async () => {
+    const neighbor: Track = { id: 'ext-1', artist: 'Outside', title: 'Neighbor', bpm: 122, camelot: '9A', energy: 5, sources: {} };
+    const similar: Track = { id: 'ext-2', artist: 'Other', title: 'Similar', bpm: 122, camelot: '9A', energy: 5, sources: {} };
+    const getNeighbors = vi.fn(async () => [
+      { trackKey: trackKeyOf('Outside', 'Neighbor'), count: 4, direction: 'after' as const },
+      { trackKey: trackKeyOf('Before', 'Only'), count: 9, direction: 'before' as const },
+    ]);
+    const resolveTrack = vi.fn(async (artist: string, title: string) =>
+      trackKeyOf(artist, title) === trackKeyOf('Outside', 'Neighbor') ? neighbor : similar
+    );
+    const suggestNext = vi.fn((_args: unknown) => []);
+    await assembleSuggestions(
+      { playlist: [last], template: '60min', plannedLength: 15 },
+      {
+        loadAdjacency: async () => ({ getNeighbors, pairCount: 1, trackCount: 2 }),
+        getSimilarTracks: async () => [{ artist: 'Other', title: 'Similar', match: 0.7 }],
+        resolveTrack,
+        suggestNext,
+      }
+    );
+    expect(getNeighbors).toHaveBeenCalledWith(trackKeyOf(last.artist, last.title));
+    const args = suggestNext.mock.calls[0][0] as {
+      candidates: Track[];
+      adjacency: Map<string, number>;
+      similarity: Map<string, number>;
+    };
+    const ids = args.candidates.map((c) => c.id);
+    expect(ids).toContain('ext-1');
+    expect(ids).toContain('ext-2');
+    expect(args.adjacency.get(trackKeyOf('Outside', 'Neighbor'))).toBe(4);
+    expect(args.adjacency.has(trackKeyOf('Before', 'Only'))).toBe(false);
+    expect(args.similarity.get(trackKeyOf('Other', 'Similar'))).toBe(0.7);
+    expect(resolveTrack).toHaveBeenCalledTimes(2);
+  });
+
+  it('degrades to demo pool when deps throw', async () => {
+    const res = await assembleSuggestions(
+      { playlist: [last], template: '60min', plannedLength: 15 },
+      {
+        loadAdjacency: async () => {
+          throw new Error('no index');
+        },
+        getSimilarTracks: async () => {
+          throw new Error('offline');
+        },
+      }
+    );
+    expect(res.suggestions.length).toBeGreaterThan(0);
+  });
+});
+
+describe('POST /api/suggest', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mocks.adjacency.loadAdjacency.mockRejectedValue(new Error('missing'));
+    mocks.resolver.getSimilarTracks.mockResolvedValue([]);
+  });
+
+  it('returns ≤10 suggestions with reasons in demo mode', async () => {
+    const { POST } = await import('@/app/api/suggest/route');
+    const res = await POST(
+      new Request('http://x/api/suggest', {
+        method: 'POST',
+        body: JSON.stringify({ playlist: [last], template: '60min' }),
+      })
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.suggestions.length).toBeGreaterThan(0);
+    expect(body.suggestions.length).toBeLessThanOrEqual(10);
+    expect(body.suggestions[0].reasons.length).toBeGreaterThan(0);
+  });
+
+  it('rejects a malformed body with 400', async () => {
+    const { POST } = await import('@/app/api/suggest/route');
+    const res = await POST(new Request('http://x/api/suggest', { method: 'POST', body: 'not json' }));
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('neighbor display names (M1)', () => {
+  const key = trackKeyOf('Ben Böhmer', 'Breathing In');
+  const neighbors = async () => [{ trackKey: key, count: 3, direction: 'after' as const }];
+
+  it('resolves neighbors with the display names the index recorded, not the normalized key', async () => {
+    const resolveTrack = vi.fn(async (artist: string, title: string) => ({ id: 'r1', artist, title, sources: {} }) as Track);
+    const suggestNext = vi.fn((_args: unknown) => []);
+    await assembleSuggestions(
+      { playlist: [last], template: '60min', plannedLength: 15 },
+      {
+        loadAdjacency: async () => ({
+          getNeighbors: neighbors,
+          pairCount: 1,
+          trackCount: 2,
+          nameOf: (k) => (k === key ? { artist: 'Ben Böhmer', title: 'Breathing In' } : undefined),
+        }),
+        resolveTrack,
+        suggestNext,
+      }
+    );
+    expect(resolveTrack).toHaveBeenCalledWith('Ben Böhmer', 'Breathing In');
+    const { candidates } = suggestNext.mock.calls[0][0] as { candidates: Track[] };
+    expect(candidates[0]).toMatchObject({ id: 'r1', artist: 'Ben Böhmer', title: 'Breathing In' });
+  });
+
+  it('falls back to title-cased key parts when the index has no display name', async () => {
+    expect(displayFromKey('ben bohmer|breathing in')).toEqual({ artist: 'Ben Bohmer', title: 'Breathing In' });
+    const resolveTrack = vi.fn(async (artist: string, title: string) => ({ id: 'r1', artist, title, sources: {} }) as Track);
+    await assembleSuggestions(
+      { playlist: [last], template: '60min', plannedLength: 15 },
+      { loadAdjacency: async () => ({ getNeighbors: neighbors, pairCount: 1, trackCount: 2 }), resolveTrack }
+    );
+    expect(resolveTrack).toHaveBeenCalledWith('Ben Bohmer', 'Breathing In');
+  });
+
+  it("prefers the resolver's canonical names when it returns them", async () => {
+    const suggestNext = vi.fn((_args: unknown) => []);
+    await assembleSuggestions(
+      { playlist: [last], template: '60min', plannedLength: 15 },
+      {
+        loadAdjacency: async () => ({ getNeighbors: neighbors, pairCount: 1, trackCount: 2 }),
+        resolveTrack: async () => ({ id: 'r1', artist: 'Ben Böhmer', title: 'Breathing In (Original Mix)', sources: {} }),
+        suggestNext,
+      }
+    );
+    const { candidates } = suggestNext.mock.calls[0][0] as { candidates: Track[] };
+    expect(candidates[0]).toMatchObject({ artist: 'Ben Böhmer', title: 'Breathing In (Original Mix)' });
+  });
+});
+
+describe('time budget (M2)', () => {
+  const never = <T,>() => new Promise<T>(() => {});
+
+  it('caps hung adjacency and similarity lookups per call and still returns demo-pool suggestions', async () => {
+    const started = Date.now();
+    const res = await assembleSuggestions(
+      { playlist: [last], template: '60min', plannedLength: 15 },
+      { loadAdjacency: () => never(), getSimilarTracks: () => never(), callTimeoutMs: 50, budgetMs: 1000 }
+    );
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(res.suggestions.length).toBeGreaterThan(0);
+  });
+
+  it('drops resolves that miss the overall budget but keeps those that finished', async () => {
+    const fast: Track = { id: 'fast', artist: 'Fast', title: 'One', bpm: 122, camelot: '9A', energy: 5, sources: {} };
+    const suggestNext = vi.fn((_args: unknown) => []);
+    const started = Date.now();
+    await assembleSuggestions(
+      { playlist: [last], template: '60min', plannedLength: 15 },
+      {
+        getSimilarTracks: async () => [
+          { artist: 'Fast', title: 'One', match: 0.9 },
+          { artist: 'Slow', title: 'Two', match: 0.8 },
+        ],
+        resolveTrack: (artist) => (artist === 'Fast' ? Promise.resolve(fast) : never<Track>()),
+        budgetMs: 150,
+        suggestNext,
+      }
+    );
+    expect(Date.now() - started).toBeLessThan(600);
+    const { candidates } = suggestNext.mock.calls[0][0] as { candidates: Track[] };
+    const ids = candidates.map((c) => c.id);
+    expect(ids).toContain('fast');
+    expect(ids.some((id) => id.startsWith('demo-'))).toBe(true);
+    expect(candidates.find((c) => c.artist === 'Slow')).toBeUndefined();
+  });
+});
+
+describe('loadSuggestDeps demo-adjacency fallback (M3)', () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it('uses the scraped index first, falls back to the demo index on a miss, and exposes display names', async () => {
+    const demoOnlyKey = trackKeyOf('Outside Artist', 'Not In Pool');
+    const realGet = vi.fn(async (k: string) =>
+      k === 'real|hit' ? [{ trackKey: 'real|next', count: 7, direction: 'after' as const }] : []
+    );
+    const demoGet = vi.fn(async () => [{ trackKey: demoOnlyKey, count: 4, direction: 'after' as const }]);
+    mocks.adjacency.loadAdjacency.mockImplementation(async (file?: string) =>
+      file === '/seed/adjacency.demo.json'
+        ? { getNeighbors: demoGet, pairCount: 1, trackCount: 2 }
+        : { getNeighbors: realGet, pairCount: 9, trackCount: 20 }
+    );
+    mocks.adjacency.readData.mockImplementation((file: string) => ({
+      names:
+        file === '/seed/adjacency.demo.json'
+          ? { [demoOnlyKey]: { artist: 'Outside Artist', title: 'Not In Pool' } }
+          : {},
+    }));
+    mocks.resolver.resolveTrack.mockImplementation(async (artist: string, title: string) => ({
+      id: 'resolved-outside',
+      artist,
+      title,
+      bpm: 122,
+      camelot: '9A',
+      energy: 5,
+      sources: {},
+    }));
+    mocks.resolver.getSimilarTracks.mockResolvedValue([]);
+
+    const deps = await loadSuggestDeps();
+    const handle = await deps.loadAdjacency!();
+    expect(await handle.getNeighbors('real|hit')).toEqual([{ trackKey: 'real|next', count: 7, direction: 'after' }]);
+    expect(demoGet).not.toHaveBeenCalled();
+    expect(await handle.getNeighbors(trackKeyOf(last.artist, last.title))).toEqual([
+      { trackKey: demoOnlyKey, count: 4, direction: 'after', sample: true },
+    ]);
+    expect(handle.nameOf?.(demoOnlyKey)).toEqual({ artist: 'Outside Artist', title: 'Not In Pool' });
+
+    const suggestNext = vi.fn((_args: unknown) => []);
+    await assembleSuggestions({ playlist: [last], template: '60min', plannedLength: 15 }, { ...deps, suggestNext });
+    const args = suggestNext.mock.calls[0][0] as { candidates: Track[]; adjacency: Map<string, number> };
+    expect(args.adjacency.get(demoOnlyKey)).toBe(4);
+    expect(mocks.resolver.resolveTrack).toHaveBeenCalledWith('Outside Artist', 'Not In Pool');
+    expect(args.candidates.find((c) => c.id === 'resolved-outside')).toMatchObject({
+      artist: 'Outside Artist',
+      title: 'Not In Pool',
+    });
+  });
+
+  it('a pool track found via the demo index gets the adjacency count without a resolve', async () => {
+    const poolKey = trackKeyOf(seed[1].artist, seed[1].title);
+    mocks.adjacency.loadAdjacency.mockImplementation(async (file?: string) => ({
+      getNeighbors: async () =>
+        file === '/seed/adjacency.demo.json' ? [{ trackKey: poolKey, count: 5, direction: 'after' as const }] : [],
+      pairCount: 0,
+      trackCount: 0,
+    }));
+    mocks.adjacency.readData.mockReturnValue({ names: {} });
+    mocks.resolver.getSimilarTracks.mockResolvedValue([]);
+    const deps = await loadSuggestDeps();
+    const suggestNext = vi.fn((_args: unknown) => []);
+    await assembleSuggestions({ playlist: [last], template: '60min', plannedLength: 15 }, { ...deps, suggestNext });
+    const args = suggestNext.mock.calls[0][0] as { candidates: Track[]; adjacency: Map<string, number> };
+    expect(args.adjacency.get(poolKey)).toBe(5);
+    expect(mocks.resolver.resolveTrack).not.toHaveBeenCalled();
+    expect(args.candidates.some((c) => c.id === seed[1].id)).toBe(true);
+  });
+});
