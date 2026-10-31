@@ -29,6 +29,13 @@ through subagents working off `docs/specs/build-plan.md`.
 - All third-party keys live in `.env` (gitignored); `.env.example` lists names only.
 - Subagents write progress back to docs/specs/build-plan.md (checkboxes + notes per task).
 
+## Provider quotas (hard-won — 2026-11-01)
+- Spotify dev-mode app: heavy benchmark traffic (~500 search calls in a few hours across agents)
+  triggered a 429 with Retry-After ≈ 13.8h — the WHOLE app (incl. Spotify Connect) is locked out.
+- iTunes Search API: ~20 req/min; bursts above that → IP-level 403 lasting hours.
+- Rules: one agent owns each provider's live traffic at a time; benchmarks run with per-provider
+  request budgets; the merger has a circuit breaker honoring Retry-After; search results cached 24h.
+
 ## Log
 - 2026-10-31: Project kicked off. 4 research agents ran (1001TL access, audio-feature APIs,
   mixing theory + similarity/previews, asset inventory). Verdicts in docs/research/. Git repo
