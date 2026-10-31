@@ -107,9 +107,14 @@ export function createIngestor(deps: IngestorDeps) {
     const results = parseSearch(await deps.fetcher.search(`${job.artist} ${job.title}`)).slice(0, TOP_TRACKLISTS);
     for (const r of results) {
       if (await deps.store.hasTracklist(r.id)) continue;
-      const tl = parseTracklist(await deps.fetcher.get(r.url));
-      await deps.store.ingest(tl.id, tl.tracks);
-      log(`live: indexed ${tl.id} (${tl.tracks.length} tracks) for ${job.key}`);
+      try {
+        const tl = parseTracklist(await deps.fetcher.get(r.url));
+        await deps.store.ingest(tl.id, tl.tracks);
+        log(`live: indexed ${tl.id} (${tl.tracks.length} tracks) for ${job.key}`);
+      } catch (err) {
+        if (isBlock(err)) throw err;
+        log(`live: skipped ${r.url}: ${(err as Error).message}`);
+      }
     }
     try {
       const q = encodeURIComponent(`${job.artist} ${job.title}`);

@@ -162,3 +162,21 @@ describe('parsePlayCount', () => {
     expect(parsePlayCount('not json', 'Bicep', 'Glue')).toBeUndefined();
   });
 });
+
+describe('partial failures', () => {
+  it('skips a tracklist that fails with a non-block error and still finishes the job', async () => {
+    let tl = 0;
+    const f: Fetcher = {
+      ...fetcher,
+      async get(url) {
+        if (url.includes('/tracklist/') && tl++ === 0) throw new FetchError(206, url);
+        return fetcher.get(url);
+      },
+    };
+    const live = createIngestor({ fetcher: f, store, statePath, now: () => clock });
+    await live.ensureNeighborsFor('Bicep', 'Glue');
+    await live.whenIdle();
+    expect(state().searched[trackKeyOf('Bicep', 'Glue')]).toBe(clock);
+    expect(await store.hasTracklist('9ycgytk')).toBe(true);
+  });
+});
