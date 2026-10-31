@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import { useCallback, useEffect, useState } from "react";
-import type { Track } from "@/types/track";
-import SpotifyImport from "./SpotifyImport";
+import { useCallback, useEffect, useState } from 'react';
+import type { Track } from '@/types/track';
+import SpotifyImport from './SpotifyImport';
 
 interface Props {
   tracks: Track[];
@@ -24,11 +24,11 @@ export default function SpotifyConnect({ tracks, onAdd }: Props) {
 
   const refresh = useCallback(async () => {
     try {
-      const body = (await (await fetch("/api/spotify/status")).json()) as {
+      const body = (await (await fetch('/api/spotify/status')).json()) as {
         connected?: boolean;
         displayName?: string;
       };
-      setName(body.connected ? (body.displayName ?? "Spotify") : null);
+      setName(body.connected ? (body.displayName ?? 'Spotify') : null);
     } catch {
       setName(null);
     } finally {
@@ -38,15 +38,14 @@ export default function SpotifyConnect({ tracks, onAdd }: Props) {
 
   useEffect(() => {
     refresh();
-    const q = new URLSearchParams(window.location.search).get("spotify");
-    if (q === "denied")
-      setMessage({ text: "Spotify connection was cancelled.", error: true });
-    else if (q === "error")
+    const q = new URLSearchParams(window.location.search).get('spotify');
+    if (q === 'denied') setMessage({ text: 'Spotify connection was cancelled.', error: true });
+    else if (q === 'error')
       setMessage({
-        text: "Could not connect to Spotify. Try again.",
+        text: 'Could not connect to Spotify. Try again.',
         error: true,
       });
-    if (q) window.history.replaceState(null, "", window.location.pathname);
+    if (q) window.history.replaceState(null, '', window.location.pathname);
   }, [refresh]);
 
   const exportable = tracks.filter((t) => t.spotifyId);
@@ -57,9 +56,9 @@ export default function SpotifyConnect({ tracks, onAdd }: Props) {
     setSaving(true);
     setMessage(null);
     try {
-      const res = await fetch("/api/spotify/export", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/spotify/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: `Set Architect ${new Date().toISOString().slice(0, 10)}`,
           spotifyIds: exportable.map((t) => t.spotifyId),
@@ -77,16 +76,16 @@ export default function SpotifyConnect({ tracks, onAdd }: Props) {
       else if (res.status === 401) {
         setName(null);
         setMessage({
-          text: "Spotify session expired. Reconnect.",
+          text: 'Spotify session expired. Reconnect.',
           error: true,
         });
       } else
         setMessage({
-          text: body.error ?? "Could not save to Spotify.",
+          text: body.error ?? 'Could not save to Spotify.',
           error: true,
         });
     } catch {
-      setMessage({ text: "Could not save to Spotify.", error: true });
+      setMessage({ text: 'Could not save to Spotify.', error: true });
     } finally {
       setSaving(false);
     }
@@ -94,24 +93,18 @@ export default function SpotifyConnect({ tracks, onAdd }: Props) {
 
   const disconnect = async () => {
     setMenu(false);
-    await fetch("/api/spotify/session", { method: "DELETE" }).catch(
-      () => undefined,
-    );
+    await fetch('/api/spotify/session', { method: 'DELETE' }).catch(() => undefined);
     setName(null);
   };
 
-  const btn =
-    "rounded-md px-2 py-1 text-[13px] focus-visible:outline-2 focus-visible:outline-[#1DB954]";
+  const btn = 'rounded-md px-2 py-1 text-[13px] focus-visible:outline-2 focus-visible:outline-[#1DB954]';
   const item =
-    "block w-full rounded px-3 py-1.5 text-left text-[13px] hover:bg-[#232736] disabled:opacity-40 disabled:hover:bg-transparent";
+    'block w-full rounded px-3 py-1.5 text-left text-[13px] hover:bg-[#232736] disabled:opacity-40 disabled:hover:bg-transparent';
 
   return (
     <div className="relative flex items-center gap-2">
       {!checked ? null : name === null ? (
-        <a
-          href="/api/spotify/login"
-          className={`${btn} bg-[#1DB954] font-medium text-[#12141C]`}
-        >
+        <a href="/api/spotify/login" className={`${btn} bg-[#1DB954] font-medium text-[#12141C]`}>
           Connect Spotify
         </a>
       ) : (
@@ -124,7 +117,7 @@ export default function SpotifyConnect({ tracks, onAdd }: Props) {
             onClick={() => setMenu((m) => !m)}
             className={`${btn} border border-[#1DB954] text-[#1DB954] disabled:opacity-50`}
           >
-            {saving ? "Saving…" : name}
+            {saving ? 'Saving…' : name}
           </button>
           {menu && (
             <div
@@ -147,21 +140,12 @@ export default function SpotifyConnect({ tracks, onAdd }: Props) {
                 role="menuitem"
                 className={item}
                 disabled={exportable.length === 0}
-                title={
-                  exportable.length === 0
-                    ? "No tracks with a Spotify ID in the set yet"
-                    : undefined
-                }
+                title={exportable.length === 0 ? 'No tracks with a Spotify ID in the set yet' : undefined}
                 onClick={save}
               >
                 Save set to Spotify
               </button>
-              <button
-                type="button"
-                role="menuitem"
-                className={item}
-                onClick={disconnect}
-              >
+              <button type="button" role="menuitem" className={item} onClick={disconnect}>
                 Disconnect
               </button>
             </div>
@@ -169,11 +153,8 @@ export default function SpotifyConnect({ tracks, onAdd }: Props) {
         </>
       )}
       {message && (
-        <span
-          role="status"
-          className={`text-[12px] ${message.error ? "text-[#EE8B7A]" : "text-[#8A8FA3]"}`}
-        >
-          {message.text}{" "}
+        <span role="status" className={`text-[12px] ${message.error ? 'text-[#EE8B7A]' : 'text-[#8A8FA3]'}`}>
+          {message.text}{' '}
           {message.url && (
             <a
               href={message.url}

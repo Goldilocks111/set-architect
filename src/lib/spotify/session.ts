@@ -1,13 +1,6 @@
-import {
-  clearCookieHeader,
-  open,
-  readCookie,
-  seal,
-  SESSION_COOKIE,
-  setCookieHeader,
-} from "./cookie";
+import { clearCookieHeader, open, readCookie, seal, SESSION_COOKIE, setCookieHeader } from './cookie';
 
-const TOKEN_URL = "https://accounts.spotify.com/api/token";
+const TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const THIRTY_DAYS = 60 * 60 * 24 * 30;
 
 interface Stored {
@@ -22,8 +15,7 @@ export interface SpotifySession {
   setCookie?: string;
 }
 
-export const redirectUri = (request: Request) =>
-  `${new URL(request.url).origin}/api/spotify/callback`;
+export const redirectUri = (request: Request) => `${new URL(request.url).origin}/api/spotify/callback`;
 
 const creds = () => {
   const id = process.env.SPOTIFY_CLIENT_ID;
@@ -39,12 +31,12 @@ async function tokenRequest(params: Record<string, string>): Promise<{
   expires_in?: number;
 }> {
   const c = creds();
-  if (!c) throw new Error("spotify not configured");
+  if (!c) throw new Error('spotify not configured');
   const res = await fetch(TOKEN_URL, {
-    method: "POST",
+    method: 'POST',
     headers: {
-      Authorization: `Basic ${Buffer.from(`${c.id}:${c.secret}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${Buffer.from(`${c.id}:${c.secret}`).toString('base64')}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
     },
     body: new URLSearchParams(params).toString(),
   });
@@ -52,21 +44,16 @@ async function tokenRequest(params: Record<string, string>): Promise<{
   return res.json();
 }
 
-const toCookie = (s: Stored) =>
-  setCookieHeader(SESSION_COOKIE, seal(s), THIRTY_DAYS);
+const toCookie = (s: Stored) => setCookieHeader(SESSION_COOKIE, seal(s), THIRTY_DAYS);
 
 /** Exchange an authorization code; returns the Set-Cookie value holding the encrypted tokens. */
-export async function exchangeCode(
-  code: string,
-  redirect: string,
-): Promise<string> {
+export async function exchangeCode(code: string, redirect: string): Promise<string> {
   const data = await tokenRequest({
-    grant_type: "authorization_code",
+    grant_type: 'authorization_code',
     code,
     redirect_uri: redirect,
   });
-  if (!data.access_token || !data.refresh_token)
-    throw new Error("spotify token response incomplete");
+  if (!data.access_token || !data.refresh_token) throw new Error('spotify token response incomplete');
   return toCookie({
     accessToken: data.access_token,
     refreshToken: data.refresh_token,
@@ -75,15 +62,13 @@ export async function exchangeCode(
 }
 
 /** Valid access token from the session cookie (refreshing if expired), or null when not connected. */
-export async function getSpotifySession(
-  request: Request,
-): Promise<SpotifySession | null> {
+export async function getSpotifySession(request: Request): Promise<SpotifySession | null> {
   const stored = open<Stored>(readCookie(request, SESSION_COOKIE));
   if (!stored?.accessToken || !stored.refreshToken) return null;
   if (Date.now() < stored.expiresAt) return { accessToken: stored.accessToken };
   try {
     const data = await tokenRequest({
-      grant_type: "refresh_token",
+      grant_type: 'refresh_token',
       refresh_token: stored.refreshToken,
     });
     if (!data.access_token) return null;

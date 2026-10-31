@@ -1,5 +1,5 @@
-import { me } from "@/lib/spotify/api";
-import { withSpotify } from "@/lib/spotify/route";
+import { me } from '@/lib/spotify/api';
+import { withSpotify } from '@/lib/spotify/route';
 
 export async function GET(request: Request) {
   return withSpotify(
@@ -9,6 +9,6 @@ export async function GET(request: Request) {
         connected: true,
         displayName: (await me(token)).displayName,
       }),
-    () => Response.json({ connected: false }),
+    () => Response.json({ connected: false })
   );
 }

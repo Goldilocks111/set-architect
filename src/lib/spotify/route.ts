@@ -1,8 +1,7 @@
-import { SpotifyApiError } from "./api";
-import { getSpotifySession } from "./session";
+import { SpotifyApiError } from './api';
+import { getSpotifySession } from './session';
 
-const notConnected = () =>
-  Response.json({ error: "not connected" }, { status: 401 });
+const notConnected = () => Response.json({ error: 'not connected' }, { status: 401 });
 
 /**
  * Runs a handler with the caller's Spotify access token, attaching a refreshed session cookie if one
@@ -11,7 +10,7 @@ const notConnected = () =>
 export async function withSpotify(
   request: Request,
   handler: (token: string) => Promise<Response>,
-  onDisconnected: () => Response = notConnected,
+  onDisconnected: () => Response = notConnected
 ): Promise<Response> {
   const session = await getSpotifySession(request);
   if (!session) return onDisconnected();
@@ -24,17 +23,12 @@ export async function withSpotify(
     else if (upstream === 403)
       res = Response.json(
         {
-          error:
-            "Spotify refused this request (dev-mode user cap or missing scope).",
+          error: 'Spotify refused this request (dev-mode user cap or missing scope).',
         },
-        { status: 403 },
+        { status: 403 }
       );
-    else
-      res = Response.json(
-        { error: "Spotify request failed." },
-        { status: 502 },
-      );
+    else res = Response.json({ error: 'Spotify request failed.' }, { status: 502 });
   }
-  if (session.setCookie) res.headers.append("Set-Cookie", session.setCookie);
+  if (session.setCookie) res.headers.append('Set-Cookie', session.setCookie);
   return res;
 }

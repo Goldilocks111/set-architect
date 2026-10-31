@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import type { Track } from "@/types/track";
+import { useEffect, useState } from 'react';
+import type { Track } from '@/types/track';
 
 interface Playlist {
   id: string;
@@ -31,18 +31,13 @@ export const toTrack = (t: PlaylistTrack): Track => ({
   spotifyUrl: t.spotifyUrl,
   popularity: t.popularity,
   sources: {
-    spotifyId: "spotify",
-    ...(t.popularity !== undefined ? { popularity: "spotify" } : {}),
+    spotifyId: 'spotify',
+    ...(t.popularity !== undefined ? { popularity: 'spotify' } : {}),
   },
 });
 
 /** Picker panel: choose one of the user's playlists, then add tracks individually or all at once. */
-export default function SpotifyImport({
-  inSet,
-  onAdd,
-  onClose,
-  onDisconnected,
-}: Props) {
+export default function SpotifyImport({ inSet, onAdd, onClose, onDisconnected }: Props) {
   const [playlists, setPlaylists] = useState<Playlist[] | null>(null);
   const [picked, setPicked] = useState<Playlist | null>(null);
   const [tracks, setTracks] = useState<PlaylistTrack[] | null>(null);
@@ -60,21 +55,19 @@ export default function SpotifyImport({
         error?: string;
       };
       if (!res.ok) {
-        setError(body.error ?? "Could not reach Spotify.");
+        setError(body.error ?? 'Could not reach Spotify.');
         return null;
       }
       return body;
     } catch {
-      setError("Could not reach Spotify.");
+      setError('Could not reach Spotify.');
       return null;
     }
   };
 
   useEffect(() => {
     let live = true;
-    load<{ playlists: Playlist[] }>("/api/spotify/playlists").then(
-      (b) => live && b && setPlaylists(b.playlists),
-    );
+    load<{ playlists: Playlist[] }>('/api/spotify/playlists').then((b) => live && b && setPlaylists(b.playlists));
     return () => {
       live = false;
     };
@@ -84,17 +77,12 @@ export default function SpotifyImport({
   const pick = async (p: Playlist) => {
     setPicked(p);
     setTracks(null);
-    const b = await load<{ tracks: PlaylistTrack[] }>(
-      `/api/spotify/playlists/${encodeURIComponent(p.id)}/tracks`,
-    );
+    const b = await load<{ tracks: PlaylistTrack[] }>(`/api/spotify/playlists/${encodeURIComponent(p.id)}/tracks`);
     setTracks(b?.tracks ?? []);
   };
 
-  const addable = (tracks ?? []).filter(
-    (t) => !inSet.has(`spotify-${t.spotifyId}`),
-  );
-  const btn =
-    "rounded-md px-2 py-1 text-[13px] focus-visible:outline-2 focus-visible:outline-[#1DB954]";
+  const addable = (tracks ?? []).filter((t) => !inSet.has(`spotify-${t.spotifyId}`));
+  const btn = 'rounded-md px-2 py-1 text-[13px] focus-visible:outline-2 focus-visible:outline-[#1DB954]';
 
   return (
     <div
@@ -105,7 +93,7 @@ export default function SpotifyImport({
       <div className="flex max-h-[75vh] w-full max-w-[520px] flex-col gap-3 overflow-hidden rounded-lg border border-[#2A2E3D] bg-[#12141C] p-4">
         <div className="flex items-center justify-between gap-2">
           <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold">
-            {picked ? picked.name : "Import a Spotify playlist"}
+            {picked ? picked.name : 'Import a Spotify playlist'}
           </h2>
           <div className="flex items-center gap-2">
             {picked && (
@@ -137,14 +125,8 @@ export default function SpotifyImport({
         <div className="min-h-0 flex-1 overflow-y-auto">
           {!picked && (
             <>
-              {!playlists && !error && (
-                <p className="text-[13px] text-[#8A8FA3]">Loading playlists…</p>
-              )}
-              {playlists?.length === 0 && (
-                <p className="text-[13px] text-[#8A8FA3]">
-                  No playlists found.
-                </p>
-              )}
+              {!playlists && !error && <p className="text-[13px] text-[#8A8FA3]">Loading playlists…</p>}
+              {playlists?.length === 0 && <p className="text-[13px] text-[#8A8FA3]">No playlists found.</p>}
               <ul className="flex flex-col">
                 {playlists?.map((p) => (
                   <li key={p.id}>
@@ -154,9 +136,7 @@ export default function SpotifyImport({
                       className="flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-[14px] hover:bg-[#1B1E2A] focus-visible:outline-2 focus-visible:outline-[#1DB954]"
                     >
                       <span className="truncate">{p.name}</span>
-                      <span className="ml-3 shrink-0 text-[12px] text-[#8A8FA3] tabular-nums">
-                        {p.trackCount}
-                      </span>
+                      <span className="ml-3 shrink-0 text-[12px] text-[#8A8FA3] tabular-nums">{p.trackCount}</span>
                     </button>
                   </li>
                 ))}
@@ -166,27 +146,18 @@ export default function SpotifyImport({
 
           {picked && (
             <>
-              {!tracks && !error && (
-                <p className="text-[13px] text-[#8A8FA3]">Loading tracks…</p>
-              )}
+              {!tracks && !error && <p className="text-[13px] text-[#8A8FA3]">Loading tracks…</p>}
               {tracks?.length === 0 && (
-                <p className="text-[13px] text-[#8A8FA3]">
-                  No importable tracks in this playlist.
-                </p>
+                <p className="text-[13px] text-[#8A8FA3]">No importable tracks in this playlist.</p>
               )}
               <ul className="flex flex-col">
                 {tracks?.map((t) => {
                   const already = inSet.has(`spotify-${t.spotifyId}`);
                   return (
-                    <li
-                      key={t.spotifyId}
-                      className="flex items-center justify-between gap-3 px-2 py-1.5"
-                    >
+                    <li key={t.spotifyId} className="flex items-center justify-between gap-3 px-2 py-1.5">
                       <span className="min-w-0 text-[14px]">
                         <span className="block truncate">{t.title}</span>
-                        <span className="block truncate text-[12px] text-[#8A8FA3]">
-                          {t.artist}
-                        </span>
+                        <span className="block truncate text-[12px] text-[#8A8FA3]">{t.artist}</span>
                       </span>
                       <button
                         type="button"
@@ -195,7 +166,7 @@ export default function SpotifyImport({
                         onClick={() => onAdd(toTrack(t))}
                         className={`${btn} shrink-0 border border-[#2A2E3D] hover:border-[#1DB954] disabled:opacity-40`}
                       >
-                        {already ? "Added" : "Add"}
+                        {already ? 'Added' : 'Add'}
                       </button>
                     </li>
                   );
@@ -212,9 +183,7 @@ export default function SpotifyImport({
             onClick={() => addable.forEach((t) => onAdd(toTrack(t)))}
             className={`${btn} bg-[#1DB954] font-medium text-[#12141C] disabled:opacity-50`}
           >
-            {addable.length === 0
-              ? "All tracks added"
-              : `Add all (${addable.length})`}
+            {addable.length === 0 ? 'All tracks added' : `Add all (${addable.length})`}
           </button>
         )}
       </div>
