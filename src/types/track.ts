@@ -11,7 +11,8 @@ export interface Track {
   danceability?: number; // 0..1
   popularity?: number; // 0..100
   isrc?: string;
-  spotifyId?: string; // when known (e.g. via ListenBrainz mapping); SoundStat/ReccoBeats key off it
+  spotifyId?: string; // when known (via Spotify search adapter); SoundStat/ReccoBeats key off it
+  spotifyUrl?: string; // open.spotify.com link for link-out
   previewUrl?: string;
   itunesUrl?: string;
   artworkUrl?: string;
