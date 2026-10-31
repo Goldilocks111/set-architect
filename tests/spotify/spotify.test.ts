@@ -240,6 +240,20 @@ describe('hardening', () => {
       delete process.env.SPOTIFY_REDIRECT_URI;
     }
   });
+  it('hops to the callback origin when the request Host differs (localhost vs 127.0.0.1)', async () => {
+    process.env.SPOTIFY_REDIRECT_URI = 'http://127.0.0.1:3001/api/spotify/callback';
+    try {
+      const res = await login(
+        req('http://localhost:3001/api/spotify/login', undefined, { headers: { host: 'localhost:3001' } })
+      );
+      expect(res.status).toBe(302);
+      expect(res.headers.get('location')).toBe('http://127.0.0.1:3001/api/spotify/login');
+      // and no state cookie is set on the wrong origin
+      expect(res.headers.get('set-cookie')).toBeNull();
+    } finally {
+      delete process.env.SPOTIFY_REDIRECT_URI;
+    }
+  });
   it('refuses to send the token to a non-Spotify pagination URL', async () => {
     fetchMock.mockImplementationOnce(() => json({ items: [], next: 'https://evil.test/steal' }));
     await expect(playlistTracks('tok', 'p')).rejects.toThrow(/non-Spotify/);

@@ -12,7 +12,7 @@ export async function GET(request: Request) {
   // Host header against the callback origin's host instead of new URL(request.url).origin.
   const requestHost = request.headers.get('host');
   const callbackHost = new URL(redirectUri(request)).host;
-  if (requestHost !== callbackHost) {
+  if (requestHost && requestHost !== callbackHost) {
     return new Response(null, {
       status: 302,
       headers: { Location: `${new URL(redirectUri(request)).origin}/api/spotify/login` },
