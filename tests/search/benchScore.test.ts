@@ -182,3 +182,18 @@ describe('combined and lead-only artist credits', () => {
     expect(isHit(track('Justice', 'Pusher'), [{ artist: 'Justice', baseTitle: 'Pusher (Part 2)' }])).toBe(false);
   });
 });
+
+describe('+extras tag', () => {
+  it('marks results that credit artists outside the fixture set', () => {
+    expect(artistRule('CamelPhat, Elderbrook', 'CamelPhat, Elderbrook, Someone')).toBe('exact+extras');
+    expect(artistRule('Above & Beyond', 'Above & Beyond & Richard Bedford')).toBe('exact+extras');
+    expect(artistRule('Chase & Status', 'Chase & Status, Tribute')).toBe('exact+extras');
+    expect(artistRule('Skrillex, Solomun', 'Solomun, Guest')).toBe('subset-secondary-only+extras');
+    expect(artistRule('Skrillex, Solomun', 'Skrillex, Guest')).toBe('subset-with-lead+extras');
+    expect(artistRule('Rüfüs Du Sol', 'RÜFÜS, Guest', )).toBeNull();
+  });
+  it('leaves clean results untagged and still hits with extras', () => {
+    expect(artistRule('CamelPhat, Elderbrook', 'CamelPhat')).toBe('subset-with-lead');
+    expect(isHit(track('Chase & Status', 'Song'), [{ artist: 'Chase & Status, Tribute', baseTitle: 'Song' }])).toBe(true);
+  });
+});

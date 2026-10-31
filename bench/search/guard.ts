@@ -144,10 +144,15 @@ export function runStatus(o: {
   total: number;
   budgetExceeded: boolean;
   rateLimitedUntil?: number;
+  /** Providers the harness itself refused on >10% of queries. */
+  throttledPartial?: string[];
 }): string {
   if (o.rateLimitedUntil) return `ABORTED (rate-limited until ${new Date(o.rateLimitedUntil).toLocaleString()})`;
   if (o.budgetExceeded) return 'ABORTED (budget)';
   if (o.degradedInvalid.length) return `INVALID (degraded >10%: ${o.degradedInvalid.join(', ')})`;
   if (o.errored > DEGRADED_INVALID_RATE * o.total) return 'INVALID (>10% errored)';
+  if (o.throttledPartial?.length) {
+    return `PARTIAL (throttled by bench >10%: ${o.throttledPartial.join(', ')}; not valid for acceptance)`;
+  }
   return 'ok';
 }

@@ -202,12 +202,19 @@ async function runTarget(t: Target) {
     degraded: '',
     throttledByBench: '',
     secondaryOnlyHits: 0,
+    extrasHits: 0,
     status: 'ok',
   };
   const dg = t.degraded ? degradedSummary(t.degraded) : { text: '', invalid: [] as string[] };
   summary.degraded = dg.text;
-  const secondary = trackRows.filter((r) => r.via === 'subset-secondary-only');
+  const secondary = trackRows.filter((r) => r.via?.startsWith('subset-secondary-only'));
   summary.secondaryOnlyHits = secondary.length;
+  const withExtras = trackRows.filter((r) => r.via?.endsWith('+extras'));
+  summary.extrasHits = withExtras.length;
+  if (withExtras.length) {
+    console.log(`${t.name}: ${withExtras.length} hit(s) with extra uncredited artists to inspect by hand:`);
+    for (const r of withExtras) console.log(`  ${r.id} [${r.via}] <- ${r.matched?.artist} / ${r.matched?.title}`);
+  }
   if (secondary.length) {
     console.log(`${t.name}: ${secondary.length} subset-secondary-only hit(s) to inspect by hand:`);
     for (const r of secondary) console.log(`  ${r.id} <- ${r.matched?.artist} / ${r.matched?.title}`);
@@ -220,6 +227,7 @@ async function runTarget(t: Target) {
     total: tracks.length + versions.length,
     budgetExceeded,
     rateLimitedUntil: rateLimitedUntil || undefined,
+    throttledPartial: t.throttled ? degradedSummary(t.throttled).invalid : [],
   });
   const dir = join(here, 'results');
   mkdirSync(dir, { recursive: true });

@@ -46,7 +46,9 @@ export const DURATION_WINDOW_MS = 10_000;
 
 const compact = (s: string) => s.replace(/ /g, '');
 
-export type ArtistRule = 'exact' | 'subset-with-lead' | 'subset-secondary-only' | 'alias';
+export type ArtistBase = 'exact' | 'subset-with-lead' | 'subset-secondary-only' | 'alias';
+/** `+extras` marks results that also credit artists outside the fixture's credited set. */
+export type ArtistRule = ArtistBase | `${ArtistBase}+extras`;
 
 /**
  * Credited fixture artists (comma-separated, lead first) map every accepted spelling to a credit index.
@@ -78,6 +80,7 @@ export function artistRule(
     .replace(FEAT, ' ')
     .split(/\s*(?:,|&|\band\b|\bx\b)\s*/i).map((w) => normalize(w)).filter(Boolean);
   const found = new Map<number, boolean>();
+  let extras = false;
   let i = 0;
   while (i < joined.length) {
     let took = false;
@@ -90,12 +93,20 @@ export function artistRule(
         took = true;
       }
     }
-    if (!took) i++;
+    if (!took) {
+      extras = true;
+      i++;
+    }
   }
   if (found.size === 0) return null;
-  if ([...found.values()].some(Boolean)) return 'alias';
-  if (found.size === credits.length) return 'exact';
-  return found.has(0) ? 'subset-with-lead' : 'subset-secondary-only';
+  const base: ArtistBase = [...found.values()].some(Boolean)
+    ? 'alias'
+    : found.size === credits.length
+      ? 'exact'
+      : found.has(0)
+        ? 'subset-with-lead'
+        : 'subset-secondary-only';
+  return extras ? `${base}+extras` : base;
 }
 
 function artistMatches(expected: string, actual: string, aliases?: Record<string, string[]>): boolean {

@@ -206,3 +206,35 @@ describe('throttled-by-bench is not degradation', () => {
     expect(throttled.text).toBe('itunes:20/20');
   });
 });
+
+describe('PARTIAL status for bench-side throttling', () => {
+  const base = { degradedInvalid: [], errored: 0, total: 130, budgetExceeded: false };
+  it('is distinct from INVALID and says it is not valid for acceptance', () => {
+    const st = runStatus({ ...base, throttledPartial: ['itunes'] });
+    expect(st).toMatch(/^PARTIAL \(throttled by bench >10%: itunes/);
+    expect(st).toContain('not valid for acceptance');
+    expect(st).not.toMatch(/^INVALID/);
+  });
+  it('INVALID and ABORTED take precedence over PARTIAL', () => {
+    expect(runStatus({ ...base, degradedInvalid: ['deezer'], throttledPartial: ['itunes'] })).toMatch(/^INVALID/);
+    expect(runStatus({ ...base, rateLimitedUntil: 5_000, throttledPartial: ['itunes'] })).toMatch(/^ABORTED/);
+  });
+  it('counts second-round calls refused by the pacing gap, per provider and query', async () => {
+    let t = 1_000;
+    const itunes = { name: 'itunes', configured: () => true, search: async () => [] as any[] };
+    let current = new Set<string>();
+    const g = guardProvider(itunes, { gate: new RequestGate(100), breaker: null, gapMs: 3100, now: () => t, onThrottle: (e) => current.add(e.provider) });
+    const perQuery: string[][] = [];
+    for (let q = 0; q < 10; q++) {
+      current = new Set();
+      t += 400; // harness query gap far below the 3.1s iTunes limit
+      for (const round of [1, 2]) {
+        try { await g.search(`q${q}-${round}`); } catch (e) { if (!(e instanceof BenchThrottled)) throw e; }
+      }
+      perQuery.push([...current]);
+    }
+    const summary = degradedSummary(perQuery);
+    expect(summary.invalid).toEqual(['itunes']);
+    expect(runStatus({ ...{ degradedInvalid: [], errored: 0, total: 10, budgetExceeded: false }, throttledPartial: summary.invalid })).toMatch(/^PARTIAL/);
+  });
+});
