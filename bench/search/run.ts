@@ -13,11 +13,15 @@ const here = __dirname;
 const DEFAULT_GAP_MS = 340; // <= 3 req/s
 const GAP_MS: Record<string, number> = { itunes: 3100, spotify: 340, deezer: 340, merged: 340 };
 const BACKOFF_MS = 60_000;
+const REQUEST_BUDGET: Record<string, number> = { spotify: 150, deezer: 400, itunes: 150 };
+const DEGRADED_INVALID_RATE = 0.1;
 const tracks: BenchTrack[] = JSON.parse(readFileSync(join(here, 'tracks.json'), 'utf8'));
 const versions: BenchVersionCase[] = JSON.parse(readFileSync(join(here, 'versions.json'), 'utf8'));
 
 interface Target {
   name: string;
+  /** Per-query degraded provider lists, filled by the merged target. */
+  degraded?: string[][];
   run(query: string): Promise<Array<{ artist: string; title?: string; baseTitle?: string; version: SearchResult['version']; durationMs?: number; provider?: string; providers?: string[] }>>;
 }
 
@@ -63,7 +67,18 @@ async function loadTargets(): Promise<Target[]> {
     const fn: ((q: string) => Promise<MergedSearchResponse>) | undefined =
       merge.mergedSearch ?? merge.searchMerged ?? merge.search ?? merge.default;
     if (typeof fn !== 'function') console.log('merge module loaded but exports no search function (searchMerged/mergedSearch/search)');
-    else targets.push({ name: 'merged', run: async (q) => (await fn(q)).hits.map((h) => ({ ...h, baseTitle: h.baseTitle })) });
+    else {
+      const degraded: string[][] = [];
+      targets.push({
+        name: 'merged',
+        degraded,
+        run: async (q) => {
+          const res = await fn(q);
+          degraded.push(res.degraded ?? []);
+          return res.hits.map((h) => ({ ...h, baseTitle: h.baseTitle }));
+        },
+      });
+    }
   }
   return targets;
 }
@@ -74,9 +89,19 @@ const only = process.argv.slice(2);
 async function runTarget(t: Target) {
   const lat: number[] = [];
   let last = 0;
+  let requests = 0;
+  let aborted = false;
+  const budget = REQUEST_BUDGET[t.name];
   const timed = async (q: string) => {
+    if (aborted) return { res: [], error: 'request budget exceeded' };
     const gap = GAP_MS[t.name] ?? DEFAULT_GAP_MS;
     for (let attempt = 0; ; attempt++) {
+      if (budget !== undefined && requests >= budget) {
+        aborted = true;
+        console.log(`${t.name}: request budget ${budget} exceeded; aborting target`);
+        return { res: [], error: 'request budget exceeded' };
+      }
+      requests++;
       const wait = last + gap - Date.now();
       if (wait > 0) await sleep(wait);
       last = Date.now();
@@ -142,7 +167,19 @@ async function runTarget(t: Target) {
     p50Ms: Math.round(percentile(lat, 50)),
     p95Ms: Math.round(percentile(lat, 95)),
     erroredQueries: [...trackRows, ...versionRows].filter((r) => r.error).length,
+    requests,
+    degraded: '' as string,
+    status: aborted ? 'ABORTED (budget)' : 'ok',
   };
+  if (t.degraded) {
+    const counts: Record<string, number> = {};
+    for (const d of t.degraded) for (const p of d) counts[p] = (counts[p] ?? 0) + 1;
+    const n = Math.max(1, t.degraded.length);
+    summary.degraded = Object.entries(counts).map(([p, c]) => `${p}:${c}/${n}`).join(' ') || 'none';
+    const bad = Object.entries(counts).filter(([, c]) => c / n > DEGRADED_INVALID_RATE).map(([p]) => p);
+    if (bad.length) summary.status = `INVALID (degraded >10%: ${bad.join(', ')})`;
+  }
+  if (summary.status === 'ok' && summary.erroredQueries > 0.1 * (tracks.length + versions.length)) summary.status = 'INVALID (>10% errored)';
   const dir = join(here, 'results');
   mkdirSync(dir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
