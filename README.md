@@ -35,9 +35,9 @@ Every music-data adapter disables itself when its key is empty. Previews come fr
 The header's **Connect Spotify** button signs a user in with Spotify (authorization-code flow, server-side) so they can import their playlists into the builder and save the current set back as a private Spotify playlist. It works in demo mode too; it is independent of Supabase.
 
 1. Set `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` in `.env` (same app as the catalog lookup).
-2. **Required manual step.** In the [Spotify developer dashboard](https://developer.spotify.com/dashboard), open your app, then Settings, then Redirect URIs, and add both:
-   - `http://localhost:3000/api/spotify/callback`
-   - `http://localhost:3001/api/spotify/callback`
+2. **Required manual step.** In the [Spotify developer dashboard](https://developer.spotify.com/dashboard), open your app, then Settings, then Redirect URIs, and add both: (Spotify no longer accepts `localhost` — use the `127.0.0.1` form, and open the app at http://127.0.0.1:3001 so cookies match)
+   - `http://127.0.0.1:3000/api/spotify/callback`
+   - `http://127.0.0.1:3001/api/spotify/callback`
 
    The redirect URI is derived from the request origin, so whichever port the dev server is on must be registered exactly. In production, set `SPOTIFY_REDIRECT_URI` to the exact registered callback URL; it is then used verbatim instead of the request's Host-derived origin.
 3. Optional: set `SPOTIFY_COOKIE_SECRET` (any long random string). Tokens are stored only in an AES-256-GCM encrypted, httpOnly cookie; the key is derived from this secret, falling back to `SPOTIFY_CLIENT_SECRET`, then to a fixed dev-only value outside production. Production refuses to start the flow without one of the two secrets.
