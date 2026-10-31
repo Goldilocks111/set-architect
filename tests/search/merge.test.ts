@@ -405,7 +405,7 @@ describe('mergedSearch: MusicBrainz version discovery', () => {
     expect(hits.find((h) => h.version.kind === 'original')?.providers).toEqual(['spotify', 'musicbrainz']);
   });
 
-  it('merges a MusicBrainz recording with a streaming hit by ISRC', async () => {
+  it('merges a MusicBrainz recording with a streaming hit of the same version and length', async () => {
     const { hits } = await mergedSearch('meduza piece of your heart extended', {
       providers: [
         prov('deezer', [res('deezer', 'MEDUZA', 'Piece Of Your Heart', { isrc: 'DEUM1' })]),
@@ -510,5 +510,87 @@ describe('mergedSearch: review fix round 1', () => {
     });
     expect(hung.search).toHaveBeenCalledTimes(1);
     expect(Date.now() - t0).toBeLessThan(80);
+  });
+});
+
+describe('mergedSearch: review fix round 2', () => {
+  const mb = (artist: string | string[], title: string, extra: Partial<SearchResult> & { isrcs?: string[] } = {}) =>
+    res('musicbrainz', artist, title, extra as Partial<SearchResult>);
+  const mbProv = (results: SearchResult[]) => prov('musicbrainz' as Name, results);
+  // "goodboys" is not in Deezer's credit, so round one is not a full answer and MusicBrainz is asked
+  const q = 'meduza piece of your heart extended goodboys';
+  const dz = () => prov('deezer', [res('deezer', 'MEDUZA', 'Piece Of Your Heart (Extended Mix)', { isrc: 'DEUM71900663', durationMs: 427_000 })]);
+  const extOf = (hits: Array<{ version: { kind: string } }>) => hits.filter((h) => h.version.kind === 'extended');
+
+  it('I1: merges by ANY of MusicBrainz\'s ISRCs, not just the first', async () => {
+    const { hits } = await mergedSearch(q, { providers: [dz(), mbProv([mb('Meduza', 'Piece of Your Heart (extended)', { isrc: 'GBXXX0000001', isrcs: ['GBXXX0000001', 'DEUM71900663'], durationMs: 300_000 })])] });
+    const ext = extOf(hits);
+    expect(ext).toHaveLength(1);
+    expect(ext[0]).toMatchObject({ key: 'DEUM71900663', providers: ['deezer', 'musicbrainz'] });
+  });
+
+  it('I1: a MusicBrainz ISRC from another release never creates a duplicate catalog-only row', async () => {
+    const { hits } = await mergedSearch(q, { providers: [dz(), mbProv([mb('Meduza', 'Piece of Your Heart (extended)', { isrc: 'GBXXX0000001', isrcs: ['GBXXX0000001'], durationMs: 427_741 })])] });
+    expect(extOf(hits)).toHaveLength(1);
+  });
+
+  it('I1: an MB-only group duplicating a streamable version is dropped', async () => {
+    const { hits } = await mergedSearch('disclosure latch extended', {
+      providers: [
+        prov('deezer', [res('deezer', 'Disclosure', 'Latch', { isrc: 'GBUM1', durationMs: 256_000 })]),
+        mbProv([mb('Disclosure', 'Latch', { isrc: 'OTHER1', durationMs: 250_000 }), mb('Disclosure', 'Latch', { isrc: 'OTHER2' })]),
+      ],
+    });
+    expect(hits.filter((h) => h.version.kind === 'original')).toHaveLength(1);
+  });
+
+  it('R14: different streaming ISRCs merge only for a same-lead re-release of identical version and length (±2s)', async () => {
+    const two = (b: Partial<SearchResult>, title2 = 'Cola') =>
+      mergedSearch('camelphat cola', {
+        providers: [
+          prov('spotify', [res('spotify', 'CamelPhat', 'Cola', { isrc: 'GB1', durationMs: 200_000 })]),
+          prov('deezer', [res('deezer', 'CamelPhat', title2, { isrc: 'GB2', ...b })]),
+        ],
+      });
+    expect((await two({ durationMs: 201_500 })).hits).toHaveLength(1);
+    expect((await two({ durationMs: 203_000 })).hits).toHaveLength(2);
+    expect((await two({})).hits).toHaveLength(2);
+    expect((await two({ durationMs: 200_000 }, 'Cola (Extended Mix)')).hits).toHaveLength(2);
+  });
+
+  it('minor 5: an "&" act never merges with a lone act named like one of its parts unless lengths match', async () => {
+    const run = (a: Partial<SearchResult>, b: Partial<SearchResult>) =>
+      mergedSearch('sun', { providers: [prov('deezer', [res('deezer', 'Above & Beyond', 'Sun', a)]), prov('itunes', [res('itunes', 'Beyond', 'Sun', b)])] });
+    expect((await run({}, {})).hits).toHaveLength(2);
+    expect((await run({ durationMs: 200_000 }, { durationMs: 260_000 })).hits).toHaveLength(2);
+    // a collaboration credited to its lead on one catalog still dedups when the lengths agree
+    const collab = await mergedSearch('cola', {
+      providers: [prov('deezer', [res('deezer', 'CamelPhat', 'Cola', { durationMs: 224_000 })]), prov('itunes', [res('itunes', 'CamelPhat & Elderbrook', 'Cola', { durationMs: 224_500 })])],
+    });
+    expect(collab.hits).toHaveLength(1);
+  });
+
+  it('minor 4: MusicBrainz is asked for the group\'s first credited artist, whole', async () => {
+    const m = mbProv([]);
+    await mergedSearch('tyler the creator earfquake radio edit', {
+      providers: [prov('spotify', [res('spotify', ['Tyler, The Creator', 'Playboi Carti'], 'EARFQUAKE')]), m],
+    });
+    expect(m.search.mock.calls[0][0]).toContain('+artist:"Tyler, The Creator"');
+  });
+
+  it('minor 6: the key\'s length bucket is 10s on the shortest length, stable when a provider is missing', async () => {
+    const keyOf = async (providers: SearchProvider[]) => (await mergedSearch('camelphat cola', { providers })).hits[0].key;
+    const sp = () => prov('spotify', [res('spotify', 'CamelPhat', 'Cola', { durationMs: 190_400 })]);
+    const dzr = () => prov('deezer', [res('deezer', 'CamelPhat', 'Cola', { durationMs: 191_600 })]);
+    const both = await keyOf([sp(), dzr()]);
+    expect(both).toMatch(/\|d190$/);
+    expect(await keyOf([dzr()])).toBe(both);
+  });
+
+  it('minor 7: a provider set with only second-round providers asks them the plain query', async () => {
+    const m = mbProv([mb('CamelPhat', 'Cola')]);
+    const { hits } = await mergedSearch('camelphat cola', { providers: [m] });
+    expect(m.search).toHaveBeenCalledWith('camelphat cola');
+    expect(hits).toHaveLength(1);
   });
 });

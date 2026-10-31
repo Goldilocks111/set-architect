@@ -69,17 +69,27 @@ describe('musicbrainz search provider', () => {
     await expect(musicbrainzSearchProvider.search('x')).rejects.toThrow(/503/);
   });
 
-  it('shares the process-wide 1 req/s MusicBrainz limiter', async () => {
+  it('shares the process-wide 1 req/s limiter and refuses a search that would wait over a second', async () => {
     configureMusicBrainzLimiter(1100);
     vi.useFakeTimers();
     fetchMock.mockImplementation(async () => json({ recordings: [] }));
     const a = musicbrainzSearchProvider.search('a');
-    const b = musicbrainzSearchProvider.search('b');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // the next slot is 1.1s away: an abandoned request must not be queued and sent later
+    await expect(musicbrainzSearchProvider.search('b')).rejects.toThrow(/queue is busy/);
+    await vi.advanceTimersByTimeAsync(200);
+    const c = musicbrainzSearchProvider.search('c');
     await vi.advanceTimersByTimeAsync(1100);
-    await Promise.all([a, b]);
+    await Promise.all([a, c]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
+  });
+
+  it('keeps every ISRC and drops recordings without an artist credit', async () => {
+    fetchMock.mockResolvedValueOnce(
+      json({ recordings: [{ ...rec, isrcs: ['AAA', 'BBB'] }, { id: 'x', title: 'Latch (Extended Version)', 'artist-credit': [] }] })
+    );
+    const rs = await musicbrainzSearchProvider.search('q');
+    expect(rs).toHaveLength(1);
+    expect(rs[0]).toMatchObject({ isrc: 'AAA', isrcs: ['AAA', 'BBB'] });
   });
 });

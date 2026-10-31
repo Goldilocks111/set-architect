@@ -16,6 +16,11 @@ export function configureMusicBrainzLimiter(gapMs: number): void {
   nextSlot = 0;
 }
 
+/** How long a request made now would wait for its slot in the shared queue. */
+export function musicBrainzQueueDelayMs(now = Date.now()): number {
+  return Math.max(0, nextSlot - now);
+}
+
 /** Process-wide limiter: every MusicBrainz request waits for its own slot, at least minGapMs after the previous. */
 async function slot(): Promise<void> {
   const now = Date.now();

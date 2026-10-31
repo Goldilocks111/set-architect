@@ -113,7 +113,8 @@ export async function searchTracks(query: string): Promise<Track[]> {
   const providers = defaultProviders().filter((p) => p.configured());
   const { hits, degraded } = await cachedMergedSearch(query, (q) => mergedSearch(q, { providers }));
   const first = firstRoundProviders(providers);
-  if (!hits.length && first.every((p) => degraded.includes(p.name))) return searchDemoTracks(query);
+  const asked = first.length ? first : providers;
+  if (!hits.length && asked.length && asked.every((p) => degraded.includes(p.name))) return searchDemoTracks(query);
   return hits.map(hitToTrack);
 }
 
