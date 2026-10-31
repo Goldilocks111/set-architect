@@ -99,6 +99,37 @@ const cases: Array<[string, Expected]> = [
   ['Track — Extended Mix', { baseTitle: 'Track', kind: 'extended' }],
   ['  Cola   (Extended   Mix)  ', { baseTitle: 'Cola', kind: 'extended', label: 'Extended Mix' }],
 
+  // review round 1: named mixes carry their remixer
+  ['Track (Mark Knight Dub Mix)', { baseTitle: 'Track', kind: 'dub', label: 'Mark Knight Dub Mix', remixer: 'Mark Knight' }],
+  ["Track (Dennis Ferrer's Dub)", { baseTitle: 'Track', kind: 'dub', remixer: 'Dennis Ferrer' }],
+  ['Track (Dub Pistols Dub Mix)', { baseTitle: 'Track', kind: 'dub', remixer: 'Dub Pistols' }],
+  ['Track (Mark Knight & Dennis Ferrer VIP)', { baseTitle: 'Track', kind: 'vip', remixer: 'Mark Knight & Dennis Ferrer' }],
+  ['Track (Édith Piaf Dub Mix)', { baseTitle: 'Track', kind: 'dub', remixer: 'Édith Piaf' }],
+  ['Track (Dennis Ferrer Dub Mix)', { baseTitle: 'Track', kind: 'dub', remixer: 'Dennis Ferrer' }],
+  ['Track (Mark Knight Mix)', { baseTitle: 'Track', kind: 'other', label: 'Mark Knight Mix' }],
+
+  // review round 1: feat/ft need a word boundary
+  ['Calling (FEATHERS MIX)', { baseTitle: 'Calling', kind: 'other', label: 'Feathers Mix' }],
+  ['Track (FTW Mix)', { baseTitle: 'Track', kind: 'other', label: 'Ftw Mix' }],
+  ['Track (Feature Mix)', { baseTitle: 'Track', kind: 'other', label: 'Feature Mix' }],
+  ['Breathe (feat.Cristoph)', { baseTitle: 'Breathe', kind: 'original', featuring: ['Cristoph'] }],
+  ['Breathe (FEAT. Cristoph)', { baseTitle: 'Breathe', kind: 'original', featuring: ['Cristoph'] }],
+
+  // review round 1: "with"
+  ['Track (with deadmau5)', { baseTitle: 'Track', kind: 'original', featuring: ['deadmau5'] }],
+  ['Track (with will.i.am)', { baseTitle: 'Track', kind: 'original', featuring: ['will.i.am'] }],
+  ['Song (With Love)', { baseTitle: 'Song (With Love)', kind: 'original' }],
+  ['Song (with you)', { baseTitle: 'Song (with you)', kind: 'original' }],
+  ['Breathe (With Cristoph)', { baseTitle: 'Breathe (With Cristoph)', kind: 'original' }],
+
+  // review round 1: noise words are not remixers; label canonical
+  ['Track (Clean Edit)', { baseTitle: 'Track', kind: 'radio' }],
+  ['Track (Explicit Edit)', { baseTitle: 'Track', kind: 'radio' }],
+  ['Track (EXTENDED MIX)', { baseTitle: 'Track', kind: 'extended', label: 'Extended Mix' }],
+  ['Track (vip mix)', { baseTitle: 'Track', kind: 'vip', label: 'VIP Mix' }],
+  ['Track (Remix by Mark Knight)', { baseTitle: 'Track', kind: 'remix', label: 'Mark Knight Remix', remixer: 'Mark Knight' }],
+  ["Track (Mark Knight's Remix)", { baseTitle: 'Track', kind: 'remix', label: 'Mark Knight Remix', remixer: 'Mark Knight' }],
+
   // degenerate
   ['(Original Mix)', { baseTitle: '(Original Mix)', kind: 'original' }],
   ['', { baseTitle: '', kind: 'original' }],
@@ -137,6 +168,23 @@ describe('parseVersion', () => {
   it('is case-insensitive on keywords', () => {
     expect(parseVersion('cola (EXTENDED MIX)').kind).toBe('extended');
     expect(parseVersion('cola (mark knight REMIX)').remixer).toBe('mark knight');
+  });
+
+  it('uses artists to accept a Title-Case "With X" credit', () => {
+    const v = parseVersion('Breathe (With Cristoph)', ['Ben Böhmer', 'Cristoph']);
+    expect(v.featuring).toEqual(['Cristoph']);
+    expect(v.baseTitle).toBe('Breathe');
+    expect(parseVersion('Song (With Love)', ['Someone']).baseTitle).toBe('Song (With Love)');
+  });
+
+  it('gives identical labels regardless of position, casing or bracket style', () => {
+    const forms = [
+      'T (Mark Knight Remix) - Extended Mix',
+      'T - Extended Mix (Mark Knight Remix)',
+      'T [extended mix] (MARK KNIGHT REMIX)',
+      'T - Mark Knight Remix [Extended Mix]',
+    ].map((r) => parseVersion(r).label);
+    expect(new Set(forms).size).toBe(1);
   });
 
   it('accepts an optional artists argument', () => {
