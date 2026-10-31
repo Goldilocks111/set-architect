@@ -1,4 +1,4 @@
-import { fetchJson } from '@/lib/http';
+import { fetchJson, HttpError } from '@/lib/http';
 import { getToken, spotifyAdapter } from '@/lib/sources/spotify';
 import { parseVersion } from '@/lib/search/version';
 import type { SearchProvider, SearchResult } from '@/lib/search/types';
@@ -61,11 +61,20 @@ export const spotifySearchProvider: SearchProvider = {
   configured: () => spotifyAdapter.configured(),
   async search(query, opts) {
     const limit = Math.max(1, Math.min(opts?.limit ?? MAX_LIMIT, MAX_LIMIT));
-    const token = await getToken();
-    const data = await fetchJson<{ tracks?: { items?: SpotifyItem[] } }>(
-      `${SEARCH_URL}?type=track&limit=${limit}&q=${encodeURIComponent(query)}`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
+    const url = `${SEARCH_URL}?type=track&limit=${limit}&q=${encodeURIComponent(query)}`;
+    const get = async (forceToken: boolean) =>
+      fetchJson<{ tracks?: { items?: SpotifyItem[] } }>(url, {
+        headers: { Authorization: `Bearer ${await getToken(forceToken)}` },
+        retries: 0,
+      });
+    let data;
+    try {
+      data = await get(false);
+    } catch (err) {
+      // a stale cached token: refresh once, then give up
+      if (!(err instanceof HttpError && err.status === 401)) throw err;
+      data = await get(true);
+    }
     return (data.tracks?.items ?? []).map(mapSpotifyItem);
   },
 };

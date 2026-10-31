@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('@/lib/search/version', () => ({
-  parseVersion: (title: string) => ({ baseTitle: title, kind: 'original', featuring: [] }),
-}));
+const parseVersionMock = vi.hoisted(() =>
+  vi.fn((title: string) => ({ baseTitle: title, kind: 'original', featuring: [] }))
+);
+vi.mock('@/lib/search/version', () => ({ parseVersion: parseVersionMock }));
 
 import {
   searchProviders,
@@ -92,6 +93,25 @@ describe('spotify', () => {
     await expect(spotifySearchProvider.search('x')).rejects.toThrow(/403/);
   });
 
+  it('refreshes the token once on 401', async () => {
+    fetchMock.mockResolvedValueOnce(json({ access_token: 't1', expires_in: 3600 }));
+    fetchMock.mockResolvedValueOnce(json({}, 401));
+    fetchMock.mockResolvedValueOnce(json({ access_token: 't2', expires_in: 3600 }));
+    fetchMock.mockResolvedValueOnce(json({ tracks: { items: [item] } }));
+    const rs = await spotifySearchProvider.search('x');
+    expect(rs).toHaveLength(1);
+    expect(fetchMock.mock.calls[3][1].headers.Authorization).toBe('Bearer t2');
+  });
+
+  it('percent-encodes & and accented characters in the query', async () => {
+    fetchMock.mockResolvedValueOnce(json({ access_token: 't', expires_in: 3600 }));
+    fetchMock.mockResolvedValueOnce(json({ tracks: { items: [] } }));
+    await spotifySearchProvider.search('Rüfüs & Béhmer é');
+    const url = fetchMock.mock.calls[1][0] as string;
+    expect(url).toContain('%26');
+    expect(url).toContain('%C3%A9');
+  });
+
   it('configured() follows the env credentials', () => {
     expect(spotifySearchProvider.configured()).toBe(true);
     vi.stubEnv('SPOTIFY_CLIENT_SECRET', '');
@@ -150,6 +170,27 @@ describe('deezer', () => {
     expect(pops[1]!).toBeLessThan(100);
     expect(pops[2]).toBe(100);
     expect(pops[3]).toBeUndefined();
+  });
+
+  it('passes title_version to parseVersion in brackets, keeping raw title', async () => {
+    fetchMock.mockResolvedValueOnce(json({ data: [{ ...item, title_version: 'Extended Mix' }] }));
+    const [r] = await deezerSearchProvider.search('q');
+    expect(parseVersionMock).toHaveBeenLastCalledWith('Latch (Extended Mix)', ['Disclosure']);
+    expect(r.title).toBe('Latch');
+  });
+
+  it('does not double a qualifier already in the title (case-insensitive)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      json({ data: [{ ...item, title: 'Latch (extended mix)', title_version: 'Extended Mix' }] })
+    );
+    await deezerSearchProvider.search('q');
+    expect(parseVersionMock).toHaveBeenLastCalledWith('Latch (extended mix)', ['Disclosure']);
+  });
+
+  it('ignores a non-numeric rank', async () => {
+    fetchMock.mockResolvedValueOnce(json({ data: [{ ...item, rank: 'abc' }, { ...item, rank: null }] }));
+    const rs = await deezerSearchProvider.search('q');
+    expect(rs.map((r) => r.popularity)).toEqual([undefined, undefined]);
   });
 
   it('returns [] when there are no results', async () => {

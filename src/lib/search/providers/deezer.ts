@@ -19,16 +19,18 @@ interface DeezerItem {
 
 /** Deezer rank is an unbounded play-based number (~1e6 for big hits): log-scale it so 1e6 maps to 100. */
 export function popularityFromRank(rank?: number): number | undefined {
-  if (typeof rank !== 'number' || rank <= 0) return undefined;
+  if (typeof rank !== 'number' || !Number.isFinite(rank) || rank <= 0) return undefined;
   return Math.min(100, Math.round((Math.log10(1 + rank) / 6) * 100));
 }
 
 export function mapDeezerItem(t: DeezerItem): SearchResult {
   const artist = t.artist?.name ?? '';
   const artists = artist ? [artist] : [];
-  // Deezer often splits the qualifier into title_version ("Extended Mix") instead of title.
+  // Deezer often splits the qualifier into title_version ("Extended Mix"); parseVersion only
+  // recognizes qualifiers in brackets or after a dash, so re-attach it in brackets.
+  const qualifier = t.title_version?.trim().replace(/^[([]\s*|\s*[)\]]$/g, '');
   const parseInput =
-    t.title_version && !t.title.includes(t.title_version) ? `${t.title} ${t.title_version}` : t.title;
+    qualifier && !t.title.toLowerCase().includes(qualifier.toLowerCase()) ? `${t.title} (${qualifier})` : t.title;
   const out: SearchResult = {
     provider: 'deezer',
     providerId: String(t.id),
