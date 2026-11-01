@@ -235,6 +235,29 @@ describe('<Builder /> resolving lifecycle', () => {
     expect(screen.getAllByText('Incomplete — Still looking — retrying automatically')).toHaveLength(5);
   });
 
+  it('a track dequeued after its clock fired never flips back to Resolving…', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const tracks = [1, 2, 3, 4, 5].map((n) => incomplete(`t${n}`));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ template: '60min', tracks }));
+    const answerAfter = (ms: number, body: unknown) => new Promise<Response>((r) => setTimeout(() => r(new Response(JSON.stringify(body))), ms));
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      const u = String(url);
+      if (!u.startsWith('/api/search/resolve')) return Promise.resolve(new Response(JSON.stringify({ suggestions: [] })));
+      if (u.includes('Title+t1') || u.includes('Title+t2')) return answerAfter(70_000, { track: incomplete('x') });
+      if (u.includes('Title+t3')) return answerAfter(30_000, { track: complete('t3') }); // starts at 70 s, lands at 100 s
+      return new Promise<Response>(() => {}); // t4, t5 never answer
+    }));
+    await act(async () => { render(<Builder demo getSongBpmConfigured={false} />); });
+    expect(screen.getAllByText('Resolving…')).toHaveLength(5);
+    for (const at of [61_000, 90_000, 125_000]) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(at - (at === 61_000 ? 0 : at === 90_000 ? 61_000 : 90_000)); });
+      expect(screen.queryByText('Resolving…')).toBeNull();
+    }
+    // t3 answered at ~100 s: Complete; the other four stay incomplete
+    expect(screen.getAllByText('Complete')).toHaveLength(1);
+    expect(screen.getAllByText(/Incomplete — Still looking/)).toHaveLength(4);
+  });
+
   it('a queued request that answers after the cap still applies', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ template: '60min', tracks: [incomplete('slow')] }));

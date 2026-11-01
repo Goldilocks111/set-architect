@@ -62,7 +62,8 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
   const startResolve = useCallback(
     async (track: Track) => {
       const gen = generation.current;
-      dispatch({ type: 'resolveStart', id: track.id });
+      // A track whose clock already fired stays incomplete/'timeout' while its request runs.
+      if (!clocks.current.get(track.id)?.fired) dispatch({ type: 'resolveStart', id: track.id });
       armClock(track.id);
       const ctrl = new AbortController();
       controllers.current.add(ctrl);
