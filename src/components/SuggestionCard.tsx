@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { Suggestion, Track } from '@/types/track';
+import { CompletenessMark } from './CompletenessBadge';
 import PreviewPlayer from './PreviewPlayer';
 import {
   QUALITY_CLASSES,
@@ -70,6 +71,7 @@ export default function SuggestionCard({ suggestion, onAdd }: Props) {
             <span className="h-2 w-2 rounded-full" style={{ background: energyColor(track.energy) }} />
             <span className="text-[#E8E4DA]">{fmtEnergy(track.energy)}</span> energy
           </span>
+          <CompletenessMark track={track} />
         </div>
 
         {reasons.length > 0 && (

@@ -11,7 +11,7 @@ import {
   YAxis,
 } from 'recharts';
 import type { ArcTemplate, Track } from '@/types/track';
-import { buildCurveData, type CurveRow } from './curveData';
+import { buildCurveData, quarantineForCurve, type CurveRow } from './curveData';
 import { plannedLengthFor } from './playlistReducer';
 
 export const CURVE_COLORS = {
@@ -50,7 +50,7 @@ function CurveTooltip({ active, payload }: { active?: boolean; payload?: Array<{
 
 export default function EnergyCurve({ tracks, template, height = 260 }: Props) {
   const planned = plannedLengthFor(template);
-  const data = buildCurveData(tracks, template, planned);
+  const data = buildCurveData(quarantineForCurve(tracks), template, planned);
   const bpms = data.map((d) => d.bpm).filter((b): b is number => b !== null);
   const bpmDomain: [number, number] = bpms.length
     ? [Math.floor(Math.min(...bpms) - 8), Math.ceil(Math.max(...bpms) + 2)]

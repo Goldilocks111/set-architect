@@ -1,8 +1,12 @@
 'use client';
 
-import type { DragEvent } from 'react';
+import { useState, type DragEvent } from 'react';
+import { isComplete } from '@/lib/completeness';
+import type { OverrideFields } from '@/lib/overrideValidation';
 import type { Track } from '@/types/track';
-import { displayTitle, energyColor, fmtBpm, fmtEnergy, youtubeHref } from './trackFormat';
+import CompletenessBadge from './CompletenessBadge';
+import OverrideEditor from './OverrideEditor';
+import { displayTitle, energyColor, fmtBpm, fmtDance, fmtEnergy, youtubeHref } from './trackFormat';
 
 interface Props {
   track: Track;
@@ -15,6 +19,9 @@ interface Props {
   onDragOverRow: (index: number) => void;
   onDrop: (index: number) => void;
   onDragEnd: () => void;
+  resolving?: boolean;
+  /** Resolves to an error message, or null when saved. */
+  onOverride?: (track: Track, fields: OverrideFields) => Promise<string | null>;
 }
 
 const iconBtn =
@@ -31,12 +38,17 @@ export default function SetRow({
   onDragOverRow,
   onDrop,
   onDragEnd,
+  resolving = false,
+  onOverride,
 }: Props) {
+  const [editing, setEditing] = useState(false);
+  const quarantined = !isComplete(track);
   const title = displayTitle(track);
   const energyKnown = typeof track.energy === 'number' && Number.isFinite(track.energy);
   return (
     <li
-      draggable
+      draggable={!editing}
+      data-quarantined={quarantined ? 'true' : 'false'}
       onDragStart={(e: DragEvent) => {
         e.dataTransfer.effectAllowed = 'move';
         onDragStart(index);
@@ -50,7 +62,7 @@ export default function SetRow({
         onDrop(index);
       }}
       onDragEnd={onDragEnd}
-      className={`group grid cursor-grab grid-cols-[28px_8px_1fr_auto] sm:grid-cols-[36px_8px_1fr_auto] items-center gap-x-3 rounded-lg px-2 py-2 active:cursor-grabbing ${
+      className={`group grid cursor-grab ${quarantined ? 'opacity-60' : ''} grid-cols-[28px_8px_1fr_auto] sm:grid-cols-[36px_8px_1fr_auto] items-center gap-x-3 rounded-lg px-2 py-2 active:cursor-grabbing ${
         dragOver ? 'bg-[#232838] ring-1 ring-[#F2B33D]/50' : 'hover:bg-[#1F2330]'
       }`}
     >
@@ -77,6 +89,10 @@ export default function SetRow({
           </span>
           <span className="shrink-0">{fmtBpm(track.bpm)} BPM</span>
           <span className="shrink-0">E{fmtEnergy(track.energy)}</span>
+          <span className="shrink-0">D{fmtDance(track.danceability)}</span>
+        </div>
+        <div className="mt-0.5">
+          <CompletenessBadge track={track} resolving={resolving} />
         </div>
       </div>
       <div className="flex items-center gap-0.5 opacity-100 sm:opacity-40 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100">
@@ -104,6 +120,11 @@ export default function SetRow({
             <path d="M6 4.5v7l5.5-3.5z" />
           </svg>
         </a>
+        {onOverride && (
+          <button type="button" className={iconBtn} onClick={() => setEditing((v) => !v)} aria-expanded={editing} aria-label={`Edit values for ${title}`}>
+            <svg aria-hidden viewBox="0 0 16 16" className="h-3.5 w-3.5 fill-current"><path d="M11.5 2.5l2 2L6 12l-3 1 1-3z" /></svg>
+          </button>
+        )}
         <button type="button" className={iconBtn} disabled={index === 0} onClick={() => onMove(index, index - 1)} aria-label={`Move ${title} up`}>
           <svg aria-hidden viewBox="0 0 16 16" className="h-3.5 w-3.5 fill-current"><path d="M8 4l5 6H3z" /></svg>
         </button>
@@ -114,6 +135,17 @@ export default function SetRow({
           <svg aria-hidden viewBox="0 0 16 16" className="h-3.5 w-3.5 stroke-current" strokeWidth="1.8" strokeLinecap="round"><path d="M4 4l8 8M12 4l-8 8" /></svg>
         </button>
       </div>
+      {editing && onOverride && (
+        <OverrideEditor
+          track={track}
+          onCancel={() => setEditing(false)}
+          onSave={async (fields) => {
+            const err = await onOverride(track, fields);
+            if (!err) setEditing(false);
+            return err;
+          }}
+        />
+      )}
     </li>
   );
 }
