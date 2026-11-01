@@ -6,7 +6,7 @@ describe('musicalKeyToCamelot', () => {
     ['F#m', '11A'], ['F# minor', '11A'], ['Gbm', '11A'], ['A minor', '8A'], ['Amin', '8A'], ['Am', '8A'],
     ['Bbmaj', '6B'], ['Bb major', '6B'], ['Bb', '6B'], ['C', '8B'], ['C major', '8B'], ['G', '9B'], ['Em', '9A'],
     ['Db', '3B'], ['C#', '3B'], ['Gb', '2B'], ['F#', '2B'], ['G#m', '1A'], ['Abm', '1A'], ['Ebm', '2A'], ['D#m', '2A'],
-    ['Bm', '10A'], ['Dm', '7A'], ['F', '7B'], ['E', '12B'], ['B', '1B'], ['C♯m', '12A'], ['B♭', '6B'],
+    ['Bm', '10A'], ['Cm', '5A'], ['Gm', '6A'], ['Fm', '4A'], ['Bbm', '3A'], ['D', '10B'], ['A', '11B'], ['Eb', '5B'], ['Ab', '4B'], ['Dm', '7A'], ['F', '7B'], ['E', '12B'], ['B', '1B'], ['C♯m', '12A'], ['B♭', '6B'],
     ['8A', '8A'], ['12b', '12B'], [' 5a ', '5A'],
     ['1d', '8B'], ['1m', '8A'], ['6d', '1B'], ['12m', '7A'], ['7m', '2A'],
   ])('%s -> %s', (input, out) => {
@@ -49,6 +49,14 @@ describe('parseMikCsv', () => {
       { artist: 'A', title: 'B', camelot: '8A', energy: 6 },
       { artist: 'C', title: 'D', camelot: '11B', energy: 9 },
     ]);
+  });
+  it('does not read free-text comments as keys', () => {
+    const r = parseMikCsv('Artist,Title,Comment,BPM\nA,B,cut at 4b intro 2a,120\nC,D,Key: 3B,121');
+    expect(r.rows).toEqual([{ artist: 'A', title: 'B', bpm: 120 }, { artist: 'C', title: 'D', camelot: '3B', bpm: 121 }]);
+  });
+  it('splits the file name at the first " - " and reads tab-delimited files', () => {
+    const r = parseMikCsv('File name\tKey\tBPM\nDJ X - Song - Part 2.wav\t8A\t120');
+    expect(r.rows[0]).toMatchObject({ artist: 'DJ X', title: 'Song - Part 2', camelot: '8A' });
   });
   it('columns beat the comment', () => {
     const r = parseMikCsv('Artist,Title,Key,Energy,Comment\nA,B,9A,4,8A - Energy 6');

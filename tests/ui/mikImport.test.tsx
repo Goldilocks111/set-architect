@@ -50,6 +50,23 @@ describe('<MikImport />', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).items).toHaveLength(2000);
   });
 
+  it('reports a failed later chunk, counts unimported rows, and still updates chunk 1 matches', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: RequestInit) => {
+      if (++calls === 2) return Response.json({ error: 'Server busy' }, { status: 500 });
+      const { items } = JSON.parse(String(init?.body)) as { items: unknown[] };
+      return Response.json({ applied: items.length, rejected: [], tracks: [] });
+    }));
+    const onApply = vi.fn();
+    const { container } = render(<MikImport tracks={[track('t1', 'A0', 'T0'), track('t2', 'A2500', 'T2500')]} onApply={onApply} />);
+    const lines = Array.from({ length: 2600 }, (_, i) => `A${i},T${i},8A,120,5`).join('\n');
+    fireEvent.change(container.querySelector('input[type=file]')!, { target: { files: [csv(`Artist,Title,Key,BPM,Energy\n${lines}`)] } });
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Stopped: Server busy'));
+    expect(screen.getByRole('status')).toHaveTextContent('Imported 2000, matched 1 in this set, skipped 0');
+    expect(screen.getByRole('status')).toHaveTextContent('600 rows not imported');
+    expect(onApply).toHaveBeenCalledWith([{ id: 't1', fields: { bpm: 120, camelot: '8A', energy: 5 } }]);
+  });
+
   it('says so when nothing usable is in the file, without calling the server', async () => {
     const fetchMock = batchFetch();
     vi.stubGlobal('fetch', fetchMock);

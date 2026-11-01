@@ -46,6 +46,8 @@ export default function MikImport({ tracks, onApply }: Props) {
       }
       const applied: MikRow[] = [];
       let rejected = 0;
+      let stopped: string | undefined;
+      let notImported = 0;
       for (let i = 0; i < rows.length; i += CHUNK) {
         const chunk = rows.slice(i, i + CHUNK);
         const res = await fetch('/api/tracks/override', {
@@ -55,9 +57,14 @@ export default function MikImport({ tracks, onApply }: Props) {
         });
         const body = (await res.json().catch(() => ({}))) as { error?: string; rejected?: Array<{ index: number }> };
         if (!res.ok) {
-          setMessage({ text: body.error ?? 'Could not import the file.', error: true });
-          if (applied.length) break; // keep what earlier chunks already saved
-          return;
+          const error = body.error ?? 'Could not import the file.';
+          if (!applied.length) {
+            setMessage({ text: error, error: true });
+            return;
+          }
+          stopped = error; // keep what earlier chunks already saved
+          notImported = rows.length - i;
+          break;
         }
         const bad = new Set((body.rejected ?? []).map((r) => r.index));
         rejected += bad.size;
@@ -78,7 +85,8 @@ export default function MikImport({ tracks, onApply }: Props) {
       }
       const updates = [...merged].flatMap(([k, fields]) => byKey.get(k)!.map((t) => ({ id: t.id, fields })));
       if (updates.length) onApply(updates);
-      setMessage({ text: `Imported ${applied.length}, matched ${updates.length} in this set, skipped ${skipped + rejected}` });
+      const summary = `Imported ${applied.length}, matched ${updates.length} in this set, skipped ${skipped + rejected}`;
+      setMessage(stopped ? { text: `${summary}. Stopped: ${stopped} ${notImported} rows not imported.`, error: true } : { text: summary });
     } catch {
       setMessage({ text: 'Could not read or import the file.', error: true });
     } finally {

@@ -137,7 +137,8 @@ export function parseMikCsv(text: string): { rows: MikRow[]; skipped: number } {
     if (bpm !== undefined) row.bpm = bpm;
     const keyCell = get('key');
     let camelot = keyCell ? musicalKeyToCamelot(keyCell) : undefined;
-    if (!camelot) camelot = /(?:^|[^0-9A-Za-z])((?:1[0-2]|[1-9])[ABab])(?![0-9A-Za-z])/.exec(comment)?.[1]?.toUpperCase();
+    // only the MIK shapes "8A - Energy 6", "Energy 6 - 8A", "Key: 8A"; free text like "cut at 4b" is not a key
+    if (!camelot) camelot = (/^\s*((?:1[0-2]|[1-9])[ABab])(?![0-9A-Za-z])/.exec(comment) ?? /\bkey\s*[:=]\s*((?:1[0-2]|[1-9])[ABab])(?![0-9A-Za-z])/i.exec(comment) ?? /energy\s*[:=]?\s*\d+\s*[-–,;/|]\s*((?:1[0-2]|[1-9])[ABab])(?![0-9A-Za-z])/i.exec(comment))?.[1]?.toUpperCase();
     if (camelot) row.camelot = camelot;
     let energy = num(get('energy'));
     if (energy === undefined) {
