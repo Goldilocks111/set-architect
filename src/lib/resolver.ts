@@ -48,7 +48,8 @@ const OVERRIDES: Record<string, Array<keyof Track>> = { soundstat: ['bpm', 'came
 interface ResolveRun {
   deadline?: number; // epoch ms; checked between adapters
   aborted: boolean; // set by the caller when it stops waiting: the loop must stop writing
-  providersSkipped: boolean; // a guarded adapter was skipped by cooldown/budget
+  providersSkipped: boolean; // a guarded adapter was skipped by cooldown/budget, or errored (offline, 5xx, 429, timeout)
+  only?: Set<string>; // restrict to these adapters (preview refresh on a cache hit); skips preview analysis
   timedOut: boolean;
   deezerPreview?: string;
   analysed: boolean;
@@ -76,6 +77,7 @@ function initialTrack(artist: string, title: string, hints: { spotifyId?: string
 async function resolveInto(track: Track, run: ResolveRun): Promise<Track> {
   for (const adapter of ADAPTERS) {
     if (run.aborted) return track;
+    if (run.only && !run.only.has(adapter.name)) continue;
     if (run.deadline !== undefined && Date.now() >= run.deadline) {
       run.timedOut = true;
       return track;
@@ -101,13 +103,16 @@ async function resolveInto(track: Track, run: ResolveRun): Promise<Track> {
         track.sources[field] = adapter.fieldLabels?.[field] ?? adapter.name;
       }
     } catch (err) {
-      if (guarded) recordFailure(guarded, err);
+      if (guarded) {
+        recordFailure(guarded, err);
+        run.providersSkipped = true;
+      }
       // a failing adapter is skipped; resolution continues with the rest
     }
   }
   // Last resort: estimate from the Deezer preview (never iTunes: Apple's terms restrict preview use).
   const missing = ESSENTIALS.filter((f) => track[f] === undefined);
-  if (missing.length && run.deezerPreview && !run.aborted) {
+  if (missing.length && run.deezerPreview && !run.aborted && !run.only) {
     run.analysed = true;
     try {
       const partial = await withTimeout(analysePreview(track.id, run.deezerPreview), ANALYSIS_TIMEOUT_MS, 'preview-analysis');
@@ -132,13 +137,32 @@ function matchedAnyProvider(track: Track): boolean {
 
 function reasonFor(track: Track, run: ResolveRun): IncompleteReason {
   if (run.timedOut) return 'timeout';
-  if (run.providersSkipped) return 'providers-unavailable';
+  // A provider that errored or was skipped could have supplied the match/preview: retryable, not permanent.
+  if (run.providersSkipped && (!matchedAnyProvider(track) || !run.deezerPreview)) return 'providers-unavailable';
   if (!matchedAnyProvider(track)) return 'not-found';
   if (!run.deezerPreview) return 'no-preview';
   return 'analysis-failed';
 }
 
 export const RESOLVE_BUDGET_MS = 45_000;
+const NEGATIVE_CACHE_MS = 24 * 60 * 60_000;
+
+/**
+ * previewUrl expires within minutes and is never persisted, so a complete cache hit still asks the
+ * preview-supplying adapters (through the usual breaker/budget guards) for a fresh one. Essentials stay cached.
+ */
+async function withFreshPreview(cached: Track, budgetMs: number): Promise<Track> {
+  const track: Track = { ...cached, sources: { ...cached.sources } };
+  const run = newRun(Date.now() + budgetMs);
+  run.only = new Set(['deezer', 'itunes']);
+  try {
+    await withTimeout(resolveInto(track, run), budgetMs, 'preview refresh');
+  } catch {
+    // best-effort: the cached essentials are still good
+  }
+  run.aborted = true;
+  return { ...track, sources: { ...track.sources } };
+}
 
 /**
  * resolveTrack + the completeness gate: consults the persistent metadata cache (a complete entry costs zero
@@ -156,11 +180,16 @@ export async function resolveWithStatus(
   if (cached && !opts.force) {
     const fromCache: Track = { ...initialTrack(artist, title, {}), ...cached.fields, sources: { ...cached.sources } };
     const missingNow = missingEssentials(fromCache);
-    if (!missingNow.length) return fromCache;
-    const nonRetryableFresh = cached.reason && !RETRYABLE_REASONS.includes(cached.reason) && Date.now() - cached.resolvedAt < 24 * 60 * 60_000;
-    if (cached.reason && (nonRetryableFresh || (cached.retryAt ?? 0) > Date.now())) {
-      fromCache.unresolved = { reason: cached.reason, missing: missingNow, ...(cached.retryAt ? { retryAt: cached.retryAt } : {}) };
-      return fromCache;
+    if (!missingNow.length) return withFreshPreview(fromCache, budgetMs);
+    // Every incomplete entry is served from cache (zero adapter calls) until it is due: a retryable one until
+    // its retryAt; an exhausted/permanent one for 24 h. Otherwise each request would re-run every adapter.
+    if (cached.reason) {
+      const retryable = RETRYABLE_REASONS.includes(cached.reason) && cached.retryAt !== undefined;
+      const until = retryable ? cached.retryAt! : cached.resolvedAt + NEGATIVE_CACHE_MS;
+      if (until > Date.now()) {
+        fromCache.unresolved = { reason: cached.reason, missing: missingNow, ...(cached.retryAt ? { retryAt: cached.retryAt } : {}) };
+        return fromCache;
+      }
     }
   }
 
