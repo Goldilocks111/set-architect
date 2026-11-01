@@ -9,6 +9,11 @@ export interface TrackRef {
   title: string;
 }
 
+export interface TrackSummary extends TrackRef {
+  trackKey: string;
+  neighborCount: number;
+}
+
 export interface AdjacencyStats {
   tracklistCount: number;
   trackCount: number;
@@ -174,6 +179,16 @@ export class JsonAdjacencyStore implements AdjacencyStore {
     const data = this.load();
     (data.playCounts ??= {})[trackKey] = count;
     writeData(this.file, data);
+  }
+
+  /** Every indexed track with its display name and distinct-neighbor count (driver frontier). */
+  trackSummaries(): TrackSummary[] {
+    const data = this.load();
+    const out: TrackSummary[] = [];
+    for (const [trackKey, name] of Object.entries(data.names)) {
+      out.push({ trackKey, artist: name.artist, title: name.title, neighborCount: neighborsOf(data, trackKey).length });
+    }
+    return out;
   }
 
   async getNeighbors(trackKey: string) {
