@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { RequestGate, dayKey, isRateLimited, loadDailyCounts, saveDailyCounts } from '../search/guard';
+import { dataDir } from '../../src/lib/dataDir';
+import { RequestGate, dayKey, loadDailyCounts, saveDailyCounts } from '../search/guard';
+import { createFetchGuard } from './guardFetch';
 import { ESSENTIALS, keyAgreement, maeEnergy, percentile, yieldTable, type DataRow, type Essential } from './score';
 
 try {
@@ -18,52 +20,7 @@ const LIMIT = limitArg ? Number(limitArg.split('=')[1]) : undefined;
 const BUDGET: Record<string, number> = { spotify: 110, deezer: 400, musicbrainz: 200, reccobeats: 200 };
 /** Minimum gap between requests per provider (ms). MusicBrainz is 1 req/s. */
 const GAP_MS: Record<string, number> = { spotify: 340, deezer: 340, musicbrainz: 1100, reccobeats: 340 };
-const HOSTS: Array<[RegExp, string]> = [
-  [/(^|\.)deezer\.com$/, 'deezer'],
-  [/(^|\.)dzcdn\.net$/, 'deezer-cdn'], // preview audio; uncounted
-  [/(^|\.)spotify\.com$/, 'spotify'],
-  [/(^|\.)musicbrainz\.org$/, 'musicbrainz'],
-  [/(^|\.)reccobeats\.com$/, 'reccobeats'],
-];
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const gates = new Map<string, RequestGate>();
-const stopped = new Map<string, string>(); // provider -> reason (429)
-const refused: Record<string, number> = {};
-const lastCall = new Map<string, number>();
-
-class BenchRefused extends Error {}
-
-/**
- * Bench-only HTTP interception: wraps global fetch (which src/lib/http.ts uses) so every provider call made
- * inside resolveTrack is paced, counted against its budget, and a 429 stops that provider for the run.
- * Refusals throw a plain error (not HttpError), so the app's persisted circuit breaker never sees them.
- */
-function installGuard(): void {
-  const real = globalThis.fetch;
-  globalThis.fetch = (async (input: any, init?: any) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    const host = new URL(url).hostname;
-    const provider = HOSTS.find(([re]) => re.test(host))?.[1];
-    if (!provider) return real(input, init);
-    const gate = gates.get(provider);
-    if (stopped.has(provider)) {
-      refused[provider] = (refused[provider] ?? 0) + 1;
-      throw new BenchRefused(`${provider} stopped for this run (${stopped.get(provider)})`);
-    }
-    const gap = GAP_MS[provider] ?? 0;
-    const wait = (lastCall.get(provider) ?? 0) + gap - Date.now();
-    if (wait > 0) await sleep(wait);
-    if (gate && !gate.take()) {
-      refused[provider] = (refused[provider] ?? 0) + 1;
-      throw new BenchRefused(`${provider} budget exhausted`);
-    }
-    lastCall.set(provider, Date.now());
-    const res = await real(input, init);
-    if (isRateLimited(provider, { status: res.status })) stopped.set(provider, `HTTP 429, retry-after ${res.headers.get('retry-after') ?? 'n/a'}`);
-    return res;
-  }) as typeof fetch;
-}
 
 async function tryImport(path: string): Promise<any | null> {
   try {
@@ -81,12 +38,12 @@ async function main(): Promise<void> {
   );
   const subset = LIMIT ? tracks.slice(0, LIMIT) : tracks;
 
-  const dd = await tryImport('../../src/lib/dataDir');
-  const dailyFile: string | null = dd ? dd.dataDir('search', 'bench-requests.json') : null;
+  // static import on purpose: if daily counts can't be shared with the search bench, fail loudly
+  const dailyFile = dataDir('search', 'bench-requests.json');
   const day = dayKey();
   const store = {
-    read: () => (dailyFile && existsSync(dailyFile) ? readFileSync(dailyFile, 'utf8') : null),
-    write: (t: string) => dailyFile && writeFileSync(dailyFile, t),
+    read: () => (existsSync(dailyFile) ? readFileSync(dailyFile, 'utf8') : null),
+    write: (t: string) => writeFileSync(dailyFile, t),
   };
   const today = loadDailyCounts(store, day);
   // merge into the shared file: the search bench keeps its own provider keys there
@@ -104,7 +61,9 @@ async function main(): Promise<void> {
   itunes.itunesAdapter.configured = () => false;
   soundstat.soundstatAdapter.configured = () => false;
 
-  installGuard();
+  const guard = createFetchGuard({ real: globalThis.fetch, gates, gapMs: GAP_MS });
+  const { stopped, refused } = guard;
+  globalThis.fetch = guard.fetch;
   const { resolveTrack } = await import('../../src/lib/resolver');
   const analysis = await tryImport('../../src/lib/analysis/previewAnalysis');
   const analyseFull: ((b: Uint8Array) => Promise<any>) | null =
