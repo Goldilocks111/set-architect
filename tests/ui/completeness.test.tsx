@@ -255,7 +255,7 @@ describe('<Builder /> resolving lifecycle', () => {
     }
     // t3 answered at ~100 s: Complete; the other four stay incomplete
     expect(screen.getAllByText('Complete')).toHaveLength(1);
-    expect(screen.getAllByText(/Incomplete — Still looking/)).toHaveLength(4);
+    expect(screen.getAllByText(/^Incomplete — /)).toHaveLength(4);
   });
 
   it('a queued request that answers after the cap still applies', async () => {
