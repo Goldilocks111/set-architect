@@ -75,13 +75,16 @@ export async function resolveTrack(
       // a failing adapter is skipped; resolution continues with the rest
     }
   }
-  // Last resort: estimate tempo from the Deezer preview (never iTunes: Apple's terms restrict preview use).
-  if (track.bpm === undefined && deezerPreview) {
+  // Last resort: estimate from the Deezer preview (never iTunes: Apple's terms restrict preview use).
+  const missing = (['bpm', 'camelot', 'energy', 'danceability'] as const).filter((f) => track[f] === undefined);
+  if (missing.length && deezerPreview) {
     try {
       const partial = await withTimeout(analysePreview(track.id, deezerPreview), ANALYSIS_TIMEOUT_MS, 'preview-analysis');
-      if (partial.bpm !== undefined) {
-        track.bpm = partial.bpm;
-        track.sources.bpm = 'preview-analysis';
+      for (const f of missing) {
+        const value = partial[f];
+        if (value === undefined) continue;
+        (track as unknown as Record<string, unknown>)[f] = value;
+        track.sources[f] = 'preview-analysis';
       }
     } catch {
       // analysis is best-effort
