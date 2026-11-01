@@ -87,3 +87,8 @@ through subagents working off `docs/specs/build-plan.md`.
   Spotify's /me/playlists repeats a playlist across pages, and a playlist can hold the same
   track twice → duplicate React keys. listPlaylists/playlistTracks now dedupe by id (first wins).
   Lesson: never assume provider pagination yields unique ids.
+- 2026-11-01: Last.fm key setup. Incident: a "masked" grep of .env used `\s` in BSD sed (macOS
+  doesn't support it) → the value of a line with `= value` printed in clear into the session;
+  key + shared secret rotated. RULE: never grep/print .env lines, even "masked" — check secrets
+  only via `node --env-file=.env` printing presence/length. Also: the app reads
+  LASTFM_API_KEY (not LASTFM_API); shared secret is not needed.
