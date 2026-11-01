@@ -206,7 +206,7 @@ describe('206 soft block', () => {
     expect(await live.ensureNeighborsFor('Bicep', 'Glue')).toEqual({ digging: false });
   });
 
-  it('a job that ingests zero tracklists leaves the key eligible for retry', async () => {
+  it('a job that ingests zero tracklists is not marked searched and retries only after the backoff', async () => {
     const f: Fetcher = {
       ...fetcher,
       async get(url) {
@@ -218,6 +218,8 @@ describe('206 soft block', () => {
     await live.ensureNeighborsFor('Bicep', 'Glue');
     await live.whenIdle();
     expect(state().searched[trackKeyOf('Bicep', 'Glue')]).toBeUndefined();
+    expect(await live.ensureNeighborsFor('Bicep', 'Glue')).toEqual({ digging: false });
+    clock += BACKOFF_MS;
     expect(await live.ensureNeighborsFor('Bicep', 'Glue')).toEqual({ digging: true });
     await live.whenIdle();
   });
@@ -233,5 +235,35 @@ describe('206 soft block', () => {
     await live.whenIdle();
     expect(scales).toEqual([2, 1, 1, 1]);
     expect(state().pausedUntil).toBeUndefined();
+  });
+
+  it('an incomplete job (tracklists found, every page failed) backs the key off instead of retrying forever', async () => {
+    const broken: Fetcher = {
+      search: (q) => fetcher.search(q),
+      async get(url) {
+        if (url.includes('/ajax/')) return AJAX;
+        throw new Error('parse failure');
+      },
+    };
+    const live = createIngestor({ fetcher: broken, store, statePath, now: () => clock });
+    await live.ensureNeighborsFor('Bicep', 'Glue');
+    await live.whenIdle();
+    const key = trackKeyOf('Bicep', 'Glue');
+    expect(state().backoff[key]).toBe(clock + BACKOFF_MS);
+    calls = [];
+    expect(await live.ensureNeighborsFor('Bicep', 'Glue')).toEqual({ digging: false });
+    expect(calls).toEqual([]);
+  });
+
+  it('deepen digs a track that already has neighbors; the default does not', async () => {
+    await store.ingest('x', [
+      { artist: 'Bicep', title: 'Glue' },
+      { artist: 'A', title: 'B' },
+    ]);
+    const live = make();
+    expect(await live.ensureNeighborsFor('Bicep', 'Glue')).toEqual({ digging: false });
+    expect(await live.ensureNeighborsFor('Bicep', 'Glue', { deepen: true })).toEqual({ digging: true });
+    await live.whenIdle();
+    expect(calls[0]).toBe('search:Bicep Glue');
   });
 });

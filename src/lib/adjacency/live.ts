@@ -6,6 +6,7 @@ import { BASE_URL, parseSearch } from '../../../scripts/scraper/parseSearch';
 import { parseTracklist } from '../../../scripts/scraper/parseTracklist';
 import { trackKeyOf } from '../../types/track';
 import { dropStaleKeys, TRACK_KEY_VERSION } from '../keyMigration';
+import { isLockHeld } from '../../../scripts/ingest/lock';
 import { JsonAdjacencyStore, type AdjacencyStore } from './store';
 
 export const SEARCHED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -165,6 +166,9 @@ export function createIngestor(deps: IngestorDeps) {
           if (complete) {
             s.searched[job.key] = now();
             delete s.backoff[job.key];
+          } else {
+            // tracklists were found but none could be fetched/parsed: don't retry every cycle
+            s.backoff[job.key] = now() + BACKOFF_MS;
           }
         });
       } catch (err) {
@@ -191,11 +195,12 @@ export function createIngestor(deps: IngestorDeps) {
 
   return {
     /** Resolves once the decision is made (no network); `digging` is true while a job for this track is queued or running. */
-    async ensureNeighborsFor(artist: string, title: string): Promise<{ digging: boolean }> {
+    async ensureNeighborsFor(artist: string, title: string, opts: { deepen?: boolean } = {}): Promise<{ digging: boolean }> {
       const key = trackKeyOf(artist, title);
       if (!artist.trim() || !title.trim()) return { digging: false };
       if (pending.has(key)) return { digging: true };
-      if ((await deps.store.getNeighbors(key)).length > 0) return { digging: false };
+      // `deepen` (background driver) digs tracks that already have neighbors to grow the index
+      if (!opts.deepen && (await deps.store.getNeighbors(key)).length > 0) return { digging: false };
       const t = now();
       const s = readState();
       if ((s.pausedUntil ?? 0) > t) return { digging: false };
@@ -224,7 +229,20 @@ const GLOBAL_KEY = Symbol.for('setarchitect.liveIngestor');
 
 /** Live fetching is off under tests and when SETARCHITECT_LIVE=0. */
 export function liveEnabled(): boolean {
-  return process.env.SETARCHITECT_LIVE !== '0' && process.env.NODE_ENV !== 'test';
+  if (process.env.SETARCHITECT_LIVE === '0' || process.env.NODE_ENV === 'test') return false;
+  return !driverRunning();
+}
+
+const DRIVER_CHECK_TTL_MS = 10_000;
+let driverCheck: { at: number; running: boolean } | undefined;
+
+/** True while the background ingest driver holds its lock (it owns adjacency.json writes); cached ~10 s. */
+function driverRunning(): boolean {
+  const t = Date.now();
+  if (!driverCheck || t - driverCheck.at > DRIVER_CHECK_TTL_MS) {
+    driverCheck = { at: t, running: isLockHeld(dataDir('index', 'ingest.lock')) };
+  }
+  return driverCheck.running;
 }
 
 function singleton(): Ingestor {
