@@ -2,6 +2,7 @@ import type { ArcTemplate, Suggestion, SuggestionReason, Track, Weights } from '
 import { trackKeyOf } from '@/types/track';
 import { isEnergyBoostKey, parseCamelot, scoreKeyTransition } from './camelot';
 import { scoreBpmTransition } from './bpm';
+import { isComplete } from '@/lib/completeness';
 import { energyTargetAt, scoreEnergyTransition } from './energy';
 
 export const DEFAULT_WEIGHTS: Weights = {
@@ -30,14 +31,18 @@ export function suggestNext(args: {
 }): Suggestion[] {
   const w = args.weights ?? DEFAULT_WEIGHTS;
   const { playlist } = args;
-  const last = playlist[playlist.length - 1];
+  // Incomplete set tracks carry no usable essentials: they never anchor a transition, but still
+  // occupy a slot in the arc and still block re-suggestion.
+  const scored = playlist.filter(isComplete);
+  const last = scored[scored.length - 1];
+  const stillResolving = playlist.length > 0 && !last;
   const target = energyTargetAt(args.template, playlist.length, args.plannedLength);
   const inSet = new Set(playlist.map((t) => t.id));
-  const recent = playlist.slice(-FLAT_RUN);
+  const recent = scored.slice(-FLAT_RUN);
 
   const out: Suggestion[] = [];
   for (const track of args.candidates) {
-    if (inSet.has(track.id)) continue;
+    if (inSet.has(track.id) || !isComplete(track)) continue;
     const reasons: SuggestionReason[] = [];
 
     // Key
@@ -97,7 +102,13 @@ export function suggestNext(args: {
     }
     reasons.push({
       kind: 'energy',
-      label: last ? energy.label : energy.label === 'Fits arc' ? 'Fits arc start' : energy.label,
+      label: last
+        ? energy.label
+        : stillResolving
+          ? 'Set tracks still resolving — scored from arc start'
+          : energy.label === 'Fits arc'
+            ? 'Fits arc start'
+            : energy.label,
       score: energy.score,
     });
 

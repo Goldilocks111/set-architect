@@ -7,6 +7,7 @@ const t = (id: string, o: Partial<Track> = {}): Track => ({
   artist: `Artist ${id}`,
   title: `Title ${id}`,
   sources: {},
+  danceability: 0.6,
   ...o,
 });
 const base = { template: '60min' as const, plannedLength: 15 };
@@ -50,9 +51,9 @@ describe('suggestNext', () => {
     expect(suggestNext({ ...base, playlist: [last, c], candidates: [c] })).toHaveLength(0);
   });
 
-  it('keeps partial-data tracks, marking unknowns', () => {
-    const noBpm = t('nb', { camelot: '8A', energy: 5 });
-    const noKey = t('nk', { bpm: 128, energy: 5 });
+  it('keeps tracks whose bpm/key are present but unusable, marking unknowns', () => {
+    const noBpm = t('nb', { bpm: 0, camelot: '8A', energy: 5 });
+    const noKey = t('nk', { bpm: 128, camelot: 'garbage', energy: 5 });
     const res = suggestNext({ ...base, playlist: [last], candidates: [noBpm, noKey] });
     expect(res).toHaveLength(2);
     const nb = res.find((s) => s.track.id === 'nb')!;
@@ -93,8 +94,8 @@ describe('suggestNext', () => {
   });
 
   it('excludes +3 jumps even when key is unknown; keeps +2 with unknown key', () => {
-    const j3 = t('j3', { bpm: 128, energy: 8 });
-    const j2 = t('j2u', { bpm: 128, energy: 7 });
+    const j3 = t('j3', { bpm: 128, camelot: 'garbage', energy: 8 });
+    const j2 = t('j2u', { bpm: 128, camelot: 'garbage', energy: 7 });
     const ids = suggestNext({ ...base, playlist: [last], candidates: [j3, j2] }).map((s) => s.track.id);
     expect(ids).toEqual(['j2u']);
   });
@@ -112,5 +113,53 @@ describe('suggestNext', () => {
     const res = suggestNext({ ...base, playlist: [last], candidates: cands });
     expect(res).toHaveLength(10);
     for (let i = 1; i < res.length; i++) expect(res[i - 1].score).toBeGreaterThanOrEqual(res[i].score);
+  });
+
+  describe('incomplete tracks (excluded, not mis-scored)', () => {
+    const full = { bpm: 128, camelot: '8A', energy: 5, danceability: 0.6 };
+
+    it('never returns incomplete candidates, including danceability-only gaps', () => {
+      const ids = suggestNext({
+        ...base,
+        playlist: [t('p', full)],
+        candidates: [
+          t('ok', full),
+          t('noDance', { ...full, danceability: undefined }),
+          t('noKey', { ...full, camelot: undefined }),
+          t('noBpm', { ...full, bpm: undefined }),
+          t('noEnergy', { ...full, energy: undefined }),
+        ],
+      }).map((s) => s.track.id);
+      expect(ids).toEqual(['ok']);
+    });
+
+    it('uses the last complete track as `last`, while arc position counts every track', () => {
+      const complete = t('c', { bpm: 128, camelot: '8A', energy: 5, danceability: 0.6 });
+      const pending = t('inc', { bpm: 90 });
+      const cand = t('n', { bpm: 128, camelot: '9A', energy: 5, danceability: 0.6 });
+      const [s] = suggestNext({ ...base, playlist: [complete, pending], candidates: [cand] });
+      expect(reason(s, 'key')?.label).toContain('8A → 9A');
+      expect(reason(s, 'bpm')?.label).not.toMatch(/unknown/i);
+      // Arc position counts the incomplete track: same score as a 2-track set ending in an identical complete track.
+      const twin = suggestNext({ ...base, playlist: [complete, t('c2', full)], candidates: [cand] })[0];
+      expect(twin.score).toBe(s.score);
+    });
+
+    it('all-incomplete playlist scores as an arc start with an explanatory reason', () => {
+      const cand = t('n', full);
+      const res = suggestNext({ ...base, playlist: [t('i1', { bpm: 100 }), t('i2')], candidates: [cand] });
+      expect(res).toHaveLength(1);
+      const kinds = res[0].reasons.map((r) => r.kind);
+      expect(kinds).not.toContain('key');
+      expect(kinds).not.toContain('bpm');
+      expect(res[0].reasons).toContainEqual(
+        expect.objectContaining({ kind: 'energy', label: 'Set tracks still resolving — scored from arc start' })
+      );
+    });
+
+    it('empty playlist keeps the plain arc-start wording', () => {
+      const [s] = suggestNext({ ...base, playlist: [], candidates: [t('n', full)] });
+      expect(reason(s, 'energy')?.label).not.toMatch(/resolving/);
+    });
   });
 });

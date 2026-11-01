@@ -105,6 +105,82 @@ describe('assembleSuggestions (demo data, no external deps)', () => {
   });
 });
 
+describe('metadata cache first, incomplete exclusion', () => {
+  const full = { bpm: 122, camelot: '9A', energy: 5, danceability: 0.7 };
+  const neighborKey = trackKeyOf('Outside', 'Neighbor');
+  const deps = (over: SuggestDeps = {}): SuggestDeps => ({
+    loadAdjacency: async () => ({
+      getNeighbors: async () => [{ trackKey: neighborKey, count: 4, direction: 'after' as const }],
+      pairCount: 1,
+      trackCount: 2,
+    }),
+    ...over,
+  });
+
+  it('a complete cache entry supplies the candidate without calling resolveTrack', async () => {
+    const resolveTrack = vi.fn(async () => ({ id: 'r', artist: 'Outside', title: 'Neighbor', sources: {} }) as Track);
+    const getCachedEntry = vi.fn((k: string) => (k === neighborKey ? { fields: { ...full } } : undefined));
+    const suggestNext = vi.fn((_a: unknown) => []);
+    await assembleSuggestions(
+      { playlist: [last], template: '60min', plannedLength: 15 },
+      deps({ resolveTrack, getCachedEntry, suggestNext })
+    );
+    expect(resolveTrack).not.toHaveBeenCalled();
+    const cands = (suggestNext.mock.calls[0][0] as { candidates: Track[] }).candidates;
+    const hit = cands.find((c) => trackKeyOf(c.artist, c.title) === neighborKey)!;
+    expect(hit).toMatchObject({ bpm: 122, camelot: '9A', energy: 5, danceability: 0.7 });
+  });
+
+  it('an incomplete cache entry falls through to resolveTrack', async () => {
+    const resolveTrack = vi.fn(async () => ({ id: 'r', artist: 'Outside', title: 'Neighbor', sources: {}, ...full }) as Track);
+    await assembleSuggestions(
+      { playlist: [last], template: '60min', plannedLength: 15 },
+      deps({ resolveTrack, getCachedEntry: () => ({ fields: { bpm: 122 } }) })
+    );
+    expect(resolveTrack).toHaveBeenCalledTimes(1);
+  });
+
+  it('cache hits do not consume the external lookup count', async () => {
+    const keys = Array.from({ length: 12 }, (_, i) => trackKeyOf('Cached', `T${i}`));
+    const resolveTrack = vi.fn(async (a: string, t: string) => ({ id: `r-${t}`, artist: a, title: t, sources: {}, ...full }) as Track);
+    const suggestNext = vi.fn((_a: unknown) => []);
+    await assembleSuggestions(
+      { playlist: [last], template: '60min', plannedLength: 15 },
+      deps({
+        loadAdjacency: async () => ({
+          getNeighbors: async () => keys.map((trackKey) => ({ trackKey, count: 1, direction: 'after' as const })),
+          pairCount: 1,
+          trackCount: 12,
+        }),
+        resolveTrack,
+        getCachedEntry: (k) => (keys.slice(0, 6).includes(k) ? { fields: { ...full } } : undefined),
+        suggestNext,
+      })
+    );
+    // 8 neighbors max considered; 6 hit the cache, so only the 2 misses resolve.
+    expect(resolveTrack).toHaveBeenCalledTimes(2);
+  });
+
+  it('an incomplete last set track is not used for neighbor lookup; all-incomplete still yields suggestions', async () => {
+    const getNeighbors = vi.fn(async () => []);
+    const res = await assembleSuggestions(
+      { playlist: [{ id: 'x', artist: 'A', title: 'B', sources: {} }], template: '60min', plannedLength: 15 },
+      { loadAdjacency: async () => ({ getNeighbors, pairCount: 0, trackCount: 0 }) }
+    );
+    expect(getNeighbors).not.toHaveBeenCalled();
+    expect(res.suggestions.length).toBeGreaterThan(0);
+    expect(res.suggestions[0].reasons).toContainEqual(expect.objectContaining({ label: expect.stringMatching(/still resolving/) }));
+  });
+
+  it('never returns incomplete tracks from the resolver', async () => {
+    const res = await assembleSuggestions(
+      { playlist: [last], template: '60min', plannedLength: 15 },
+      deps({ resolveTrack: async (a, t) => ({ id: 'half', artist: a, title: t, sources: {}, bpm: 122, camelot: '9A', energy: 5 }) as Track })
+    );
+    expect(res.suggestions.map((s) => s.track.id)).not.toContain('half');
+  });
+});
+
 describe('POST /api/suggest', () => {
   beforeEach(() => {
     vi.resetAllMocks();
