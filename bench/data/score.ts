@@ -1,0 +1,66 @@
+export type Essential = 'bpm' | 'camelot' | 'energy' | 'danceability';
+export const ESSENTIALS: Essential[] = ['bpm', 'camelot', 'energy', 'danceability'];
+
+export interface DataRow {
+  id: string;
+  bucket: 'classic' | 'recent';
+  fields: Partial<Record<Essential, number | string>>;
+  sources: Record<string, string>;
+  latencyMs: number;
+  local?: { bpm?: number; camelot?: string; energy?: number; danceability?: number; ms: number };
+}
+
+type Yield = Record<Essential | 'complete', number>;
+
+function yieldOf(rows: DataRow[]): Yield {
+  const out = { bpm: 0, camelot: 0, energy: 0, danceability: 0, complete: 0 } as Yield;
+  if (rows.length === 0) return out;
+  for (const r of rows) {
+    let all = true;
+    for (const f of ESSENTIALS) {
+      if (r.fields[f] !== undefined) out[f]++;
+      else all = false;
+    }
+    if (all) out.complete++;
+  }
+  for (const k of Object.keys(out) as Array<keyof Yield>) out[k] /= rows.length;
+  return out;
+}
+
+/** Fraction (0..1) of rows carrying each essential, and all four ("complete"). */
+export function yieldTable(rows: DataRow[]): Record<'all' | 'classic' | 'recent', Yield> {
+  return {
+    all: yieldOf(rows),
+    classic: yieldOf(rows.filter((r) => r.bucket === 'classic')),
+    recent: yieldOf(rows.filter((r) => r.bucket === 'recent')),
+  };
+}
+
+function parseCamelot(k: string): { n: number; l: string } | null {
+  const m = /^(\d{1,2})([AB])$/i.exec(k.trim());
+  if (!m) return null;
+  const n = Number(m[1]);
+  return n >= 1 && n <= 12 ? { n, l: m[2].toUpperCase() } : null;
+}
+
+/** relative = same number, other letter; fifth = adjacent number (wrapping 12<->1), same letter. */
+export function keyAgreement(a: string, b: string): 'exact' | 'relative' | 'fifth' | 'miss' {
+  const x = parseCamelot(a);
+  const y = parseCamelot(b);
+  if (!x || !y) return 'miss';
+  if (x.n === y.n) return x.l === y.l ? 'exact' : 'relative';
+  const d = Math.abs(x.n - y.n);
+  return x.l === y.l && (d === 1 || d === 11) ? 'fifth' : 'miss';
+}
+
+/** Mean absolute error over [reference, local] pairs; 0 when there are none. */
+export function maeEnergy(pairs: Array<[number, number]>): number {
+  if (pairs.length === 0) return 0;
+  return pairs.reduce((s, [a, b]) => s + Math.abs(a - b), 0) / pairs.length;
+}
+
+export function percentile(values: number[], p: number): number {
+  if (values.length === 0) return 0;
+  const s = [...values].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.ceil((p / 100) * s.length) - 1)];
+}
