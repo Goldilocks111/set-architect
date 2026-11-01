@@ -108,3 +108,36 @@ describe('POST /api/tracks/override guards', () => {
     expect((await post(body)).status).toBe(200);
   });
 });
+
+describe('POST /api/tracks/override batch', () => {
+  const item = (n: number, fields: unknown = ok) => ({ artist: `Art ${n}`, title: `Tune ${n}`, fields });
+
+  it('applies valid items, reports rejected indexes, and returns merged tracks', async () => {
+    const res = await post({ items: [item(1), item(2, { bpm: 280 }), { artist: '', title: 't', fields: ok }, item(4, { energy: 5 })] });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.applied).toBe(2);
+    expect(json.rejected.map((r: { index: number }) => r.index)).toEqual([1, 2]);
+    expect(json.rejected[0].error).toMatch(/bpm/);
+    expect(json.tracks).toHaveLength(2);
+    expect(json.tracks[0]).toMatchObject({ artist: 'Art 1', ...ok });
+    expect(json.tracks[1].unresolved.missing).toEqual(expect.arrayContaining(['bpm']));
+    expect(getEntry(trackKeyOf('Art 2', 'Tune 2'))).toBeUndefined();
+    expect(getEntry(trackKeyOf('Art 4', 'Tune 4'))?.sources.energy).toBe('manual');
+  });
+  it('413s above 2000 items and 400s a non-array', async () => {
+    expect((await post({ items: Array.from({ length: 2001 }, (_, i) => item(i)) })).status).toBe(413);
+    expect((await post({ items: Array.from({ length: 2000 }, (_, i) => item(i)) })).status).toBe(200);
+    expect((await post({ items: 'x' })).status).toBe(400);
+  });
+  it('keeps every guard', async () => {
+    const body = { items: [item(1)] };
+    expect((await post(body, { 'content-type': 'text/plain' })).status).toBe(415);
+    expect((await post(body, { 'content-type': 'application/json', origin: 'https://evil.example' })).status).toBe(403);
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'http://x');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'k');
+    auth.getCurrentUser.mockResolvedValue(null);
+    expect((await post(body)).status).toBe(401);
+    expect(getEntry(trackKeyOf('Art 1', 'Tune 1'))).toBeUndefined();
+  });
+});

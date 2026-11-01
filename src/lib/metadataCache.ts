@@ -76,8 +76,7 @@ export function putResolved(key: string, track: Track, now = Date.now()): CacheE
   return entry;
 }
 
-export function putManual(key: string, fields: Partial<Pick<Track, Essential>>): CacheEntry {
-  const cache = read();
+function applyManual(cache: Record<string, CacheEntry>, key: string, fields: Partial<Pick<Track, Essential>>): CacheEntry {
   const prev = cache[key];
   const entry: CacheEntry = {
     fields: { ...prev?.fields },
@@ -95,8 +94,22 @@ export function putManual(key: string, fields: Partial<Pick<Track, Essential>>):
   }
   settle(entry);
   cache[key] = entry;
+  return entry;
+}
+
+export function putManual(key: string, fields: Partial<Pick<Track, Essential>>): CacheEntry {
+  const cache = read();
+  const entry = applyManual(cache, key, fields);
   write(cache);
   return entry;
+}
+
+/** Batch form of putManual: one read and one atomic write for the whole list (later items win on a repeated key). */
+export function putManualMany(items: Array<{ key: string; fields: Partial<Pick<Track, Essential>> }>): CacheEntry[] {
+  const cache = read();
+  const entries = items.map(({ key, fields }) => applyManual(cache, key, fields));
+  if (items.length) write(cache);
+  return entries;
 }
 
 /** Records (or clears) when the re-resolve queue will next try this track. */

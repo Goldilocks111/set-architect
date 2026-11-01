@@ -1,12 +1,26 @@
 import { isDemoMode } from '@/lib/demo';
 import { missingEssentials } from '@/lib/completeness';
-import { putManual } from '@/lib/metadataCache';
-import { validateOverride } from '@/lib/overrideValidation';
+import { putManual, putManualMany } from '@/lib/metadataCache';
+import { validateOverride, type OverrideFields } from '@/lib/overrideValidation';
 import { trackKeyOf, type Track } from '@/types/track';
 
 const bad = (error: string) => Response.json({ error }, { status: 400 });
+/** Mixed In Key libraries run to thousands of rows; the client chunks to this size. */
+export const MAX_BATCH = 2000;
 
-/** Manual values for one track: POST {artist, title, fields: {bpm?, camelot?, energy?, danceability?}} */
+const clean = (v: unknown) => (typeof v === 'string' ? v.trim().slice(0, 200) : '');
+
+function trackFrom(key: string, artist: string, title: string, entry: ReturnType<typeof putManual>): Track {
+  const track: Track = { id: key, artist, title, ...entry.fields, sources: { ...entry.sources } };
+  const missing = missingEssentials(track);
+  if (missing.length) track.unresolved = { reason: entry.reason ?? 'not-found', missing, ...(entry.retryAt ? { retryAt: entry.retryAt } : {}) };
+  return track;
+}
+
+/**
+ * Manual values for one track: POST {artist, title, fields: {bpm?, camelot?, energy?, danceability?}}
+ * or a batch: POST {items: [{artist, title, fields}]} (<= MAX_BATCH) -> {applied, rejected: [{index, error}], tracks}
+ */
 export async function POST(request: Request) {
   // Overrides beat every provider forever and are global, so this write needs the same care as saving a playlist.
   if (!/^application\/json\s*(;|$)/i.test(request.headers.get('content-type') ?? '')) {
@@ -27,16 +41,30 @@ export async function POST(request: Request) {
     return bad('Invalid JSON body');
   }
   const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
-  const artist = typeof b.artist === 'string' ? b.artist.trim().slice(0, 200) : '';
-  const title = typeof b.title === 'string' ? b.title.trim().slice(0, 200) : '';
+  if (b.items !== undefined) {
+    if (!Array.isArray(b.items)) return bad('items must be an array');
+    if (b.items.length > MAX_BATCH) return Response.json({ error: `At most ${MAX_BATCH} items per request` }, { status: 413 });
+    const rejected: Array<{ index: number; error: string }> = [];
+    const valid: Array<{ key: string; artist: string; title: string; fields: OverrideFields }> = [];
+    b.items.forEach((raw, index) => {
+      const it = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+      const artist = clean(it.artist);
+      const title = clean(it.title);
+      if (!artist || !title) return void rejected.push({ index, error: 'Pass both artist and title' });
+      const checked = validateOverride(it.fields);
+      if (!checked.ok) return void rejected.push({ index, error: checked.error });
+      valid.push({ key: trackKeyOf(artist, title), artist, title, fields: checked.fields });
+    });
+    const entries = putManualMany(valid.map((v) => ({ key: v.key, fields: v.fields })));
+    const tracks = valid.map((v, i) => trackFrom(v.key, v.artist, v.title, entries[i]));
+    return Response.json({ applied: valid.length, rejected, tracks });
+  }
+  const artist = clean(b.artist);
+  const title = clean(b.title);
   if (!artist || !title) return bad('Pass both artist and title');
   const checked = validateOverride(b.fields);
   if (!checked.ok) return bad(checked.error);
 
   const key = trackKeyOf(artist, title);
-  const entry = putManual(key, checked.fields);
-  const track: Track = { id: key, artist, title, ...entry.fields, sources: { ...entry.sources } };
-  const missing = missingEssentials(track);
-  if (missing.length) track.unresolved = { reason: entry.reason ?? 'not-found', missing, ...(entry.retryAt ? { retryAt: entry.retryAt } : {}) };
-  return Response.json({ track });
+  return Response.json({ track: trackFrom(key, artist, title, putManual(key, checked.fields)) });
 }

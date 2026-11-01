@@ -1,9 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { dataDir } from '@/lib/dataDir';
-import { getEntry, putManual, putResolved } from '@/lib/metadataCache';
+import { getEntry, putManual, putManualMany, putResolved } from '@/lib/metadataCache';
 import type { Track } from '@/types/track';
 
 const t = (over: Partial<Track> = {}): Track => ({
@@ -13,6 +13,29 @@ const t = (over: Partial<Track> = {}): Track => ({
 
 beforeEach(() => {
   process.env.SETARCHITECT_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-cache-'));
+});
+
+describe('putManualMany', () => {
+  it('writes the file once for the whole batch, marks fields manual, and last item wins', () => {
+    const spy = vi.spyOn(fs, 'writeFileSync');
+    const entries = putManualMany([
+      { key: 'a|1', fields: { bpm: 120 } },
+      { key: 'a|2', fields: { camelot: '8A', energy: 6 } },
+      { key: 'a|1', fields: { bpm: 125 } },
+    ]);
+    expect(spy.mock.calls.filter(([f]) => String(f).includes('metadata.json'))).toHaveLength(1);
+    spy.mockRestore();
+    expect(entries).toHaveLength(3);
+    expect(getEntry('a|1')?.fields.bpm).toBe(125);
+    expect(getEntry('a|1')?.sources.bpm).toBe('manual');
+    expect(getEntry('a|2')?.fields).toMatchObject({ camelot: '8A', energy: 6 });
+  });
+  it('does not touch the file for an empty batch', () => {
+    const spy = vi.spyOn(fs, 'writeFileSync');
+    expect(putManualMany([])).toEqual([]);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
 });
 
 describe('metadataCache', () => {
