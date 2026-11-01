@@ -23,7 +23,7 @@ export default function CompletenessBadge({ track, resolving }: Props) {
   }
   if (resolving) {
     return (
-      <span role="status" className="shrink-0 animate-pulse text-[11.5px] text-[#F2B33D]">
+      <span role="status" className="shrink-0 motion-safe:animate-pulse text-[11.5px] text-[#F2B33D]">
         Resolving…
       </span>
     );
@@ -34,6 +34,17 @@ export default function CompletenessBadge({ track, resolving }: Props) {
     <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-[11.5px] text-[#EE8B7A]">
       <span>{`Incomplete — ${REASON_COPY[reason]}`}</span>
       <span className="text-[#8A8FA3]">Missing: {missing.map((f) => FIELD_LABEL[f]).join(', ')}</span>
+    </span>
+  );
+}
+
+/** Quiet mark for search hits and suggestion cards: informative, not an alarm. */
+export function CompletenessMark({ track }: { track: Track }) {
+  const missing = missingEssentials(track);
+  if (missing.length === 0) return <span className="text-[11px] text-[#7DD3A8]">Complete</span>;
+  return (
+    <span className="text-[11px] text-[#8A8FA3]">
+      Not yet analysed · missing {missing.map((f) => FIELD_LABEL[f]).join(', ')}
     </span>
   );
 }

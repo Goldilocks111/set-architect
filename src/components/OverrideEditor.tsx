@@ -18,22 +18,25 @@ const FIELDS = [
   { key: 'danceability', label: 'Danceability', step: '0.01', hint: '0–1' },
 ] as const;
 
+const focusRing = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F2B33D]';
 const input =
   'w-20 rounded border border-[#2A2F3F] bg-[#12141C] px-1.5 py-1 text-[12.5px] text-[#E8E4DA] tabular-nums focus-visible:outline-2 focus-visible:outline-[#F2B33D]';
 
 export default function OverrideEditor({ track, onSave, onCancel }: Props) {
   const uid = useId();
-  const [values, setValues] = useState<Record<string, string>>(() =>
+  const [initial] = useState<Record<string, string>>(() =>
     Object.fromEntries(FIELDS.map((f) => [f.key, track[f.key] === undefined ? '' : String(track[f.key])]))
   );
+  const [values, setValues] = useState<Record<string, string>>(initial);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function save() {
     const raw: Record<string, unknown> = {};
     for (const f of FIELDS) {
+      // Only what the user changed: untouched provider values keep their source and are not re-validated.
       const v = values[f.key].trim();
-      if (v === '') continue;
+      if (v === '' || v === initial[f.key].trim()) continue;
       raw[f.key] = f.key === 'camelot' ? v : Number(v);
     }
     const checked = validateOverride(raw);
@@ -52,19 +55,25 @@ export default function OverrideEditor({ track, onSave, onCancel }: Props) {
         void save();
       }}
       onDragStart={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') onCancel();
+      }}
     >
       {FIELDS.map((f) => (
-        <label key={f.key} htmlFor={`${uid}-${f.key}`} className="flex flex-col gap-0.5 text-[11.5px] text-[#8A8FA3]">
-          {f.label}
+        <div key={f.key} className="flex flex-col gap-0.5 text-[11.5px] text-[#8A8FA3]">
+          <label htmlFor={`${uid}-${f.key}`}>{f.label}</label>
           <input
             id={`${uid}-${f.key}`}
+            autoFocus={f.key === 'bpm'}
+            aria-describedby={`${uid}-${f.key}-hint`}
             className={input}
             value={values[f.key]}
             inputMode={f.key === 'camelot' ? 'text' : 'decimal'}
             placeholder={f.hint}
             onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
           />
-        </label>
+          <span id={`${uid}-${f.key}-hint`} className="text-[10.5px] text-[#8A8FA3]/70">{f.hint}</span>
+        </div>
       ))}
       <button
         type="submit"
@@ -73,7 +82,7 @@ export default function OverrideEditor({ track, onSave, onCancel }: Props) {
       >
         Save
       </button>
-      <button type="button" onClick={onCancel} className="px-1.5 py-1 text-[12.5px] text-[#8A8FA3] hover:text-[#E8E4DA]">
+      <button type="button" onClick={onCancel} className={`rounded px-1.5 py-1 text-[12.5px] text-[#8A8FA3] hover:text-[#E8E4DA] ${focusRing}`}>
         Cancel
       </button>
       {error && (

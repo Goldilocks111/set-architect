@@ -19,9 +19,11 @@ import { initialPlaylistState, plannedLengthFor, playlistReducer, type PlaylistS
 import { fetchResolved, needsMetadata } from './trackFormat';
 
 const MINUTES_PER_TRACK = 4;
-/** A resolve that has not answered by now is shown as incomplete ('timeout'); the server retries on its own. */
+/** Counted from enqueue: a track not answered by now is shown as incomplete ('timeout'); the server retries on its own. */
 export const RESOLVE_CAP_MS = 60_000;
 const MAX_IN_FLIGHT = 2;
+/** Safety net so a hung request cannot hold a queue slot forever; the server answers within ~47 s. */
+const HARD_ABORT_MS = 120_000;
 
 interface Props {
   demo: boolean;
@@ -41,23 +43,43 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
   const queue = useRef<Track[]>([]);
   const active = useRef(0);
 
-  const startResolve = useCallback(async (track: Track) => {
+  // The 60 s clock starts when a track is first asked for (enqueue or direct add), not when its request starts.
+  const clocks = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; fired: boolean }>());
+
+  const armClock = useCallback((id: string) => {
+    if (clocks.current.has(id)) return;
     const gen = generation.current;
-    dispatch({ type: 'resolveStart', id: track.id });
-    const ctrl = new AbortController();
-    controllers.current.add(ctrl);
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      ctrl.abort();
-    }, RESOLVE_CAP_MS);
-    const resolved = await fetchResolved(track, ctrl.signal);
-    clearTimeout(timer);
-    controllers.current.delete(ctrl);
-    if (gen !== generation.current) return;
-    if (resolved) dispatch({ type: 'resolved', id: track.id, track: resolved });
-    else dispatch({ type: 'resolveFailed', id: track.id, reason: timedOut ? 'timeout' : 'providers-unavailable' });
+    const clock = {
+      fired: false,
+      timer: setTimeout(() => {
+        clock.fired = true;
+        if (gen === generation.current) dispatch({ type: 'resolveFailed', id, reason: 'timeout' });
+      }, RESOLVE_CAP_MS),
+    };
+    clocks.current.set(id, clock);
   }, []);
+
+  const startResolve = useCallback(
+    async (track: Track) => {
+      const gen = generation.current;
+      dispatch({ type: 'resolveStart', id: track.id });
+      armClock(track.id);
+      const ctrl = new AbortController();
+      controllers.current.add(ctrl);
+      // The request outlives the displayed cap (a late answer still applies); this only frees a hung slot.
+      const hard = setTimeout(() => ctrl.abort(), HARD_ABORT_MS);
+      const resolved = await fetchResolved(track, ctrl.signal);
+      clearTimeout(hard);
+      controllers.current.delete(ctrl);
+      const clock = clocks.current.get(track.id);
+      clearTimeout(clock?.timer);
+      clocks.current.delete(track.id);
+      if (gen !== generation.current) return;
+      if (resolved) dispatch({ type: 'resolved', id: track.id, track: resolved });
+      else dispatch({ type: 'resolveFailed', id: track.id, reason: clock?.fired || ctrl.signal.aborted ? 'timeout' : 'providers-unavailable' });
+    },
+    [armClock]
+  );
 
   /** Background re-requests run sequentially-ish: at most MAX_IN_FLIGHT at once. */
   const pump = useCallback(
@@ -79,11 +101,14 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
   const requeue = useCallback(
     (list: Track[]) => {
       const pending = list.filter((t) => !isComplete(t));
-      for (const t of pending) dispatch({ type: 'resolveStart', id: t.id });
+      for (const t of pending) {
+        dispatch({ type: 'resolveStart', id: t.id });
+        armClock(t.id);
+      }
       queue.current.push(...pending);
       pump();
     },
-    [pump]
+    [pump, armClock]
   );
 
   useEffect(() => {
@@ -100,6 +125,8 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
       if (generation.current === gen) generation.current++;
       live.forEach((c) => c.abort());
       live.clear();
+      clocks.current.forEach((c) => clearTimeout(c.timer));
+      clocks.current.clear();
       queue.current = [];
       active.current = 0;
     };

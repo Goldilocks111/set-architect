@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import type { Track } from '@/types/track';
+import { CompletenessMark } from './CompletenessBadge';
 import { fmtBpm, fmtEnergy } from './trackFormat';
 import { isInSet } from './recordingKeys';
 import VersionChip, { baseTitleOf, fmtDuration, groupVersions } from './VersionChip';
@@ -134,6 +135,11 @@ export default function SearchBar({ onAdd, inSet }: Props) {
                         <VersionChip label={t.version} />
                       </div>
                       <div className="truncate text-xs text-[#8A8FA3]">{t.artist}</div>
+                      {!added && (
+                        <div className="truncate">
+                          <CompletenessMark track={t} />
+                        </div>
+                      )}
                     </div>
                     <div className="flex gap-2 text-xs text-[#8A8FA3] tabular-nums">
                       {fmtDuration(t.durationMs) && <span aria-label="Duration">{fmtDuration(t.durationMs)}</span>}

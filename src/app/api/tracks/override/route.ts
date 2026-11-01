@@ -1,5 +1,6 @@
+import { isDemoMode } from '@/lib/demo';
 import { missingEssentials } from '@/lib/completeness';
-import { getEntry, putManual } from '@/lib/metadataCache';
+import { putManual } from '@/lib/metadataCache';
 import { validateOverride } from '@/lib/overrideValidation';
 import { trackKeyOf, type Track } from '@/types/track';
 
@@ -7,6 +8,18 @@ const bad = (error: string) => Response.json({ error }, { status: 400 });
 
 /** Manual values for one track: POST {artist, title, fields: {bpm?, camelot?, energy?, danceability?}} */
 export async function POST(request: Request) {
+  // Overrides beat every provider forever and are global, so this write needs the same care as saving a playlist.
+  if (!/^application\/json\s*(;|$)/i.test(request.headers.get('content-type') ?? '')) {
+    return Response.json({ error: 'Content-Type must be application/json' }, { status: 415 });
+  }
+  const origin = request.headers.get('origin');
+  if (request.headers.get('sec-fetch-site') === 'cross-site' || (origin !== null && origin !== new URL(request.url).origin)) {
+    return Response.json({ error: 'Cross-origin requests are not allowed' }, { status: 403 });
+  }
+  if (!isDemoMode()) {
+    const { getCurrentUser } = await import('@/lib/supabase/auth');
+    if (!(await getCurrentUser())) return Response.json({ error: 'Sign in to edit track values.' }, { status: 401 });
+  }
   let body: unknown;
   try {
     body = await request.json();
@@ -24,6 +37,6 @@ export async function POST(request: Request) {
   const entry = putManual(key, checked.fields);
   const track: Track = { id: key, artist, title, ...entry.fields, sources: { ...entry.sources } };
   const missing = missingEssentials(track);
-  if (missing.length) track.unresolved = { reason: getEntry(key)?.reason ?? 'not-found', missing, ...(entry.retryAt ? { retryAt: entry.retryAt } : {}) };
+  if (missing.length) track.unresolved = { reason: entry.reason ?? 'not-found', missing, ...(entry.retryAt ? { retryAt: entry.retryAt } : {}) };
   return Response.json({ track });
 }

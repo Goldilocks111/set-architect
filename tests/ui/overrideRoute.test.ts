@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const auth = vi.hoisted(() => ({ getCurrentUser: vi.fn() }));
+vi.mock('@/lib/supabase/auth', () => auth);
+
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,15 +12,19 @@ import { getEntry, putResolved } from '@/lib/metadataCache';
 import { resolveWithStatus } from '@/lib/resolver';
 import { trackKeyOf } from '@/types/track';
 
-const post = (body: unknown) =>
-  POST(new Request('http://localhost/api/tracks/override', { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body) }));
+const post = (body: unknown, headers: Record<string, string> = { 'content-type': 'application/json' }) =>
+  POST(new Request('http://localhost/api/tracks/override', { method: 'POST', headers, body: typeof body === 'string' ? body : JSON.stringify(body) }));
 const ok = { bpm: 126, camelot: '8A', energy: 7, danceability: 0.8 };
 
 beforeEach(() => {
   process.env.SETARCHITECT_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'override-'));
   vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  auth.getCurrentUser.mockReset();
+});
 
 describe('validateOverride', () => {
   it.each([
@@ -69,5 +77,34 @@ describe('POST /api/tracks/override', () => {
     const forced = await resolveWithStatus('Art', 'Tune', { force: true });
     expect(forced).toMatchObject({ bpm: 126, energy: 7 });
     expect(getEntry(key)?.sources.bpm).toBe('manual');
+  });
+});
+
+describe('POST /api/tracks/override guards', () => {
+  const body = { artist: 'Art', title: 'Tune', fields: ok };
+  const key = trackKeyOf('Art', 'Tune');
+
+  it('415s without an application/json content type (no-cors text/plain CSRF)', async () => {
+    expect((await post(body, { 'content-type': 'text/plain' })).status).toBe(415);
+    expect((await post(body, {})).status).toBe(415);
+    expect(getEntry(key)).toBeUndefined();
+  });
+  it('403s a cross-origin Origin or Sec-Fetch-Site: cross-site', async () => {
+    const json = { 'content-type': 'application/json' };
+    expect((await post(body, { ...json, origin: 'https://evil.example' })).status).toBe(403);
+    expect((await post(body, { ...json, 'sec-fetch-site': 'cross-site' })).status).toBe(403);
+    expect(getEntry(key)).toBeUndefined();
+  });
+  it('allows a same-origin Origin', async () => {
+    expect((await post(body, { 'content-type': 'application/json; charset=utf-8', origin: 'http://localhost', 'sec-fetch-site': 'same-origin' })).status).toBe(200);
+  });
+  it('requires a signed-in user outside demo mode', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'http://x');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'k');
+    auth.getCurrentUser.mockResolvedValue(null);
+    expect((await post(body)).status).toBe(401);
+    expect(getEntry(key)).toBeUndefined();
+    auth.getCurrentUser.mockResolvedValue({ id: 'u1' });
+    expect((await post(body)).status).toBe(200);
   });
 });

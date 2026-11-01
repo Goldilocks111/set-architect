@@ -2,6 +2,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import CompletenessBadge from '@/components/CompletenessBadge';
 import SetList from '@/components/SetList';
+import SearchBar from '@/components/SearchBar';
+import SuggestionCard from '@/components/SuggestionCard';
 import Builder from '@/components/Builder';
 import { STORAGE_KEY } from '@/components/persistence';
 import { quarantineForCurve } from '@/components/curveData';
@@ -77,7 +79,7 @@ describe('<SetList /> quarantine', () => {
     fireEvent.change(screen.getByLabelText('BPM'), { target: { value: '128' } });
     fireEvent.change(screen.getByLabelText('Danceability'), { target: { value: '0.5' } });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })); });
-    expect(onOverride).toHaveBeenCalledWith(expect.objectContaining({ id: 'b' }), { bpm: 128, camelot: '8A', energy: 6, danceability: 0.5 });
+    expect(onOverride).toHaveBeenCalledWith(expect.objectContaining({ id: 'b' }), { bpm: 128, danceability: 0.5 });
   });
   it('rejects an invalid value in the editor without calling onOverride', async () => {
     const onOverride = vi.fn(async () => null);
@@ -87,6 +89,47 @@ describe('<SetList /> quarantine', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })); });
     expect(onOverride).not.toHaveBeenCalled();
     expect(screen.getByRole('alert')).toHaveTextContent(/bpm/i);
+  });
+});
+
+describe('override editor: only changed fields', () => {
+  it('ignores an out-of-range untouched provider value and sends nothing for it', async () => {
+    const onOverride = vi.fn(async () => null);
+    render(<SetList tracks={[incomplete('h', { bpm: 210 })]} template="60min" plannedLength={15} onRemove={() => {}} onMove={() => {}} onOverride={onOverride} />);
+    fireEvent.click(screen.getByRole('button', { name: /edit values/i }));
+    fireEvent.change(screen.getByLabelText('Danceability'), { target: { value: '0.9' } });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })); });
+    expect(onOverride).toHaveBeenCalledWith(expect.anything(), { danceability: 0.9 });
+  });
+  it('saving with no change shows an error and does not call onOverride', async () => {
+    const onOverride = vi.fn(async () => null);
+    render(<SetList tracks={[incomplete('h')]} template="60min" plannedLength={15} onRemove={() => {}} onMove={() => {}} onOverride={onOverride} />);
+    fireEvent.click(screen.getByRole('button', { name: /edit values/i }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })); });
+    expect(onOverride).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+  });
+  it('untouched fields keep their provider source after an override', () => {
+    const t = incomplete('p', { sources: { bpm: 'getsongbpm', energy: 'acousticbrainz' } });
+    const s = playlistReducer({ ...initialPlaylistState, tracks: [t] }, { type: 'override', id: 'p', fields: { danceability: 0.4 } });
+    expect(s.tracks[0].sources).toMatchObject({ bpm: 'getsongbpm', energy: 'acousticbrainz', danceability: 'manual' });
+  });
+});
+
+describe('compact completeness marks', () => {
+  it('SearchBar results show a neutral not-yet-analysed state with missing fields', async () => {
+    const hit: Track = { id: 'h1', artist: 'Hit Artist', title: 'Hit Title', bpm: 120, sources: {} };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ tracks: [hit] }))));
+    render(<SearchBar onAdd={() => {}} inSet={new Set()} />);
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'hit art' } });
+    expect(await screen.findByText(/Not yet analysed/)).toBeInTheDocument();
+    expect(screen.getByText(/missing key, energy, danceability/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Incomplete/)).toBeNull();
+    vi.unstubAllGlobals();
+  });
+  it('SuggestionCard shows a Complete mark for a complete track', () => {
+    render(<SuggestionCard suggestion={{ track: complete('s'), score: 0.8, reasons: [] }} onAdd={() => {}} />);
+    expect(screen.getByText('Complete')).toBeInTheDocument();
   });
 });
 
@@ -167,7 +210,7 @@ describe('<Builder /> resolving lifecycle', () => {
         : new Response(JSON.stringify({ suggestions: [] }))));
     await act(async () => { render(<Builder demo getSongBpmConfigured={false} />); });
     await waitFor(() => expect(screen.getByText('Complete')).toBeInTheDocument());
-    expect(screen.getByRole('listitem', { name: undefined })).toHaveAttribute('data-quarantined', 'false');
+    expect(screen.getByRole('listitem')).toHaveAttribute('data-quarantined', 'false');
   });
 
   it('caps in-flight re-requests at 2', async () => {
@@ -177,6 +220,34 @@ describe('<Builder /> resolving lifecycle', () => {
     vi.stubGlobal('fetch', fetchMock);
     await act(async () => { render(<Builder demo getSongBpmConfigured={false} />); });
     expect(fetchMock.mock.calls.filter(([u]) => String(u).startsWith('/api/search/resolve'))).toHaveLength(2);
+  });
+
+  it('the 60 s clock starts at enqueue: no track shows Resolving… after 60 s, and a late answer still applies', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const tracks = [1, 2, 3, 4, 5].map((n) => incomplete(`t${n}`));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ template: '60min', tracks }));
+    const fetchMock = hangingFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => { render(<Builder demo getSongBpmConfigured={false} />); });
+    expect(screen.getAllByText('Resolving…')).toHaveLength(5);
+    await act(async () => { await vi.advanceTimersByTimeAsync(61_000); });
+    expect(screen.queryByText('Resolving…')).toBeNull();
+    expect(screen.getAllByText('Incomplete — Still looking — retrying automatically')).toHaveLength(5);
+  });
+
+  it('a queued request that answers after the cap still applies', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ template: '60min', tracks: [incomplete('slow')] }));
+    let release!: (r: Response) => void;
+    vi.stubGlobal('fetch', vi.fn((url: string) =>
+      String(url).startsWith('/api/search/resolve')
+        ? new Promise<Response>((r) => { release = r; })
+        : Promise.resolve(new Response(JSON.stringify({ suggestions: [] })))));
+    await act(async () => { render(<Builder demo getSongBpmConfigured={false} />); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(61_000); });
+    expect(screen.getByText(/Incomplete — Still looking/)).toBeInTheDocument();
+    await act(async () => { release(new Response(JSON.stringify({ track: complete('slow') }))); });
+    await waitFor(() => expect(screen.getByText('Complete')).toBeInTheDocument());
   });
 
   it('saving an override POSTs and shows the track complete', async () => {
@@ -192,7 +263,7 @@ describe('<Builder /> resolving lifecycle', () => {
     fireEvent.change(screen.getByLabelText('Danceability'), { target: { value: '0.4' } });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })); });
     const call = fetchMock.mock.calls.find(([u]) => String(u) === '/api/tracks/override')!;
-    expect(JSON.parse(String(call[1]?.body))).toEqual({ artist: 'Artist bad', title: 'Title bad', fields: { bpm: 124, camelot: '8A', energy: 6, danceability: 0.4 } });
+    expect(JSON.parse(String(call[1]?.body))).toEqual({ artist: 'Artist bad', title: 'Title bad', fields: { danceability: 0.4 } });
     await waitFor(() => expect(screen.getByText('Complete')).toBeInTheDocument());
   });
 });
