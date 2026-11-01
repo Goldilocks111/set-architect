@@ -1,7 +1,7 @@
 import { withTimeout } from '@/lib/http';
 import { cooldownUntil, recordFailure, recordSuccess, resetBreakers, resetBudgets, takeBudget } from './breaker';
 import { searchProviders } from './providers';
-import { musicbrainzWorkQuery } from './providers/musicbrainz';
+import { musicbrainzLooseQuery, musicbrainzWorkQuery } from './providers/musicbrainz';
 import { parseVersion } from './version';
 import type { MergedHit, MergedSearchResponse, ParsedVersion, SearchProvider, SearchResult, VersionKind } from './types';
 
@@ -302,6 +302,10 @@ interface Assessment {
   strong: boolean;
   /** Folded words that name this work (artists + title). */
   workWords: Set<string>;
+  /** Artist or title (not both) is named in the query: the hit is related to the request but not the answer. */
+  related: boolean;
+  /** Folded lead artist is named in the query. */
+  leadInQuery: boolean;
 }
 
 function assess(g: Group, q: Query, hit: Omit<MergedHit, 'score' | 'key'>): Assessment | null {
@@ -356,6 +360,8 @@ function assess(g: Group, q: Query, hit: Omit<MergedHit, 'score' | 'key'>): Asse
     work,
     strong: work && coverage === 1 && [...asked].every((k) => kinds.has(k)),
     workWords: new Set([...titleWords, ...names.flatMap(tokens)]),
+    related: artistMatch || titleMatch,
+    leadInQuery: inQuery(q, g.members[0].r.artists[0] ?? g.members[0].r.artist),
   };
 }
 
@@ -436,6 +442,10 @@ export function defaultProviders(): SearchProvider[] {
   return allow?.length ? searchProviders.filter((p) => allow.includes(p.name)) : searchProviders;
 }
 
+/** A co-credit's length may differ this much from the query artist's own recordings of the same title. */
+const COCREDIT_DURATION_TOLERANCE = 0.25;
+const COCREDIT_PENALTY = 60;
+
 interface Ranked {
   hit: MergedHit;
   a: Assessment;
@@ -450,7 +460,36 @@ function rank(members: Member[], q: Query): Ranked[] {
     const a = assess(g, q, hit);
     if (a) out.push({ hit: { ...hit, score: a.score }, a, lead: g.members[0].r.artists[0] ?? g.members[0].r.artist });
   }
+  demoteForeignCoCredits(out);
   return out.sort((x, y) => y.hit.score - x.hit.score);
+}
+
+/**
+ * "Fisher Rain Extended Mix" also finds "Karanda, Fisher - Rain": same title, but the queried act is only a
+ * secondary credit. Lengths are compared only between recordings of the same version kind (an extended mix is
+ * legitimately far longer than a radio cut): a co-credit more than 25% off every same-kind recording led by a
+ * queried artist is demoted and no longer counts as a full answer. When the lead artist's recordings are all
+ * other kinds the length proves nothing, so the co-credit keeps its score but is not "strong" either, which
+ * has MusicBrainz look for the lead artist's own version; once that arrives the same-kind check applies.
+ */
+function demoteForeignCoCredits(ranked: Ranked[]): void {
+  for (const r of ranked) {
+    const d = r.hit.durationMs;
+    if (r.a.leadInQuery || !r.a.work || d === undefined) continue;
+    const title = fold(r.hit.baseTitle);
+    const own = ranked.filter((x) => x !== r && x.a.leadInQuery && x.a.work && x.hit.durationMs !== undefined && fold(x.hit.baseTitle) === title);
+    if (!own.length) continue;
+    const far = (x: Ranked) => Math.abs(d - x.hit.durationMs!) / x.hit.durationMs! > COCREDIT_DURATION_TOLERANCE;
+    const sameKind = own.filter((x) => x.hit.version.kind === r.hit.version.kind);
+    if (sameKind.length) {
+      if (sameKind.every(far)) {
+        r.hit = { ...r.hit, score: Math.round((r.hit.score - COCREDIT_PENALTY) * 100) / 100 };
+        r.a = { ...r.a, strong: false };
+      }
+    } else if (r.a.strong && own.every(far)) {
+      r.a = { ...r.a, strong: false };
+    }
+  }
 }
 
 /** The best first-round hit naming both artist and title, and the query words that are not part of it. */
@@ -473,6 +512,15 @@ function refinedQuery(query: string, work: ReturnType<typeof identifiedWork>): s
   if (!work?.leftover.length) return undefined;
   const refined = `${work.best.hit.baseTitle} ${work.leftover.join(' ')}`;
   return fold(refined) === fold(query) ? undefined : refined;
+}
+
+const isVersionWord = (w: string) => !!VERSION_WORDS[w] || QUALIFIER_WORDS.has(w);
+const contentWords = (q: Query) => q.tokens.filter((w) => !FILLER.has(w) && !isVersionWord(w));
+
+/** Content words that the best artist-or-title match does not account for ("solardo" next to Thottrup's "Deeper Love"). */
+function unexplainedQueryWords(q: Query, ranked: Ranked[]): string[] {
+  const best = ranked.find((r) => r.a.related);
+  return best ? contentWords(q).filter((w) => !best.a.workWords.has(w)) : [];
 }
 
 /** Providers consulted only when the first round has no full answer (rate-limited, or catalog-only). */
@@ -544,6 +592,12 @@ export async function mergedSearch(
     if (work) {
       const mbq = musicbrainzWorkQuery(work.best.hit.baseTitle, work.best.lead, work.leftover);
       calls.push(...musicbrainz.map((p): [SearchProvider, string] => [p, mbq]));
+    } else if (ranked.some((r) => r.a.related) && unexplainedQueryWords(q, ranked).length > 0 && contentWords(q).length >= 2) {
+      // Only the artist or only the title was found ("Kölsch Speicher 140" -> Kölsch's other tracks, "Solardo
+      // Deeper Love" -> another act's "Deeper Love"): the streaming catalogs lack the work, so ask MusicBrainz
+      // with every content word rather than a guess at which words are the title.
+      const loose = musicbrainzLooseQuery(q.tokens.filter((w) => !FILLER.has(w)));
+      calls.push(...musicbrainz.map((p): [SearchProvider, string] => [p, loose]));
     }
     if (calls.length) {
       stage2 = true;

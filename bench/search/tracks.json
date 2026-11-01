@@ -853,6 +853,9 @@
     "releaseYear": 1987,
     "bucket": "classic",
     "query": "Rhythim Is Rhythim Strings of Life",
+    "aliases": {
+      "Rhythim Is Rhythim": ["Derrick May", "Mayday"]
+    },
     "source": "https://en.wikipedia.org/wiki/Strings_of_Life"
   },
   {

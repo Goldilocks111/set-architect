@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { isHit, hitRank, hitDetail, artistRule, versionCorrect, normalize, type BenchTrack, type BenchVersionCase } from '../../bench/search/score';
 
@@ -76,7 +77,7 @@ describe('scorer regressions', () => {
   });
   it('artist comparison ignores spaces', () => {
     expect(isHit(track('Brutalismus3000', 'X'), [{ artist: 'Brutalismus 3000', baseTitle: 'X' }])).toBe(true);
-    expect(isHit(track('Brutalismus 3000', 'X'), [{ artist: 'Boys Noize, Brutalismus3000', baseTitle: 'X' }])).toBe(true);
+    expect(isHit(track('Brutalismus 3000', 'X'), [{ artist: 'Brutalismus3000, Boys Noize', baseTitle: 'X' }])).toBe(true);
   });
 });
 
@@ -191,6 +192,17 @@ describe('+extras tag', () => {
     expect(artistRule('Skrillex, Solomun', 'Solomun, Guest')).toBe('subset-secondary-only+extras');
     expect(artistRule('Skrillex, Solomun', 'Skrillex, Guest')).toBe('subset-with-lead+extras');
     expect(artistRule('Rüfüs Du Sol', 'RÜFÜS, Guest', )).toBeNull();
+  });
+  it('R15b: an added lead artist is a miss, trailing co-artists stay a tagged hit', () => {
+    expect(artistRule('Benny Benassi', 'David Guetta, Benny Benassi')).toBeNull();
+    expect(artistRule('Fisher', 'Karanda, Fisher')).toBeNull();
+    expect(artistRule('Benny Benassi', 'Benny Benassi, David Guetta')).toBe('exact+extras');
+    expect(isHit(track('Benny Benassi', 'Satisfaction'), [{ artist: 'David Guetta, Benny Benassi', baseTitle: 'Satisfaction' }])).toBe(false);
+  });
+  it('R15b: aliases of the credited act are not an added lead (Rhythim Is Rhythim = Derrick May / Mayday)', () => {
+    const fx = (JSON.parse(fs.readFileSync('bench/search/tracks.json', 'utf8')) as BenchTrack[]).find((t) => t.id === 'c-rhythim-is-rhythim-strings-of-life')!;
+    expect(isHit(fx, [{ artist: 'Derrick May, Mayday, Rhythim Is Rhythim', baseTitle: 'Strings of Life' }])).toBe(true);
+    expect(artistRule('Benny Benassi', 'David Guetta, Benny Benassi', fx.aliases)).toBeNull();
   });
   it('leaves clean results untagged and still hits with extras', () => {
     expect(artistRule('CamelPhat, Elderbrook', 'CamelPhat')).toBe('subset-with-lead');
