@@ -73,3 +73,13 @@ through subagents working off `docs/specs/build-plan.md`.
   queue (one job at a time; HTTP 206 = soft-block → 60-min queue pause, gentler resume; index
   grows over days). ALL runtime data moved to ~/.setarchitect (Turbopack has no watch-ignore —
   runtime writes in repo cause rebuild loops). 304 tests green.
+- 2026-11-01 (V2 Phase 2 — search): merged multi-provider search (Spotify+Deezer stage 1;
+  MusicBrainz + refined queries stage 2; iTunes optional behind breaker), version parser +
+  version chips, ISRC/signature dedup, persistent circuit breaker + 24h cache. ACCEPTANCE RUN
+  (single, after Spotify lockout cleared): track hit-rate 98% raw / 97% audited (classic 98%,
+  recent 96%), version-correctness 93.3%, total p95 1240ms (stage-1 747ms) — all targets met;
+  R13 progressive results not needed. Baseline: docs/research/search-bench-baseline-2026-11-01-merged.json,
+  memo docs/research/search-coverage-bench.md. Lessons: the auditor caught a false pass
+  (Guetta/Benassi rework accepted by the artist-credit subset rule) — always hand-audit
+  "+extras" hits; a Spotify-degraded run silently looked like a valid one — benchmarks must
+  fail PARTIAL when any required provider degrades; one probe before any bench after a lockout.
