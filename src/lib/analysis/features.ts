@@ -58,7 +58,7 @@ export function extractFeatures(pcm: Float32Array, sampleRate: number): Loudness
   };
 }
 
-/** Peaks above an adaptive threshold (local median + k * MAD-ish spread), at least ~60 ms apart. */
+/** Local maxima of the flux above mean + 1 standard deviation (global, not local), at least 3 hops (~70 ms at 22.05 kHz) apart. */
 function countOnsets(flux: number[]): number {
   if (flux.length < 3) return 0;
   const mean = flux.reduce((a, b) => a + b, 0) / flux.length;

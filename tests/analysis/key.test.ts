@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chromagram, estimateKey } from '@/lib/analysis/key';
+import { chromagram, estimateKey, CHROMA_MIN_HZ } from '@/lib/analysis/key';
 
 const SR = 22050;
 const semis = (n: number) => 440 * 2 ** (n / 12); // n semitones from A4
@@ -49,5 +49,19 @@ describe('key detection', () => {
     const c = chromagram(tones([semis(0)], 3), SR);
     expect(c).toHaveLength(12);
     expect(c.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 6);
+  });
+
+  it('44.1 kHz C-major triad with a loud 55 Hz off-key sub-bass still -> 8B', () => {
+    const sr = 44100;
+    const pcm = new Float32Array(sr * 10);
+    const notes = [0, 4, 7, 0, 4, 7, 12].map((n) => semis(C + n));
+    for (const f of notes)
+      for (let h = 1; h <= 3; h++)
+        for (let i = 0; i < pcm.length; i++) pcm[i] += (0.5 / h / notes.length) * Math.sin((2 * Math.PI * f * h * i) / sr);
+    // A1 = 55 Hz is outside C major's tonic triad; loud kick-like sub
+    const sub = 55 * 1.0595; // A#1: non-key pitch class
+    for (let i = 0; i < pcm.length; i++) pcm[i] += 0.8 * Math.sin((2 * Math.PI * sub * i) / sr);
+    expect(CHROMA_MIN_HZ).toBeGreaterThanOrEqual(100);
+    expect(estimateKey(chromagram(pcm, sr))?.camelot).toBe('8B');
   });
 });

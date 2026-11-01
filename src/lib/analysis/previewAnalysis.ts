@@ -134,19 +134,26 @@ async function writeCache(cache: Record<string, Analysis>, file = CACHE_FILE): P
   }
 }
 
+async function fetchAndAnalyse(previewUrl: string): Promise<Analysis | undefined> {
+  const res = await fetchWithTimeout(previewUrl, { timeoutMs: ANALYSIS_TIMEOUT_MS - 1000, retries: 0 });
+  const buf = new Uint8Array(await res.arrayBuffer());
+  if (buf.length === 0 || buf.length > MAX_BYTES) return undefined;
+  return analyseFull(buf);
+}
+
 /** Fetches a Deezer preview transiently and estimates bpm, key, energy, danceability; results cached by trackKey. Never throws. */
 export async function analysePreview(trackKey: string, previewUrl: string): Promise<Partial<Track>> {
+  let cached: Analysis | undefined;
   try {
     const cache = await readCache();
-    let hit: Analysis | undefined = cache[trackKey];
-    // v1 entries were bpm-only: re-analyse when the richer fields are missing
-    if (!hit || hit.v !== 2) {
-      const res = await fetchWithTimeout(previewUrl, { timeoutMs: ANALYSIS_TIMEOUT_MS - 1000, retries: 0 });
-      const buf = new Uint8Array(await res.arrayBuffer());
-      if (buf.length === 0 || buf.length > MAX_BYTES) return {};
-      hit = await analyseFull(buf);
-      if (!hit) return {};
-      cache[trackKey] = hit;
+    cached = cache[trackKey];
+    // v1 entries were bpm-only: re-analyse them to get the richer fields
+    let hit: Analysis;
+    if (cached && cached.v === 2) hit = cached;
+    else {
+      const fresh = await fetchAndAnalyse(previewUrl);
+      if (!fresh) return staleOnly(cached);
+      hit = cache[trackKey] = fresh;
       await writeCache(cache);
     }
     const out: Partial<Track> = {};
@@ -156,6 +163,11 @@ export async function analysePreview(trackKey: string, previewUrl: string): Prom
     if (hit.danceability !== undefined) out.danceability = hit.danceability;
     return out;
   } catch {
-    return {};
+    return staleOnly(cached);
   }
+}
+
+/** A v1 entry that could not be upgraded still has a usable bpm. */
+function staleOnly(cached: Analysis | undefined): Partial<Track> {
+  return cached && cached.v !== 2 && cached.bpm !== undefined ? { bpm: cached.bpm } : {};
 }

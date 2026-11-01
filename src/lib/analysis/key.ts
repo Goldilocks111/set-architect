@@ -1,10 +1,14 @@
 import { hann, magnitudeFrame } from './fft';
 import { toCamelot } from '../sources/camelot';
 
-const FRAME = 4096;
-const HOP = 2048;
-const MIN_HZ = 55;
-const MAX_HZ = 5000;
+// Chroma is computed on audio decimated to ~CHROMA_RATE: with a 4096-point FFT that gives ~2.7 Hz bins, so a semitone
+// (6.5 Hz at 110 Hz) spans more than one bin. Below CHROMA_MIN_HZ kick/sub-bass can't be resolved to a pitch class and
+// only pollutes the chroma, so it is excluded (Task 3 may tune these).
+export const CHROMA_FRAME = 4096;
+export const CHROMA_HOP = 2048;
+export const CHROMA_MIN_HZ = 110;
+export const CHROMA_MAX_HZ = 4000;
+export const CHROMA_RATE = 11025;
 
 /** Below this best-profile Pearson correlation the key is reported as unknown (Task 3 tunes). */
 export const KEY_MIN_CONFIDENCE = 0.5;
@@ -27,12 +31,26 @@ export type KeyProfile = keyof typeof PROFILES;
 /** 12-bin pitch-class energy (C..B), summed magnitude over all frames, normalised to sum 1 (all zero for silence). */
 export function chromagram(pcm: Float32Array, sampleRate: number): Float64Array {
   const chroma = new Float64Array(12);
+  const factor = Math.max(1, Math.round(sampleRate / CHROMA_RATE));
+  if (factor > 1) {
+    // boxcar average = crude anti-alias low-pass; adequate below CHROMA_MAX_HZ
+    const out = new Float32Array(Math.floor(pcm.length / factor));
+    for (let i = 0; i < out.length; i++) {
+      let acc = 0;
+      for (let j = 0; j < factor; j++) acc += pcm[i * factor + j];
+      out[i] = acc / factor;
+    }
+    pcm = out;
+    sampleRate /= factor;
+  }
+  const FRAME = CHROMA_FRAME;
+  const HOP = CHROMA_HOP;
   const window = hann(FRAME);
   const re = new Float64Array(FRAME);
   const im = new Float64Array(FRAME);
   const binHz = sampleRate / FRAME;
-  const lo = Math.max(1, Math.ceil(MIN_HZ / binHz));
-  const hi = Math.min(FRAME / 2 - 1, Math.floor(MAX_HZ / binHz));
+  const lo = Math.max(1, Math.ceil(CHROMA_MIN_HZ / binHz));
+  const hi = Math.min(FRAME / 2 - 1, Math.floor(CHROMA_MAX_HZ / binHz));
   const pcOfBin = new Int8Array(FRAME / 2);
   for (let k = lo; k <= hi; k++) {
     const semis = Math.round(12 * Math.log2((k * binHz) / 440)) + 9; // A4 = pitch class 9

@@ -28,7 +28,9 @@ afterEach(() => {
 
 describe('resolveTrack preview-analysis fallback', () => {
   it('fills key/energy/danceability (not only bpm) with preview-analysis provenance, never overwriting', async () => {
+    vi.stubEnv('GETSONGBPM_API_KEY', 'g');
     mockFetch([
+      ['api.getsong.co', () => json({ search: [{ tempo: '123', key_of: 'F♯m' }] })],
       ['api.deezer.com', () => json({ data: [{ id: 1, title: 'T', rank: 5, preview: 'dz-preview', bpm: 128, artist: { name: 'A' } }] })],
       ['itunes.apple.com', () => json({ results: [] })],
       ['musicbrainz.org', () => json({ recordings: [] })],
@@ -36,10 +38,12 @@ describe('resolveTrack preview-analysis fallback', () => {
     analysePreview.mockResolvedValue({ bpm: 99, camelot: '8A', energy: 7, danceability: 0.7 });
     const t = await resolveTrack('A', 'T');
     expect(analysePreview).toHaveBeenCalled();
-    expect(t.camelot).toBe('8A');
+    expect(t.camelot).toBe('11A');
+    expect(t.sources.camelot).not.toBe('preview-analysis');
     expect(t.energy).toBe(7);
     expect(t.danceability).toBe(0.7);
-    expect(t.sources.camelot).toBe('preview-analysis');
-    if (t.sources.bpm !== 'preview-analysis') expect(t.bpm).not.toBe(99);
+    expect(t.sources.energy).toBe('preview-analysis');
+    expect(t.bpm).toBe(123);
+    expect(t.sources.bpm).not.toBe('preview-analysis');
   });
 });

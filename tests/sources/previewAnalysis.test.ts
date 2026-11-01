@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { estimateBpm, foldBpm, analysePreview, analyseFull, analysePcm } from '@/lib/analysis/previewAnalysis';
 import { mockFetch } from './helpers';
+import { dataDir } from '@/lib/dataDir';
+import fs from 'node:fs';
+import { TRACK_KEY_VERSION } from '@/lib/keyMigration';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -58,5 +61,26 @@ describe('analyseFull / analysePcm', () => {
     expect(a?.v).toBe(2);
     expect(a?.energy).toBeGreaterThanOrEqual(1);
     expect(a?.danceability).toBeGreaterThan(0);
+  });
+});
+
+describe('analysePreview v1 cache entries', () => {
+  const file = dataDir('index', 'analysis.json');
+  const seed = (key: string) => {
+    fs.mkdirSync(dataDir('index'), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ [key]: { bpm: 123 }, __keyVersion: TRACK_KEY_VERSION }));
+  };
+
+  it('returns the stale cached bpm when re-analysis fails', async () => {
+    seed('stale|bpm-only');
+    mockFetch([['preview.test', () => new Response('nope', { status: 500 })]]);
+    expect(await analysePreview('stale|bpm-only', 'https://preview.test/x.mp3')).toEqual({ bpm: 123 });
+  });
+
+  it('re-analyses a v1 entry to v2 and caches it', async () => {
+    seed('upgrade|me');
+    const fetchFn = mockFetch([['preview.test', () => new Response(new Uint8Array([1, 2, 3, 4]))]]);
+    await analysePreview('upgrade|me', 'https://preview.test/x.mp3');
+    expect(fetchFn).toHaveBeenCalled(); // v1 entry was not trusted
   });
 });
