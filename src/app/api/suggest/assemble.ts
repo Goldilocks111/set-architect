@@ -1,4 +1,5 @@
 import { suggestNext as engineSuggestNext } from '@/engine';
+import { isComplete } from '@/lib/completeness';
 import { demoTracks, isDemoMode } from '@/lib/demo';
 import { trackKeyOf, type AdjacencyLookup, type ArcTemplate, type Suggestion, type Track } from '@/types/track';
 
@@ -24,6 +25,8 @@ export const playCountBonus = (n: number) => PLAY_COUNT_MAX_BONUS * Math.min(1, 
 /** Optional collaborators; anything missing, throwing or too slow degrades to the demo pool. */
 export interface SuggestDeps {
   resolveTrack?: (artist: string, title: string) => Promise<Track>;
+  /** Metadata-cache lookup by trackKey; a complete hit supplies a candidate without any provider call. */
+  getCachedEntry?: (key: string) => { fields: Partial<Track> } | undefined;
   getSimilarTracks?: (artist: string, title: string) => Promise<Array<{ artist: string; title: string; match: number }>>;
   loadAdjacency?: () => Promise<AdjacencyHandle>;
   suggestNext?: typeof engineSuggestNext;
@@ -85,7 +88,8 @@ export async function assembleSuggestions(
 ): Promise<{ suggestions: Suggestion[] }> {
   const pool = demoTracks();
   const poolByKey = new Map(pool.map((t) => [keyOf(t), t]));
-  const last = input.playlist[input.playlist.length - 1];
+  // Incomplete set tracks have no usable essentials, so they can't anchor neighbor/similarity lookups.
+  const last = input.playlist.filter(isComplete).pop();
 
   const adjacency = new Map<string, number>();
   const similarity = new Map<string, number>();
@@ -138,11 +142,17 @@ export async function assembleSuggestions(
   }
 
   const seen = new Set<string>();
-  const toResolve = external.filter((e) => {
-    if (seen.has(e.key) || poolByKey.has(e.key)) return false;
+  const cached: Track[] = [];
+  const toResolve: typeof external = [];
+  for (const e of external) {
+    if (seen.has(e.key) || poolByKey.has(e.key)) continue;
     seen.add(e.key);
-    return true;
-  });
+    // Cache first: a complete entry costs no provider call and no share of the external-lookup budget.
+    const fields = await safe(deps.getCachedEntry && (async () => deps.getCachedEntry!(e.key)?.fields), undefined);
+    const hit: Track | undefined = fields && { ...fields, id: `cache-${e.key}`, artist: e.artist, title: e.title, sources: {} };
+    if (hit && isComplete(hit)) cached.push(hit);
+    else toResolve.push(e);
+  }
   // Resolves that finish inside the budget are used; the rest are dropped (the demo pool still ranks).
   const resolved: Array<Track | null> = toResolve.map(() => null);
   await withTimeout(
@@ -158,7 +168,7 @@ export async function assembleSuggestions(
   const inSet = new Set(input.playlist.flatMap((t) => [t.id, keyOf(t)]));
   const candidates: Track[] = [];
   const candidateKeys = new Set<string>();
-  for (const t of [...resolved, ...pool]) {
+  for (const t of [...cached, ...resolved, ...pool]) {
     if (!t) continue;
     const k = keyOf(t);
     if (inSet.has(t.id) || inSet.has(k) || candidateKeys.has(k)) continue;
@@ -211,6 +221,11 @@ export async function loadSuggestDeps(): Promise<SuggestDeps> {
     deps.getSimilarTracks = resolver.getSimilarTracks;
   } catch {
     // resolver unavailable: demo pool only
+  }
+  try {
+    deps.getCachedEntry = (await import('@/lib/metadataCache')).getEntry;
+  } catch {
+    // no cache: every candidate goes through the resolver
   }
   try {
     const adj = await import('@/lib/adjacency');
