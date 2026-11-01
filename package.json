@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test": "vitest run",
     "scrape": "tsx scripts/scraper/cli.ts",
-    "bench:search": "tsx bench/search/run.ts"
+    "bench:search": "tsx bench/search/run.ts",
+    "bench:data": "tsx bench/data/run.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
