@@ -49,3 +49,4 @@ data/index/
 .superpowers/
 .playwright-mcp/
 bench/search/results/
+.claude/scheduled_tasks.lock
