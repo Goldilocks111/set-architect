@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { isHit, hitRank, hitDetail, artistRule, versionCorrect, normalize, type BenchTrack, type BenchVersionCase } from '../../bench/search/score';
 
@@ -197,6 +198,11 @@ describe('+extras tag', () => {
     expect(artistRule('Fisher', 'Karanda, Fisher')).toBeNull();
     expect(artistRule('Benny Benassi', 'Benny Benassi, David Guetta')).toBe('exact+extras');
     expect(isHit(track('Benny Benassi', 'Satisfaction'), [{ artist: 'David Guetta, Benny Benassi', baseTitle: 'Satisfaction' }])).toBe(false);
+  });
+  it('R15b: aliases of the credited act are not an added lead (Rhythim Is Rhythim = Derrick May / Mayday)', () => {
+    const fx = (JSON.parse(fs.readFileSync('bench/search/tracks.json', 'utf8')) as BenchTrack[]).find((t) => t.id === 'c-rhythim-is-rhythim-strings-of-life')!;
+    expect(isHit(fx, [{ artist: 'Derrick May, Mayday, Rhythim Is Rhythim', baseTitle: 'Strings of Life' }])).toBe(true);
+    expect(artistRule('Benny Benassi', 'David Guetta, Benny Benassi', fx.aliases)).toBeNull();
   });
   it('leaves clean results untagged and still hits with extras', () => {
     expect(artistRule('CamelPhat, Elderbrook', 'CamelPhat')).toBe('subset-with-lead');
