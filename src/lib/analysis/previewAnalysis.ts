@@ -6,14 +6,23 @@ import MusicTempo from 'music-tempo';
 import { fetchWithTimeout } from '../http';
 import type { Track } from '@/types/track';
 import { dropStaleKeys, TRACK_KEY_VERSION } from '../keyMigration';
+import { chromagram, estimateKey } from './key';
+import { danceabilityFrom, energyFrom, extractFeatures } from './features';
 
 const CACHE_FILE = dataDir('index', 'analysis.json');
 const MAX_BYTES = 2_000_000; // a 30s preview is ~500KB; refuse anything much larger
 export const ANALYSIS_TIMEOUT_MS = 8000;
 
 export interface Analysis {
-  bpm: number;
+  bpm?: number;
+  camelot?: string;
+  energy?: number;
+  danceability?: number;
+  v: 2;
 }
+
+const MIN_SECONDS = 5;
+const SILENCE_RMS = 1e-3; // about -60 dBFS
 
 /** Folds an estimate into the usual DJ range, correcting octave errors by halving or doubling. */
 export function foldBpm(bpm: number): number {
@@ -61,15 +70,33 @@ function downmix(channels: Float32Array[]): Float32Array {
   return out;
 }
 
-/** Decodes MP3 bytes in memory and estimates BPM. Nothing is written to disk. */
-export async function analyseMp3(bytes: Uint8Array): Promise<Analysis | undefined> {
+/** Estimates every field from mono PCM; undefined for silence, too-short audio, or when nothing could be found. */
+export function analysePcm(pcm: Float32Array, sampleRate: number): Analysis | undefined {
+  if (pcm.length < sampleRate * MIN_SECONDS) return undefined;
+  let sq = 0;
+  for (let i = 0; i < pcm.length; i++) sq += pcm[i] * pcm[i];
+  if (Math.sqrt(sq / pcm.length) < SILENCE_RMS) return undefined;
+  const bpm = estimateBpm(pcm, sampleRate);
+  const camelot = estimateKey(chromagram(pcm, sampleRate))?.camelot;
+  const features = extractFeatures(pcm, sampleRate);
+  const out: Analysis = {
+    bpm,
+    camelot,
+    energy: energyFrom(features),
+    danceability: danceabilityFrom(features, bpm),
+    v: 2,
+  };
+  return out;
+}
+
+/** Decodes MP3 bytes once, in memory, and estimates bpm, key, energy, danceability. Nothing is written to disk. */
+export async function analyseFull(bytes: Uint8Array): Promise<Analysis | undefined> {
   const decoder = new MPEGDecoder();
   try {
     await decoder.ready;
     const { channelData, sampleRate, samplesDecoded } = decoder.decode(bytes);
     if (!samplesDecoded) return undefined;
-    const bpm = estimateBpm(downmix(channelData), sampleRate);
-    return bpm === undefined ? undefined : { bpm };
+    return analysePcm(downmix(channelData), sampleRate);
   } finally {
     decoder.free();
   }
@@ -107,21 +134,27 @@ async function writeCache(cache: Record<string, Analysis>, file = CACHE_FILE): P
   }
 }
 
-/** Fetches a Deezer preview transiently and estimates tempo; results cached by trackKey. Never throws. */
+/** Fetches a Deezer preview transiently and estimates bpm, key, energy, danceability; results cached by trackKey. Never throws. */
 export async function analysePreview(trackKey: string, previewUrl: string): Promise<Partial<Track>> {
   try {
     const cache = await readCache();
     let hit: Analysis | undefined = cache[trackKey];
-    if (!hit) {
+    // v1 entries were bpm-only: re-analyse when the richer fields are missing
+    if (!hit || hit.v !== 2) {
       const res = await fetchWithTimeout(previewUrl, { timeoutMs: ANALYSIS_TIMEOUT_MS - 1000, retries: 0 });
       const buf = new Uint8Array(await res.arrayBuffer());
       if (buf.length === 0 || buf.length > MAX_BYTES) return {};
-      hit = await analyseMp3(buf);
+      hit = await analyseFull(buf);
       if (!hit) return {};
       cache[trackKey] = hit;
       await writeCache(cache);
     }
-    return { bpm: hit.bpm };
+    const out: Partial<Track> = {};
+    if (hit.bpm !== undefined) out.bpm = hit.bpm;
+    if (hit.camelot !== undefined) out.camelot = hit.camelot;
+    if (hit.energy !== undefined) out.energy = hit.energy;
+    if (hit.danceability !== undefined) out.danceability = hit.danceability;
+    return out;
   } catch {
     return {};
   }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { estimateBpm, foldBpm, analysePreview } from '@/lib/analysis/previewAnalysis';
+import { estimateBpm, foldBpm, analysePreview, analyseFull, analysePcm } from '@/lib/analysis/previewAnalysis';
 import { mockFetch } from './helpers';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -40,5 +40,23 @@ describe('previewAnalysis', () => {
   it('never throws: undecodable bytes give {}', async () => {
     mockFetch([['preview.test', () => new Response(new Uint8Array([1, 2, 3, 4]))]]);
     expect(await analysePreview('nobody|nothing-test', 'https://preview.test/x.mp3')).toEqual({});
+  });
+});
+
+describe('analyseFull / analysePcm', () => {
+  const tone = (hz: number, seconds: number, sr = 22050) =>
+    Float32Array.from({ length: sr * seconds }, (_, i) => 0.4 * Math.sin((2 * Math.PI * hz * i) / sr));
+
+  it('rejects silence and short audio', async () => {
+    expect(analysePcm(new Float32Array(22050 * 30), 22050)).toBeUndefined();
+    expect(analysePcm(tone(440, 3), 22050)).toBeUndefined();
+    expect(await analyseFull(new Uint8Array([1, 2, 3, 4]))).toBeUndefined();
+  });
+
+  it('returns v2 with energy and danceability for a click track', () => {
+    const a = analysePcm(clickTrack(124, 20), 22050);
+    expect(a?.v).toBe(2);
+    expect(a?.energy).toBeGreaterThanOrEqual(1);
+    expect(a?.danceability).toBeGreaterThan(0);
   });
 });
