@@ -8,6 +8,7 @@ import ArcTemplatePicker from './ArcTemplatePicker';
 import BillingActions from './BillingActions';
 import DemoBanner from './DemoBanner';
 import EnergyCurve from './EnergyCurve';
+import MikImport from './MikImport';
 import SavedSets from './SavedSets';
 import SearchBar from './SearchBar';
 import { recordingKeys } from './recordingKeys';
@@ -161,6 +162,20 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
     return null;
   }, []);
 
+  /** Mixed In Key values land as manual; danceability is never in a MIK file, so the resolver is asked for it. */
+  const applyMik = useCallback(
+    (updates: Array<{ id: string; fields: OverrideFields }>) => {
+      let next = state;
+      for (const u of updates) {
+        dispatch({ type: 'override', id: u.id, fields: u.fields });
+        next = playlistReducer(next, { type: 'override', id: u.id, fields: u.fields });
+      }
+      const ids = new Set(updates.map((u) => u.id));
+      requeue(next.tracks.filter((t) => ids.has(t.id)));
+    },
+    [state, requeue]
+  );
+
   const loadSet = useCallback(
     (p: PlaylistState) => {
       dispatch({ type: 'load', state: p });
@@ -182,6 +197,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <MikImport tracks={tracks} onApply={applyMik} />
           <SpotifyConnect tracks={tracks} onAdd={add} />{/* spotify-connect */}
           {!demo && <BillingActions />}
           {!demo && (
