@@ -56,9 +56,9 @@ describe('analyseFull / analysePcm', () => {
     expect(await analyseFull(new Uint8Array([1, 2, 3, 4]))).toBeUndefined();
   });
 
-  it('returns v2 with energy and danceability for a click track', () => {
+  it('returns v3 with energy and danceability for a click track', () => {
     const a = analysePcm(clickTrack(124, 20), 22050);
-    expect(a?.v).toBe(2);
+    expect(a?.v).toBe(3);
     expect(a?.energy).toBeGreaterThanOrEqual(1);
     expect(a?.danceability).toBeGreaterThan(0);
   });
@@ -82,5 +82,13 @@ describe('analysePreview v1 cache entries', () => {
     const fetchFn = mockFetch([['preview.test', () => new Response(new Uint8Array([1, 2, 3, 4]))]]);
     await analysePreview('upgrade|me', 'https://preview.test/x.mp3');
     expect(fetchFn).toHaveBeenCalled(); // v1 entry was not trusted
+  });
+
+  it('re-analyses a v2 entry (pre-tuning key/energy) but keeps its bpm if that fails', async () => {
+    fs.mkdirSync(dataDir('index'), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ 'old|v2': { bpm: 126, camelot: '5A', energy: 7, danceability: 0.8, v: 2 }, __keyVersion: TRACK_KEY_VERSION }));
+    const fetchFn = mockFetch([['preview.test', () => new Response('nope', { status: 500 })]]);
+    expect(await analysePreview('old|v2', 'https://preview.test/x.mp3')).toEqual({ bpm: 126 });
+    expect(fetchFn).toHaveBeenCalled();
   });
 });

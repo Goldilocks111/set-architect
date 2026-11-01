@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chromagram, estimateKey, CHROMA_MIN_HZ } from '@/lib/analysis/key';
+import { chromagram, estimateKey, pitchBinMap, whiten, CHROMA_MIN_HZ } from '@/lib/analysis/key';
 
 const SR = 22050;
 const semis = (n: number) => 440 * 2 ** (n / 12); // n semitones from A4
@@ -49,6 +49,38 @@ describe('key detection', () => {
     const c = chromagram(tones([semis(0)], 3), SR);
     expect(c).toHaveLength(12);
     expect(c.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 6);
+  });
+
+  it('pitch bins average their FFT bins: a flat spectrum gives the same value in every pitch bin', () => {
+    const { target, counts } = pitchBinMap(11025, 4096);
+    const bins = new Float64Array(counts.length);
+    for (let k = 0; k < target.length; k++) if (target[k] >= 0) bins[target[k]] += 1; // flat magnitude 1
+    for (let s = 0; s < bins.length; s++) if (counts[s] > 0) expect(bins[s] / counts[s]).toBe(1);
+    // more FFT bins land in a high pitch bin than in a low one (why summing over-weights the treble)
+    expect(counts[counts.length - 1]).toBeGreaterThan(counts[Math.floor(counts.length / 2)]);
+  });
+
+  it('whiten subtracts the local mean and clamps at zero', () => {
+    expect([...whiten(new Float64Array(40).fill(3), 5)]).toEqual(new Array(40).fill(0));
+    const row = new Float64Array(41).fill(1);
+    row[20] = 12; // a peak on a flat floor: 11 neighbours mean = (10 + 12) / 11 = 2
+    const w = whiten(row, 5);
+    expect(w[20]).toBeCloseTo(10, 9);
+    expect(w[0]).toBe(0);
+  });
+
+  it('a C-major triad over a loud treble-heavy noise floor -> 8B', () => {
+    const notes = [0, 4, 7, 0, 4, 7, 12].map((n) => semis(C + n));
+    const pcm = tones(notes);
+    let seed = 5;
+    let prev = 0;
+    for (let i = 0; i < pcm.length; i++) {
+      seed = (seed * 16807) % 2147483647;
+      const w = (seed / 2147483647) * 2 - 1;
+      pcm[i] += 0.6 * (w - prev); // first difference: noise rising with frequency, like hats/cymbals
+      prev = w;
+    }
+    expect(keyOf(pcm)?.camelot).toBe('8B');
   });
 
   it('44.1 kHz C-major triad with a loud 55 Hz off-key sub-bass still -> 8B', () => {
