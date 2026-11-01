@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  resolver: { searchTracks: vi.fn(), resolveTrack: vi.fn(), getSimilarTracks: vi.fn() },
+  resolver: { searchTracks: vi.fn(), resolveTrack: vi.fn(), resolveWithStatus: vi.fn(), getSimilarTracks: vi.fn() },
+  reresolve: { scheduleRetry: vi.fn() },
   auth: { getCurrentUser: vi.fn() },
   server: { createClient: vi.fn() },
   admin: { createAdminClient: vi.fn() },
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/supabase/admin', () => mocks.admin);
 vi.mock('@/lib/billing/entitlements', () => mocks.entitlements);
 vi.mock('@/lib/resolver', () => mocks.resolver);
+vi.mock('@/lib/reresolve', () => mocks.reresolve);
 vi.mock('@/lib/supabase/auth', () => mocks.auth);
 vi.mock('@/lib/supabase/server', () => mocks.server);
 
@@ -221,5 +223,34 @@ describe('POST /api/playlists (configured)', () => {
     const res = await POST(new Request('http://x/api/playlists', { method: 'POST', body: JSON.stringify({ name: 'a', tracks: [] }) }));
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ error: 'entitlements unavailable' });
+  });
+});
+
+describe('GET /api/search/resolve', () => {
+  beforeEach(() => vi.resetAllMocks());
+  afterEach(() => vi.useRealTimers());
+
+  it('returns track.unresolved from resolveWithStatus with a retryAt for retryable reasons', async () => {
+    const { GET } = await import('@/app/api/search/resolve/route');
+    mocks.resolver.resolveWithStatus.mockResolvedValue({
+      id: 'x|y', artist: 'X', title: 'Y', sources: {}, unresolved: { reason: 'providers-unavailable', missing: ['bpm'] },
+    });
+    mocks.reresolve.scheduleRetry.mockReturnValue(1234);
+    const res = await GET(new Request('http://x/api/search/resolve?artist=X&title=Y'));
+    const body = await res.json();
+    expect(mocks.resolver.resolveWithStatus).toHaveBeenCalledWith('X', 'Y', { budgetMs: 45_000 });
+    expect(body.track.unresolved).toEqual({ reason: 'providers-unavailable', missing: ['bpm'], retryAt: 1234 });
+  });
+
+  it('responds within the budget even if the resolver hangs (fake timers)', async () => {
+    vi.useFakeTimers();
+    const { GET } = await import('@/app/api/search/resolve/route');
+    mocks.resolver.resolveWithStatus.mockReturnValue(new Promise(() => {}));
+    const p = GET(new Request('http://x/api/search/resolve?artist=X&title=Y'));
+    await vi.advanceTimersByTimeAsync(50_000);
+    const res = await p;
+    expect(res.status).toBeLessThan(500);
+    const body = await res.json();
+    expect(body.track.unresolved.reason).toBe('timeout');
   });
 });
