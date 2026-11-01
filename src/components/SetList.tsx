@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useState } from 'react';
+import type { OverrideFields } from '@/lib/overrideValidation';
 import type { ArcTemplate, Track } from '@/types/track';
 import SetRow from './SetRow';
 import TransitionBadge from './TransitionBadge';
@@ -11,9 +12,11 @@ interface Props {
   plannedLength: number;
   onRemove: (id: string) => void;
   onMove: (from: number, to: number) => void;
+  resolving?: string[];
+  onOverride?: (track: Track, fields: OverrideFields) => Promise<string | null>;
 }
 
-export default function SetList({ tracks, template, plannedLength, onRemove, onMove }: Props) {
+export default function SetList({ tracks, template, plannedLength, onRemove, onMove, resolving, onOverride }: Props) {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
 
@@ -39,6 +42,8 @@ export default function SetList({ tracks, template, plannedLength, onRemove, onM
             count={tracks.length}
             onRemove={onRemove}
             onMove={onMove}
+            resolving={resolving?.includes(track.id)}
+            onOverride={onOverride}
             dragOver={dragOver === i && dragFrom !== null && dragFrom !== i}
             onDragStart={setDragFrom}
             onDragOverRow={setDragOver}

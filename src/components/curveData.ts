@@ -1,4 +1,5 @@
 import { energyTargetAt } from '@/engine';
+import { isComplete } from '@/lib/completeness';
 import type { ArcTemplate, Track } from '@/types/track';
 
 export interface CurveRow {
@@ -25,3 +26,7 @@ export function buildCurveData(tracks: Track[], template: ArcTemplate, plannedLe
     };
   });
 }
+
+/** Incomplete tracks are quarantined: their energy is not drawn on the curve (the slot stays, as a gap). */
+export const quarantineForCurve = (tracks: Track[]): Track[] =>
+  tracks.map((t) => (isComplete(t) ? t : { ...t, energy: undefined }));

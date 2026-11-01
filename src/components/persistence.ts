@@ -14,13 +14,15 @@ export function loadLocal(): PlaylistState | null {
 export function saveLocal(state: PlaylistState): void {
   try {
     // Preview URLs are signed/short-lived (Deezer ~15 min) and must not be persisted.
+    const { resolving: _resolving, ...persisted } = state; // in-flight state is client-only
+    void _resolving;
     const tracks = state.tracks.map(({ previewUrl: _drop, ...rest }) => {
       void _drop;
       const sources = { ...rest.sources };
       delete sources.previewUrl;
       return { ...rest, sources };
     });
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, tracks }));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...persisted, tracks }));
   } catch {
     // storage blocked or full: the set still lives in memory for this session
   }

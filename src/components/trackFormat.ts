@@ -1,4 +1,5 @@
 import type { SuggestionReason, Track } from '@/types/track';
+import { missingEssentials } from '@/lib/completeness';
 import { safeHttpUrl } from './trackSanitize';
 
 export const youtubeHref = (t: Track) =>
@@ -57,7 +58,11 @@ export function previewSource(t: Track): PreviewSource {
   return 'other';
 }
 
-export const needsMetadata = (t: Track) => t.bpm === undefined || t.camelot === undefined || t.energy === undefined;
+export const fmtDance = (d: number | undefined) =>
+  typeof d === 'number' && Number.isFinite(d) ? d.toFixed(2) : '—';
+
+/** Any of the four essentials missing (danceability included): the track needs a resolve. */
+export const needsMetadata = (t: Track) => missingEssentials(t).length > 0;
 
 export async function fetchResolved(t: Pick<Track, 'artist' | 'title'>, signal?: AbortSignal): Promise<Track | null> {
   try {
