@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { open, seal, SESSION_COOKIE, STATE_COOKIE } from '@/lib/spotify/cookie';
-import { createPlaylist, playlistTracks } from '@/lib/spotify/api';
+import { createPlaylist, listPlaylists, playlistTracks } from '@/lib/spotify/api';
 import { getSpotifySession } from '@/lib/spotify/session';
 import { GET as login } from '@/app/api/spotify/login/route';
 import { GET as callback } from '@/app/api/spotify/callback/route';
@@ -162,6 +162,36 @@ describe('api mapping', () => {
         popularity: undefined,
       },
     ]);
+  });
+  it('drops playlists repeated across pages and tracks repeated within a playlist (unique React keys)', async () => {
+    fetchMock
+      .mockImplementationOnce(() =>
+        json({
+          items: [{ id: 'p1', name: 'One', tracks: { total: 2 } }],
+          next: 'https://api.spotify.com/v1/me/playlists?offset=50',
+        })
+      )
+      .mockImplementationOnce(() =>
+        json({
+          items: [
+            { id: 'p1', name: 'One', tracks: { total: 2 } },
+            { id: 'p2', name: 'Two', tracks: { total: 0 } },
+          ],
+          next: null,
+        })
+      );
+    expect((await listPlaylists('tok')).map((p) => p.id)).toEqual(['p1', 'p2']);
+
+    fetchMock.mockImplementationOnce(() =>
+      json({
+        items: [
+          { track: { id: 'abc', name: 'Song', artists: [{ name: 'A' }] } },
+          { track: { id: 'abc', name: 'Song', artists: [{ name: 'A' }] } },
+        ],
+        next: null,
+      })
+    );
+    expect((await playlistTracks('tok', 'p1')).map((t) => t.spotifyId)).toEqual(['abc']);
   });
   it('never touches deprecated endpoints', async () => {
     fetchMock.mockImplementation(() => json({ items: [], next: null, id: 'p1' }));

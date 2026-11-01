@@ -83,3 +83,7 @@ through subagents working off `docs/specs/build-plan.md`.
   (Guetta/Benassi rework accepted by the artist-credit subset rule) — always hand-audit
   "+extras" hits; a Spotify-degraded run silently looked like a valid one — benchmarks must
   fail PARTIAL when any required provider degrades; one probe before any bench after a lockout.
+- 2026-11-01: Fix "two children with the same key" console error in the Spotify import picker:
+  Spotify's /me/playlists repeats a playlist across pages, and a playlist can hold the same
+  track twice → duplicate React keys. listPlaylists/playlistTracks now dedupe by id (first wins).
+  Lesson: never assume provider pagination yields unique ids.

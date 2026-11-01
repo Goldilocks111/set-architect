@@ -48,6 +48,7 @@ export async function me(token: string): Promise<{ id: string; displayName: stri
 
 export async function listPlaylists(token: string): Promise<SpotifyPlaylist[]> {
   const out: SpotifyPlaylist[] = [];
+  const seen = new Set<string>();
   let next: string | null = `${BASE}/me/playlists?limit=50`;
   for (let page = 0; next && page < 10; page++) {
     const d: {
@@ -58,7 +59,13 @@ export async function listPlaylists(token: string): Promise<SpotifyPlaylist[]> {
       } | null>;
       next?: string | null;
     } = await call(token, next);
-    for (const p of d.items ?? []) if (p) out.push({ id: p.id, name: p.name, trackCount: p.tracks?.total ?? 0 });
+    // Spotify can repeat a playlist across pages (library shifting mid-pagination): keep the first
+    for (const p of d.items ?? []) {
+      if (p && !seen.has(p.id)) {
+        seen.add(p.id);
+        out.push({ id: p.id, name: p.name, trackCount: p.tracks?.total ?? 0 });
+      }
+    }
     next = d.next ?? null;
   }
   return out;
@@ -89,6 +96,7 @@ export class PlaylistBlockedError extends SpotifyApiError {
 
 export async function playlistTracks(token: string, playlistId: string): Promise<SpotifyPlaylistTrack[]> {
   const out: SpotifyPlaylistTrack[] = [];
+  const seen = new Set<string>();
   const base = `/playlists/${encodeURIComponent(playlistId)}`;
   let first = true;
   let next: string | null = null;
@@ -108,6 +116,9 @@ export async function playlistTracks(token: string, playlistId: string): Promise
       const t = raw.track;
       // skip local files, removed tracks and podcast episodes: no usable Spotify id
       if (!t || !t.id || t.is_local || (t.type && t.type !== 'track') || !t.name) continue;
+      // a playlist may contain the same track twice; it can only be added to a set once
+      if (seen.has(t.id)) continue;
+      seen.add(t.id);
       out.push({
         artist: (t.artists ?? []).map((a) => a.name).join(', '),
         title: t.name,
