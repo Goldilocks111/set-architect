@@ -170,3 +170,19 @@ export function summarizePipeline(rows: PipelineRow[]): {
     p95: percentile(elapsed, 95),
   };
 }
+
+/**
+ * Overall verdict. Degradation (429 stop, exhausted budget, a breaker cooldown opened mid-run) makes the run PARTIAL
+ * even at 100/100: breaker-skipped adapters turn into "incomplete with a reason", which would otherwise pass.
+ * A --limit run is a smoke test and never reports PASS.
+ */
+export function pipelineStatus(o: { passed: number; n: number; stopped: string[]; refused: string[]; cooldowns: string[]; limited: boolean }): string {
+  const parts: string[] = [];
+  if (o.stopped.length) parts.push(`rate-limited: ${o.stopped.join(', ')}`);
+  if (o.refused.length) parts.push(`budget exhausted: ${o.refused.join(', ')}`);
+  if (o.cooldowns.length) parts.push(`breaker opened: ${o.cooldowns.join(', ')}`);
+  if (parts.length) return `PARTIAL (${parts.join('; ')})`;
+  const allPass = o.passed === o.n;
+  if (o.limited) return allPass ? 'SMOKE' : 'SMOKE (FAIL)';
+  return allPass ? 'PASS' : 'FAIL';
+}

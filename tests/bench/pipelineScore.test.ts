@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PIPELINE_LIMIT_MS, pipelinePass, summarizePipeline, type PipelineRow } from '../../bench/data/score';
+import { PIPELINE_LIMIT_MS, pipelinePass, pipelineStatus, summarizePipeline, type PipelineRow } from '../../bench/data/score';
 
 const row = (over: Partial<PipelineRow>): PipelineRow => ({
   id: 'a',
@@ -53,5 +53,36 @@ describe('summarizePipeline', () => {
     const s = summarizePipeline([]);
     expect(s.n).toBe(0);
     expect(s.complete.all).toBe(0);
+  });
+});
+
+describe('pipelineStatus', () => {
+  const ok = { passed: 100, n: 100, stopped: [], refused: [], cooldowns: [], limited: false };
+  it('PASS only at full pass with no degradation', () => {
+    expect(pipelineStatus(ok)).toBe('PASS');
+  });
+  it('FAIL when any track fails', () => {
+    expect(pipelineStatus({ ...ok, passed: 99 })).toBe('FAIL');
+  });
+  it('PARTIAL on a 429 stop even at 100/100', () => {
+    expect(pipelineStatus({ ...ok, stopped: ['spotify'] })).toMatch(/^PARTIAL.*rate-limited.*spotify/);
+  });
+  it('PARTIAL on budget exhaustion even at 100/100', () => {
+    expect(pipelineStatus({ ...ok, refused: ['deezer'] })).toMatch(/^PARTIAL.*budget.*deezer/);
+  });
+  it('PARTIAL when a breaker cooldown opened during the run', () => {
+    expect(pipelineStatus({ ...ok, cooldowns: ['musicbrainz'] })).toMatch(/^PARTIAL.*breaker.*musicbrainz/);
+  });
+  it('lists every degradation together', () => {
+    const s = pipelineStatus({ ...ok, stopped: ['spotify'], cooldowns: ['deezer'] });
+    expect(s).toMatch(/spotify/);
+    expect(s).toMatch(/deezer/);
+  });
+  it('a --limit run reports SMOKE, never PASS', () => {
+    expect(pipelineStatus({ ...ok, passed: 5, n: 5, limited: true })).toBe('SMOKE');
+    expect(pipelineStatus({ ...ok, passed: 4, n: 5, limited: true })).toBe('SMOKE (FAIL)');
+  });
+  it('degradation outranks SMOKE', () => {
+    expect(pipelineStatus({ ...ok, limited: true, cooldowns: ['spotify'] })).toMatch(/^PARTIAL/);
   });
 });
