@@ -31,6 +31,18 @@ export function musicbrainzWorkQuery(baseTitle: string, leadArtist: string, vers
   return boost ? `${base} recording:(${boost})^10` : base;
 }
 
+/**
+ * Lucene query for a request whose artist and title could not be told apart: every content word is looked
+ * up as recording title and as artist credit, and the version words only boost.
+ */
+export function musicbrainzLooseQuery(words: string[]): string {
+  const isVersion = (w: string) => /^(extended|club|radio|remix|rework|bootleg|flip|refix|original|dub|vip|live|acoustic|instrumental|remaster|remastered|edit|mix|version)$/.test(w);
+  const content = words.filter((w) => !isVersion(w)).map(escapeLucene);
+  const version = words.filter(isVersion).map(escapeLucene);
+  const base = `recording:(${content.join(' ')}) artist:(${content.join(' ')})`;
+  return version.length ? `${base} recording:(${version.join(' ')})^10` : base;
+}
+
 export function mapMusicBrainzRecording(r: MbRecording): SearchResultWithIsrcs {
   const artists = (r['artist-credit'] ?? []).map((a) => a.name).filter(Boolean);
   const out: SearchResultWithIsrcs = {

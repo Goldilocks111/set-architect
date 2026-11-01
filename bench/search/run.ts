@@ -53,6 +53,8 @@ interface Target {
   name: string;
   /** Per-query degraded provider lists, filled by the merged target. */
   degraded?: string[][];
+  /** Queries that had a degraded provider, so a degrade can be traced to what was asked. */
+  degradedQueries?: Array<{ query: string; providers: string[] }>;
   /** Per-query providers the harness itself refused to call (budget, pacing, breaker). */
   throttled?: string[][];
   /** Minimum gap between queries. */
@@ -150,6 +152,7 @@ async function loadTargets(): Promise<{ targets: Target[]; skipped: string[] }> 
       skipped.push('merged: merge.ts missing or exports no mergedSearch');
     } else {
       const degraded: string[][] = [];
+      const degradedQueries: Array<{ query: string; providers: string[] }> = [];
       const throttled: string[][] = [];
       const timings: Timing[] = [];
       let now = new Set<string>();
@@ -162,6 +165,7 @@ async function loadTargets(): Promise<{ targets: Target[]; skipped: string[] }> 
       targets.push({
         name: 'merged',
         degraded,
+        degradedQueries,
         throttled,
         timings,
         participating,
@@ -170,7 +174,12 @@ async function loadTargets(): Promise<{ targets: Target[]; skipped: string[] }> 
         run: async (q) => {
           now = new Set();
           const res = await fn(q, { providers: wrapped, onTiming: (t) => timings.push(t) });
-          degraded.push((res.degraded ?? []).filter((n) => !now.has(n)));
+          const lost = (res.degraded ?? []).filter((n) => !now.has(n));
+          degraded.push(lost);
+          if (lost.length) {
+            degradedQueries.push({ query: q, providers: lost });
+            console.warn(`DEGRADED ${lost.join(',')} on query: ${q}`);
+          }
           throttled.push([...now]);
           return res.hits.map((h) => ({ ...h, baseTitle: h.baseTitle }));
         },
@@ -271,6 +280,7 @@ async function runTarget(t: Target) {
     erroredQueries: [...trackRows, ...versionRows].filter((r) => r.error).length,
     requests: t.name === 'merged' ? sumGates() - mergedStart : (gates.get(t.name)?.count ?? 0) - startCount,
     degraded: '',
+    degradedQueries: '',
     throttledByBench: '',
     secondaryOnlyHits: 0,
     extrasHits: 0,
@@ -291,6 +301,8 @@ async function runTarget(t: Target) {
   }
   const dg = t.degraded ? degradedSummary(t.degraded) : { text: '', invalid: [] as string[] };
   summary.degraded = dg.text;
+  const degradedQueries = t.degradedQueries ?? [];
+  summary.degradedQueries = degradedQueries.map((d) => `${d.providers.join(',')}: ${d.query}`).join(' | ');
   const secondary = trackRows.filter((r) => r.via?.startsWith('subset-secondary-only'));
   summary.secondaryOnlyHits = secondary.length;
   const withExtras = trackRows.filter((r) => r.via?.endsWith('+extras'));

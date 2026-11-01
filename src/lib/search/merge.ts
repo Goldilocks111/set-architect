@@ -1,7 +1,7 @@
 import { withTimeout } from '@/lib/http';
 import { cooldownUntil, recordFailure, recordSuccess, resetBreakers, resetBudgets, takeBudget } from './breaker';
 import { searchProviders } from './providers';
-import { musicbrainzWorkQuery } from './providers/musicbrainz';
+import { musicbrainzLooseQuery, musicbrainzWorkQuery } from './providers/musicbrainz';
 import { parseVersion } from './version';
 import type { MergedHit, MergedSearchResponse, ParsedVersion, SearchProvider, SearchResult, VersionKind } from './types';
 
@@ -302,6 +302,10 @@ interface Assessment {
   strong: boolean;
   /** Folded words that name this work (artists + title). */
   workWords: Set<string>;
+  /** Artist or title (not both) is named in the query: the hit is related to the request but not the answer. */
+  related: boolean;
+  /** Folded lead artist is named in the query. */
+  leadInQuery: boolean;
 }
 
 function assess(g: Group, q: Query, hit: Omit<MergedHit, 'score' | 'key'>): Assessment | null {
@@ -356,6 +360,8 @@ function assess(g: Group, q: Query, hit: Omit<MergedHit, 'score' | 'key'>): Asse
     work,
     strong: work && coverage === 1 && [...asked].every((k) => kinds.has(k)),
     workWords: new Set([...titleWords, ...names.flatMap(tokens)]),
+    related: artistMatch || titleMatch,
+    leadInQuery: inQuery(q, g.members[0].r.artists[0] ?? g.members[0].r.artist),
   };
 }
 
@@ -436,6 +442,10 @@ export function defaultProviders(): SearchProvider[] {
   return allow?.length ? searchProviders.filter((p) => allow.includes(p.name)) : searchProviders;
 }
 
+/** A co-credit's length may differ this much from the query artist's own recordings of the same title. */
+const COCREDIT_DURATION_TOLERANCE = 0.25;
+const COCREDIT_PENALTY = 60;
+
 interface Ranked {
   hit: MergedHit;
   a: Assessment;
@@ -450,7 +460,28 @@ function rank(members: Member[], q: Query): Ranked[] {
     const a = assess(g, q, hit);
     if (a) out.push({ hit: { ...hit, score: a.score }, a, lead: g.members[0].r.artists[0] ?? g.members[0].r.artist });
   }
+  demoteForeignCoCredits(out);
   return out.sort((x, y) => y.hit.score - x.hit.score);
+}
+
+/**
+ * "Fisher Rain Extended Mix" also finds "Karanda, Fisher - Rain": same title, but the queried act is only a
+ * secondary credit and the length (367 s against Fisher's 209-267 s) shows it is another song. When a recording
+ * led by a queried artist exists with the same title, a co-credit whose length is more than 25% off every one
+ * of those is demoted, and it no longer counts as a full answer (so MusicBrainz is asked for the real one).
+ */
+function demoteForeignCoCredits(ranked: Ranked[]): void {
+  for (const r of ranked) {
+    const d = r.hit.durationMs;
+    if (r.a.leadInQuery || !r.a.work || d === undefined) continue;
+    const title = fold(r.hit.baseTitle);
+    const own = ranked.filter((x) => x !== r && x.a.leadInQuery && x.a.work && x.hit.durationMs !== undefined && fold(x.hit.baseTitle) === title);
+    if (!own.length) continue;
+    if (own.every((x) => Math.abs(d - x.hit.durationMs!) / x.hit.durationMs! > COCREDIT_DURATION_TOLERANCE)) {
+      r.hit = { ...r.hit, score: Math.round((r.hit.score - COCREDIT_PENALTY) * 100) / 100 };
+      r.a = { ...r.a, strong: false };
+    }
+  }
 }
 
 /** The best first-round hit naming both artist and title, and the query words that are not part of it. */
@@ -544,6 +575,12 @@ export async function mergedSearch(
     if (work) {
       const mbq = musicbrainzWorkQuery(work.best.hit.baseTitle, work.best.lead, work.leftover);
       calls.push(...musicbrainz.map((p): [SearchProvider, string] => [p, mbq]));
+    } else if (ranked.some((r) => r.a.related)) {
+      // Only the artist or only the title was found ("Kölsch Speicher 140" -> Kölsch's other tracks, "Solardo
+      // Deeper Love" -> another act's "Deeper Love"): the streaming catalogs lack the work, so ask MusicBrainz
+      // with every content word rather than a guess at which words are the title.
+      const loose = musicbrainzLooseQuery(q.tokens.filter((w) => !FILLER.has(w)));
+      calls.push(...musicbrainz.map((p): [SearchProvider, string] => [p, loose]));
     }
     if (calls.length) {
       stage2 = true;

@@ -76,7 +76,7 @@ describe('scorer regressions', () => {
   });
   it('artist comparison ignores spaces', () => {
     expect(isHit(track('Brutalismus3000', 'X'), [{ artist: 'Brutalismus 3000', baseTitle: 'X' }])).toBe(true);
-    expect(isHit(track('Brutalismus 3000', 'X'), [{ artist: 'Boys Noize, Brutalismus3000', baseTitle: 'X' }])).toBe(true);
+    expect(isHit(track('Brutalismus 3000', 'X'), [{ artist: 'Brutalismus3000, Boys Noize', baseTitle: 'X' }])).toBe(true);
   });
 });
 
@@ -191,6 +191,12 @@ describe('+extras tag', () => {
     expect(artistRule('Skrillex, Solomun', 'Solomun, Guest')).toBe('subset-secondary-only+extras');
     expect(artistRule('Skrillex, Solomun', 'Skrillex, Guest')).toBe('subset-with-lead+extras');
     expect(artistRule('Rüfüs Du Sol', 'RÜFÜS, Guest', )).toBeNull();
+  });
+  it('R15b: an added lead artist is a miss, trailing co-artists stay a tagged hit', () => {
+    expect(artistRule('Benny Benassi', 'David Guetta, Benny Benassi')).toBeNull();
+    expect(artistRule('Fisher', 'Karanda, Fisher')).toBeNull();
+    expect(artistRule('Benny Benassi', 'Benny Benassi, David Guetta')).toBe('exact+extras');
+    expect(isHit(track('Benny Benassi', 'Satisfaction'), [{ artist: 'David Guetta, Benny Benassi', baseTitle: 'Satisfaction' }])).toBe(false);
   });
   it('leaves clean results untagged and still hits with extras', () => {
     expect(artistRule('CamelPhat, Elderbrook', 'CamelPhat')).toBe('subset-with-lead');

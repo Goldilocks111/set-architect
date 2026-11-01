@@ -57,7 +57,8 @@ export type ArtistRule = ArtistBase | `${ArtistBase}+extras`;
  * HIT = at least one credited artist is on the result. Other credited artists may be missing (Deezer lists
  * a single artist) and extra uncredited artists may appear (iTunes joins featured artists). A credited name
  * that is merely part of a longer name ("Disclosure Fan Club") never matches. Hits that rest on a
- * non-lead credit alone are tagged 'subset-secondary-only' so they can be audited by hand.
+ * non-lead credit alone are tagged 'subset-secondary-only' so they can be audited by hand. An uncredited
+ * artist prepended to the credit (a new lead act) is a miss; trailing ones are a hit tagged '+extras'.
  */
 export function artistRule(
   expected: string,
@@ -81,6 +82,7 @@ export function artistRule(
     .split(/\s*(?:,|&|\band\b|\bx\b)\s*/i).map((w) => normalize(w)).filter(Boolean);
   const found = new Map<number, boolean>();
   let extras = false;
+  let leadAdded = false;
   let i = 0;
   while (i < joined.length) {
     let took = false;
@@ -95,10 +97,14 @@ export function artistRule(
     }
     if (!took) {
       extras = true;
+      if (found.size === 0) leadAdded = true;
       i++;
     }
   }
   if (found.size === 0) return null;
+  // R15b: an uncredited artist placed *before* the credited ones is a different lead act (Guetta's rework of
+  // Benassi's "Satisfaction"); only trailing co-artists are tolerated, and those are tagged +extras.
+  if (leadAdded) return null;
   const base: ArtistBase = [...found.values()].some(Boolean)
     ? 'alias'
     : found.size === credits.length
