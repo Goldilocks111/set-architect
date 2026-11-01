@@ -95,3 +95,30 @@ describe('search follow-ups (Phase 2 memo section 5)', () => {
     expect(musicbrainzLooseQuery(['disclosure', 'latch', 'remix'])).toBe('recording:(disclosure latch) artist:(disclosure latch) recording:(remix)^10');
   });
 });
+
+describe('search follow-ups: fix round 1', () => {
+  const mbSpy = () => prov('musicbrainz', []);
+
+  it('artist-only and title-only queries make no MusicBrainz call', async () => {
+    const mb1 = mbSpy();
+    await mergedSearch('Solardo', { providers: [prov('spotify', [res('spotify', 'Solardo', 'Feel My Desire')]), mb1] });
+    expect(mb1.search).not.toHaveBeenCalled();
+    const mb2 = mbSpy();
+    await mergedSearch('Deeper Love', { providers: [prov('spotify', [res('spotify', 'Steen Thottrup', 'Deeper Love')]), mb2] });
+    expect(mb2.search).not.toHaveBeenCalled();
+  });
+
+  it('a co-credited Extended Mix is not demoted against the lead artist\'s radio-length original', async () => {
+    const { hits } = await mergedSearch('Fisher Rain Extended Mix', {
+      providers: [
+        prov('spotify', [
+          res('spotify', ['Karanda', 'Fisher'], 'Rain - Extended Mix', { durationMs: 330_000 }),
+          res('spotify', 'FISHER', 'Rain', { durationMs: 180_000 }),
+        ]),
+        mbSpy(),
+      ],
+    });
+    expect(hits[0].version.kind).toBe('extended');
+    expect(hits[0].artist).toContain('Karanda');
+  });
+});
