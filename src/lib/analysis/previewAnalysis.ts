@@ -7,7 +7,7 @@ import { fetchWithTimeout } from '../http';
 import type { Track } from '@/types/track';
 import { dropStaleKeys, TRACK_KEY_VERSION } from '../keyMigration';
 import { chromagram, estimateKey } from './key';
-import { danceabilityFrom, energyFrom, extractFeatures } from './features';
+import { danceabilityFrom, energyFrom, extractFeatures, type LoudnessFeatures } from './features';
 
 const CACHE_FILE = dataDir('index', 'analysis.json');
 const MAX_BYTES = 2_000_000; // a 30s preview is ~500KB; refuse anything much larger
@@ -19,6 +19,9 @@ export interface Analysis {
   energy?: number;
   danceability?: number;
   v: 2;
+  /** Raw inputs of energy/danceability and the key estimate's confidence: set by analysePcm, for fitting (bench). Not cached. */
+  features?: LoudnessFeatures;
+  keyConfidence?: number;
 }
 
 const MIN_SECONDS = 5;
@@ -77,7 +80,8 @@ export function analysePcm(pcm: Float32Array, sampleRate: number): Analysis | un
   for (let i = 0; i < pcm.length; i++) sq += pcm[i] * pcm[i];
   if (Math.sqrt(sq / pcm.length) < SILENCE_RMS) return undefined;
   const bpm = estimateBpm(pcm, sampleRate);
-  const camelot = estimateKey(chromagram(pcm, sampleRate))?.camelot;
+  const key = estimateKey(chromagram(pcm, sampleRate));
+  const camelot = key?.camelot;
   const features = extractFeatures(pcm, sampleRate);
   const out: Analysis = {
     bpm,
@@ -85,6 +89,8 @@ export function analysePcm(pcm: Float32Array, sampleRate: number): Analysis | un
     energy: energyFrom(features),
     danceability: danceabilityFrom(features, bpm),
     v: 2,
+    features,
+    keyConfidence: key?.confidence,
   };
   return out;
 }
@@ -153,7 +159,8 @@ export async function analysePreview(trackKey: string, previewUrl: string): Prom
     else {
       const fresh = await fetchAndAnalyse(previewUrl);
       if (!fresh) return staleOnly(cached);
-      hit = cache[trackKey] = fresh;
+      const { features: _f, keyConfidence: _k, ...slim } = fresh; // diagnostics are not cached
+      hit = cache[trackKey] = slim;
       await writeCache(cache);
     }
     const out: Partial<Track> = {};

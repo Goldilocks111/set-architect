@@ -7,7 +7,16 @@ export interface DataRow {
   fields: Partial<Record<Essential, number | string>>;
   sources: Record<string, string>;
   latencyMs: number;
-  local?: { bpm?: number; camelot?: string; energy?: number; danceability?: number; ms: number };
+  local?: {
+    bpm?: number;
+    camelot?: string;
+    energy?: number;
+    danceability?: number;
+    ms: number;
+    /** Raw inputs for fitting energy/danceability coefficients later. */
+    features?: { rmsDb: number; onsetRate: number; centroidHz: number; pulseClarity: number };
+    keyConfidence?: number;
+  };
 }
 
 type Yield = Record<Essential | 'complete', number>;
@@ -63,4 +72,55 @@ export function percentile(values: number[], p: number): number {
   if (values.length === 0) return 0;
   const s = [...values].sort((a, b) => a - b);
   return s[Math.min(s.length - 1, Math.ceil((p / 100) * s.length) - 1)];
+}
+
+/** Source label the resolver gives to values it estimated itself from the Deezer preview. */
+export const LOCAL_SOURCE = 'preview-analysis';
+
+/** Rows with every field whose source is our own preview analysis removed (inputs untouched). */
+export function providersOnly(rows: DataRow[]): DataRow[] {
+  return rows.map((r) => ({
+    ...r,
+    fields: Object.fromEntries(Object.entries(r.fields).filter(([f]) => r.sources[f] !== LOCAL_SOURCE)),
+  }));
+}
+
+/** Number of essentials each source supplied. */
+export function sourceBreakdown(rows: DataRow[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of rows) {
+    for (const f of ESSENTIALS) {
+      if (r.fields[f] === undefined) continue;
+      const s = r.sources[f] ?? 'unknown';
+      out[s] = (out[s] ?? 0) + 1;
+    }
+  }
+  return out;
+}
+
+/** BPM agreement within ±2%, allowing half-time and double-time. */
+export function bpmAgrees(a: number, b: number): boolean {
+  if (!(a > 0) || !(b > 0)) return false;
+  return [1, 0.5, 2].some((m) => Math.abs(a - b * m) / a <= 0.02);
+}
+
+/**
+ * [reference, local] pairs for one field, using only rows whose reference value came from a real provider
+ * (never our own preview analysis, which would compare the analyser with itself).
+ */
+export function referencePairs<T extends number | string>(
+  rows: DataRow[],
+  field: Essential,
+): { pairs: Array<[T, T]>; bySource: Record<string, number> } {
+  const pairs: Array<[T, T]> = [];
+  const bySource: Record<string, number> = {};
+  for (const r of rows) {
+    const ref = r.fields[field];
+    const loc = r.local?.[field];
+    const src = r.sources[field];
+    if (ref === undefined || loc === undefined || src === LOCAL_SOURCE) continue;
+    pairs.push([ref as T, loc as T]);
+    bySource[src ?? 'unknown'] = (bySource[src ?? 'unknown'] ?? 0) + 1;
+  }
+  return { pairs, bySource };
 }

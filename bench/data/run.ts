@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { dataDir } from '../../src/lib/dataDir';
 import { RequestGate, dayKey, loadDailyCounts, saveDailyCounts } from '../search/guard';
 import { createFetchGuard } from './guardFetch';
-import { ESSENTIALS, keyAgreement, maeEnergy, percentile, yieldTable, type DataRow, type Essential } from './score';
+import { ESSENTIALS, bpmAgrees, keyAgreement, maeEnergy, percentile, providersOnly, referencePairs, sourceBreakdown, yieldTable, type DataRow, type Essential } from './score';
 
 try {
   (process as any).loadEnvFile?.('.env');
@@ -94,7 +94,7 @@ async function main(): Promise<void> {
         const res = await fetch(track.previewUrl, { signal: AbortSignal.timeout(10_000) });
         if (res.ok) {
           const out = await analyseFull(new Uint8Array(await res.arrayBuffer()));
-          if (out) row.local = { bpm: out.bpm, camelot: out.camelot, energy: out.energy, danceability: out.danceability, ms: Date.now() - a0 };
+          if (out) row.local = { bpm: out.bpm, camelot: out.camelot, energy: out.energy, danceability: out.danceability, ms: Date.now() - a0, features: out.features, keyConfidence: out.keyConfidence };
         }
       } catch {
         // local analysis is best-effort; the column just stays empty for this track
@@ -117,29 +117,42 @@ async function main(): Promise<void> {
       ? `PARTIAL (budget exhausted: ${refusedList.join(', ')})`
       : 'ok';
 
+  // Accuracy: reference values only (never preview-analysis, which would compare the analyser with itself).
   const both = rows.filter((r) => r.local);
+  const refKey = referencePairs<string>(rows, 'camelot');
   const keyDist = { exact: 0, relative: 0, fifth: 0, miss: 0 };
-  const energyPairs: Array<[number, number]> = [];
-  for (const r of both) {
-    const p = r.fields.camelot;
-    if (typeof p === 'string' && r.local?.camelot) keyDist[keyAgreement(p, r.local.camelot)]++;
-    if (typeof r.fields.energy === 'number' && r.local?.energy !== undefined) energyPairs.push([r.fields.energy, r.local.energy]);
-  }
+  for (const [ref, loc] of refKey.pairs) keyDist[keyAgreement(ref, loc)]++;
+  const refBpm = referencePairs<number>(rows, 'bpm');
+  const bpmOk = refBpm.pairs.filter(([r, l]) => bpmAgrees(r, l)).length;
+  const refEnergy = referencePairs<number>(rows, 'energy');
+  const refDance = referencePairs<number>(rows, 'danceability');
+  const energyMae = maeEnergy(refEnergy.pairs);
+  const danceMae = maeEnergy(refDance.pairs);
+  const provTable = yieldTable(providersOnly(rows));
+  const bySource = sourceBreakdown(rows);
   const localYield = {
     ...Object.fromEntries(ESSENTIALS.map((f) => [f, both.length ? both.filter((r) => r.local?.[f] !== undefined).length / both.length : 0])),
   } as Record<Essential, number>;
 
   console.log(`\nSTATUS: ${status}  (n=${rows.length})`);
-  console.log('\nYield                 all  classic  recent');
-  for (const f of [...ESSENTIALS, 'complete'] as const) {
-    console.log(`  ${f.padEnd(14)}  ${fmt(table.all[f]).padStart(6)}  ${fmt(table.classic[f]).padStart(6)}  ${fmt(table.recent[f]).padStart(6)}`);
-  }
+  const printYield = (title: string, t: typeof table) => {
+    console.log(`\n${title}      all  classic  recent`);
+    for (const f of [...ESSENTIALS, 'complete'] as const) {
+      console.log(`  ${f.padEnd(14)}  ${fmt(t.all[f]).padStart(6)}  ${fmt(t.classic[f]).padStart(6)}  ${fmt(t.recent[f]).padStart(6)}`);
+    }
+  };
+  printYield('Yield, providers only (excl. preview-analysis)', provTable);
+  printYield('Yield, with local analysis', table);
+  console.log('\nFields supplied per source: ' + Object.entries(bySource).map(([k, v]) => `${k} ${v}`).join('  '));
   console.log(`\nLatency per track: p50 ${p50}ms  p95 ${p95}ms`);
   console.log(`\nLocal analysis on ${both.length} tracks with a Deezer preview${analyseFull ? '' : ' (skipped: analyseFull absent)'}`);
   if (both.length) {
     console.log('  local yield: ' + ESSENTIALS.map((f) => `${f} ${fmt(localYield[f])}`).join('  '));
-    console.log(`  key vs provider: ${Object.entries(keyDist).map(([k, v]) => `${k} ${v}`).join('  ')}`);
-    console.log(`  energy MAE vs provider (${energyPairs.length} pairs): ${maeEnergy(energyPairs).toFixed(2)}`);
+    const src = (o: Record<string, number>) => Object.entries(o).map(([k, v]) => `${k} ${v}`).join(', ') || 'none';
+    console.log(`  key vs reference (n=${refKey.pairs.length}; ${src(refKey.bySource)}): ${Object.entries(keyDist).map(([k, v]) => `${k} ${v}`).join('  ')}`);
+    console.log(`  bpm within 2% incl. half/double (n=${refBpm.pairs.length}; ${src(refBpm.bySource)}): ${bpmOk}`);
+    console.log(`  energy MAE (n=${refEnergy.pairs.length}; ${src(refEnergy.bySource)}): ${energyMae.toFixed(2)}`);
+    console.log(`  danceability MAE (n=${refDance.pairs.length}; ${src(refDance.bySource)}): ${danceMae.toFixed(3)}`);
     console.log(`  local ms: p50 ${percentile(both.map((r) => r.local!.ms), 50)}  p95 ${percentile(both.map((r) => r.local!.ms), 95)}`);
   }
   console.log(`\nRequests: ${[...gates].map(([k, g]) => `${k} ${g.count}/${BUDGET[k]}`).join('  ')}`);
@@ -149,7 +162,7 @@ async function main(): Promise<void> {
   mkdirSync(dirname(outFile), { recursive: true });
   writeFileSync(
     outFile,
-    JSON.stringify({ day, status, stopped: Object.fromEntries(stopped), refused, yield: table, latency: { p50, p95 }, key: keyDist, energyMae: maeEnergy(energyPairs), rows }, null, 2),
+    JSON.stringify({ day, status, stopped: Object.fromEntries(stopped), refused, yield: table, yieldProvidersOnly: provTable, bySource, reference: { key: { n: refKey.pairs.length, dist: keyDist, bySource: refKey.bySource }, bpm: { n: refBpm.pairs.length, within2pct: bpmOk, bySource: refBpm.bySource }, energy: { n: refEnergy.pairs.length, mae: energyMae, bySource: refEnergy.bySource }, danceability: { n: refDance.pairs.length, mae: danceMae, bySource: refDance.bySource } }, latency: { p50, p95 }, rows }, null, 2),
   );
   console.log(`\nWrote ${outFile}`);
 }
