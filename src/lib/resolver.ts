@@ -1,4 +1,6 @@
 import { trackKeyOf, type Track } from '@/types/track';
+import { ESSENTIALS, RETRYABLE_REASONS, missingEssentials, type IncompleteReason } from './completeness';
+import { getEntry, putResolved } from './metadataCache';
 import { searchDemoTracks } from './demo';
 import { withTimeout } from './http';
 import { analysePreview, ANALYSIS_TIMEOUT_MS } from './analysis/previewAnalysis';
@@ -42,27 +44,55 @@ const ADAPTERS: SourceAdapter[] = [
 // previewUrl must not be persisted long-term.
 const OVERRIDES: Record<string, Array<keyof Track>> = { soundstat: ['bpm', 'camelot'], itunes: ['previewUrl'] };
 
+/** Facts about one resolve pass, collected inside the loop so the reason is never guessed afterwards. */
+interface ResolveRun {
+  deadline?: number; // epoch ms; checked between adapters
+  aborted: boolean; // set by the caller when it stops waiting: the loop must stop writing
+  providersSkipped: boolean; // a guarded adapter was skipped by cooldown/budget
+  timedOut: boolean;
+  deezerPreview?: string;
+  analysed: boolean;
+}
+
+const newRun = (deadline?: number): ResolveRun => ({ deadline, aborted: false, providersSkipped: false, timedOut: false, analysed: false });
+
 export async function resolveTrack(
   artist: string,
   title: string,
   hints: { spotifyId?: string } = {}
 ): Promise<Track> {
+  return resolveInto(initialTrack(artist, title, hints), newRun());
+}
+
+function initialTrack(artist: string, title: string, hints: { spotifyId?: string }): Track {
   const track: Track = { id: trackKeyOf(artist, title), artist, title, sources: {} };
   if (hints.spotifyId) {
     track.spotifyId = hints.spotifyId;
     track.sources.spotifyId = 'caller';
   }
-  let deezerPreview: string | undefined;
+  return track;
+}
+
+async function resolveInto(track: Track, run: ResolveRun): Promise<Track> {
   for (const adapter of ADAPTERS) {
+    if (run.aborted) return track;
+    if (run.deadline !== undefined && Date.now() >= run.deadline) {
+      run.timedOut = true;
+      return track;
+    }
     const guarded = isGuarded(adapter.name) ? adapter.name : undefined;
     try {
       if (!adapter.configured()) continue;
       // Enrichment shares the search providers' breaker and the app's Spotify budget: one add or a
       // suggestion refresh must not walk back into a lockout.
-      if (guarded && (cooldownUntil(guarded) || !takeBudget(guarded, { app: true }))) continue;
+      if (guarded && (cooldownUntil(guarded) || !takeBudget(guarded, { app: true }))) {
+        run.providersSkipped = true;
+        continue;
+      }
       const partial = await withTimeout(adapter.enrich({ ...track }), adapter.timeoutMs ?? ADAPTER_TIMEOUT_MS, adapter.name);
+      if (run.aborted) return track;
       if (guarded) recordSuccess(guarded);
-      if (adapter.name === 'deezer') deezerPreview = partial?.previewUrl;
+      if (adapter.name === 'deezer') run.deezerPreview = partial?.previewUrl;
       const overrides = OVERRIDES[adapter.name] ?? [];
       for (const [field, value] of Object.entries(partial ?? {}) as Array<[keyof Track, unknown]>) {
         if (value === undefined || value === null || field === 'sources' || field === 'id') continue;
@@ -76,10 +106,12 @@ export async function resolveTrack(
     }
   }
   // Last resort: estimate from the Deezer preview (never iTunes: Apple's terms restrict preview use).
-  const missing = (['bpm', 'camelot', 'energy', 'danceability'] as const).filter((f) => track[f] === undefined);
-  if (missing.length && deezerPreview) {
+  const missing = ESSENTIALS.filter((f) => track[f] === undefined);
+  if (missing.length && run.deezerPreview && !run.aborted) {
+    run.analysed = true;
     try {
-      const partial = await withTimeout(analysePreview(track.id, deezerPreview), ANALYSIS_TIMEOUT_MS, 'preview-analysis');
+      const partial = await withTimeout(analysePreview(track.id, run.deezerPreview), ANALYSIS_TIMEOUT_MS, 'preview-analysis');
+      if (run.aborted) return track;
       for (const f of missing) {
         const value = partial[f];
         if (value === undefined) continue;
@@ -91,6 +123,66 @@ export async function resolveTrack(
     }
   }
   return track;
+}
+
+/** True when some adapter actually matched the track (youtube's keyless search link and the caller's hint don't count). */
+function matchedAnyProvider(track: Track): boolean {
+  return Object.entries(track.sources).some(([field, src]) => src !== 'caller' && field !== 'youtubeUrl');
+}
+
+function reasonFor(track: Track, run: ResolveRun): IncompleteReason {
+  if (run.timedOut) return 'timeout';
+  if (run.providersSkipped) return 'providers-unavailable';
+  if (!matchedAnyProvider(track)) return 'not-found';
+  if (!run.deezerPreview) return 'no-preview';
+  return 'analysis-failed';
+}
+
+export const RESOLVE_BUDGET_MS = 45_000;
+
+/**
+ * resolveTrack + the completeness gate: consults the persistent metadata cache (a complete entry costs zero
+ * adapter calls), keeps manual overrides, and marks a still-incomplete track with `unresolved` and why.
+ * `force` skips the cache short-circuit (used by the re-resolve queue).
+ */
+export async function resolveWithStatus(
+  artist: string,
+  title: string,
+  opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string } } = {}
+): Promise<Track> {
+  const key = trackKeyOf(artist, title);
+  const budgetMs = opts.budgetMs ?? RESOLVE_BUDGET_MS;
+  const cached = getEntry(key);
+  if (cached && !opts.force) {
+    const fromCache: Track = { ...initialTrack(artist, title, {}), ...cached.fields, sources: { ...cached.sources } };
+    const missingNow = missingEssentials(fromCache);
+    if (!missingNow.length) return fromCache;
+    const nonRetryableFresh = cached.reason && !RETRYABLE_REASONS.includes(cached.reason) && Date.now() - cached.resolvedAt < 24 * 60 * 60_000;
+    if (cached.reason && (nonRetryableFresh || (cached.retryAt ?? 0) > Date.now())) {
+      fromCache.unresolved = { reason: cached.reason, missing: missingNow, ...(cached.retryAt ? { retryAt: cached.retryAt } : {}) };
+      return fromCache;
+    }
+  }
+
+  const track = initialTrack(artist, title, opts.hints ?? {});
+  const run = newRun(Date.now() + budgetMs);
+  try {
+    await withTimeout(resolveInto(track, run), budgetMs, 'resolve');
+  } catch {
+    run.timedOut = true;
+  }
+  run.aborted = true; // a late adapter must not keep mutating what we return
+  const result: Track = { ...track, sources: { ...track.sources } };
+  // What the track will look like once earlier cached fields and manual overrides are folded in.
+  const prior = getEntry(key);
+  const prospective: Track = { ...result, ...prior?.fields, sources: result.sources };
+  for (const f of ESSENTIALS) if (prior?.sources[f] !== 'manual' && result[f] !== undefined) (prospective as unknown as Record<string, unknown>)[f] = result[f];
+  const missing = missingEssentials(prospective);
+  if (missing.length) result.unresolved = { reason: reasonFor(result, run), missing };
+  const entry = putResolved(key, result);
+  const merged: Track = { ...result, ...entry.fields, sources: { ...result.sources, ...entry.sources } };
+  if (!missing.length) delete merged.unresolved;
+  return merged;
 }
 
 /** Stable across searches: the ISRC, else the merge key without the per-response "#n" collision suffix. */

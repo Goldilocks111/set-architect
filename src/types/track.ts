@@ -1,3 +1,5 @@
+import type { Essential, IncompleteReason } from '@/lib/completeness';
+
 // Frozen contract — change only via the integrator (see docs/superpowers/plans/2026-10-31-set-architect-v1.md)
 
 export interface Track {
@@ -22,6 +24,7 @@ export interface Track {
   youtubeUrl?: string;
   year?: number;
   sources: Record<string, string>; // field name -> source adapter name
+  unresolved?: { reason: IncompleteReason; missing: Essential[]; retryAt?: number }; // set when an essential is missing
 }
 
 export interface SuggestionReason {

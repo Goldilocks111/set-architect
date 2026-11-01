@@ -7,7 +7,7 @@ import { demoTracks } from '@/lib/demo';
 import { trackKeyOf } from '@/types/track';
 
 const mocks = vi.hoisted(() => ({
-  resolver: { searchTracks: vi.fn(), resolveTrack: vi.fn(), getSimilarTracks: vi.fn() },
+  resolver: { searchTracks: vi.fn(), resolveTrack: vi.fn(), resolveWithStatus: vi.fn(), getSimilarTracks: vi.fn() },
   adjacency: {
     loadAdjacency: vi.fn(),
     readData: vi.fn(),
@@ -31,7 +31,7 @@ afterEach(() => {
 
 describe('seed metadata merge (I1)', () => {
   it('/api/search/resolve fills Glue from the seed when adapters return nothing', async () => {
-    mocks.resolver.resolveTrack.mockResolvedValue({ id: 'live-1', artist: 'Bicep', title: 'Glue', sources: {} });
+    mocks.resolver.resolveWithStatus.mockResolvedValue({ id: 'live-1', artist: 'Bicep', title: 'Glue', sources: {} });
     const { GET } = await import('@/app/api/search/resolve/route');
     const { track } = await (await GET(new Request('http://x/api/search/resolve?artist=Bicep&title=Glue'))).json();
     expect(track).toMatchObject({ id: 'live-1', bpm: 128, camelot: '9A', energy: 6 });
