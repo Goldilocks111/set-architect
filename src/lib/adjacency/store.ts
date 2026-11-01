@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { trackKeyOf, type AdjacencyLookup } from '../../types/track';
 import { isRuntimeDataPath } from '../dataDir';
@@ -142,13 +142,48 @@ export function writeData(file: string, data: AdjacencyData): void {
   renameSync(tmp, file);
 }
 
+const DEFAULT_RECHECK_MS = 3000;
+
+/**
+ * Several processes (dev server, ingest driver) may share one file. The cache is revalidated against the
+ * file's identity (inode/mtime/size, so atomic renames are noticed): reads at most every `recheckMs`,
+ * mutations always, and a mutation is applied to the fresh copy before the atomic write.
+ */
 export class JsonAdjacencyStore implements AdjacencyStore {
   private data: AdjacencyData | undefined;
+  private sig: string | undefined;
+  private checkedAt = 0;
 
-  constructor(private readonly file: string) {}
+  constructor(
+    private readonly file: string,
+    private readonly opts: { recheckMs?: number } = {}
+  ) {}
 
-  private load(): AdjacencyData {
-    return (this.data ??= readData(this.file));
+  private signature(): string {
+    try {
+      const st = statSync(this.file);
+      return `${st.ino}:${st.mtimeMs}:${st.size}`;
+    } catch {
+      return 'missing';
+    }
+  }
+
+  private load(forWrite = false): AdjacencyData {
+    const t = Date.now();
+    if (this.data && !forWrite && t - this.checkedAt < (this.opts.recheckMs ?? DEFAULT_RECHECK_MS)) return this.data;
+    const sig = this.signature();
+    if (!this.data || sig !== this.sig) {
+      this.data = readData(this.file);
+      this.sig = this.signature(); // after readData, which may persist a migration
+    }
+    this.checkedAt = t;
+    return this.data;
+  }
+
+  private save(data: AdjacencyData): void {
+    writeData(this.file, data);
+    this.sig = this.signature();
+    this.checkedAt = Date.now();
   }
 
   async hasTracklist(id: string): Promise<boolean> {
@@ -156,7 +191,7 @@ export class JsonAdjacencyStore implements AdjacencyStore {
   }
 
   async ingest(tracklistId: string, tracks: TrackRef[]): Promise<boolean> {
-    const data = this.load();
+    const data = this.load(true);
     if (tracklistId in data.tracklists) return false;
     const keys = tracks.map((t) => {
       const key = trackKeyOf(t.artist, t.title);
@@ -167,7 +202,7 @@ export class JsonAdjacencyStore implements AdjacencyStore {
       if (keys[i] !== keys[i - 1]) addEdge(data, keys[i - 1], keys[i]);
     }
     data.tracklists[tracklistId] = keys.length;
-    writeData(this.file, data);
+    this.save(data);
     return true;
   }
 
@@ -176,9 +211,9 @@ export class JsonAdjacencyStore implements AdjacencyStore {
   }
 
   setPlayCount(trackKey: string, count: number): void {
-    const data = this.load();
+    const data = this.load(true);
     (data.playCounts ??= {})[trackKey] = count;
-    writeData(this.file, data);
+    this.save(data);
   }
 
   /** Every indexed track with its display name and distinct-neighbor count (driver frontier). */

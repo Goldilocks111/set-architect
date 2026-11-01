@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -138,5 +138,68 @@ describe('runDriver', () => {
     writeFileSync(h.lockPath, JSON.stringify({ pid: 424242, startedAt: 1 }));
     expect(await runDriver(h.deps)).toBe(0);
     expect(existsSync(h.lockPath)).toBe(false);
+  });
+});
+
+describe('repeated hard blocks', () => {
+  it('stops after 3 consecutive hard-block jobs, releases the lock and logs the reason', async () => {
+    const counters = { softBlocks: 0, hardBlocks: 0 };
+    const h = harness({ counters, seeds: [1, 2, 3, 4, 5].map((n) => ({ artist: `Art${n}`, title: `T${n}` })) });
+    h.deps.ingestor.ensureNeighborsFor = async (a, ti) => {
+      h.ensured.push(`${a}|${ti}`);
+      counters.hardBlocks++;
+      const st = existsSync(h.statePath) ? JSON.parse(readFileSync(h.statePath, 'utf8')) : { searched: {}, backoff: {} };
+      st.backoff[trackKeyOf(a, ti)] = h.now() + 1e9;
+      st.pausedUntil = h.now() + 1800_000;
+      writeFileSync(h.statePath, JSON.stringify(st));
+      return { digging: true };
+    };
+    expect(await runDriver(h.deps)).toBe(0);
+    expect(h.ensured).toHaveLength(3);
+    expect(existsSync(h.lockPath)).toBe(false);
+    const lines = readFileSync(h.growthPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    expect(lines.at(-1).stopped).toBe('repeated-hard-blocks');
+  });
+  it('a successful job between blocks resets the streak', async () => {
+    const counters = { softBlocks: 0, hardBlocks: 0 };
+    const h = harness({ counters, seeds: [1, 2, 3, 4, 5, 6].map((n) => ({ artist: `Art${n}`, title: `T${n}` })) });
+    let n = 0;
+    h.deps.ingestor.ensureNeighborsFor = async (a, ti) => {
+      h.ensured.push(`${a}|${ti}`);
+      const st = existsSync(h.statePath) ? JSON.parse(readFileSync(h.statePath, 'utf8')) : { searched: {}, backoff: {} };
+      if (++n % 3 !== 0) {
+        counters.hardBlocks++;
+        st.pausedUntil = h.now() + 1000;
+      }
+      st.searched[trackKeyOf(a, ti)] = h.now();
+      writeFileSync(h.statePath, JSON.stringify(st));
+      return { digging: true };
+    };
+    await runDriver(h.deps);
+    expect(h.ensured.length).toBeGreaterThan(4);
+  });
+});
+
+describe('liveEnabled gating by the driver lock', () => {
+  it('is false while a live pid holds the lock and true again when the pid is dead', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('SETARCHITECT_LIVE', '');
+    vi.stubEnv('SETARCHITECT_DATA_DIR', dir);
+    vi.useFakeTimers();
+    try {
+      const { liveEnabled } = await import('../../src/lib/adjacency/live');
+      const lock = path.join(dir, 'index', 'ingest.lock');
+      expect(liveEnabled()).toBe(true);
+      writeFileSync(lock, JSON.stringify({ pid: process.pid, startedAt: 1 }));
+      expect(liveEnabled()).toBe(true); // cached for ~10 s
+      vi.advanceTimersByTime(11_000);
+      expect(liveEnabled()).toBe(false);
+      writeFileSync(lock, JSON.stringify({ pid: 2 ** 22 + 12345, startedAt: 1 }));
+      vi.advanceTimersByTime(11_000);
+      expect(liveEnabled()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    }
   });
 });

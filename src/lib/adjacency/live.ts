@@ -166,6 +166,9 @@ export function createIngestor(deps: IngestorDeps) {
           if (complete) {
             s.searched[job.key] = now();
             delete s.backoff[job.key];
+          } else {
+            // tracklists were found but none could be fetched/parsed: don't retry every cycle
+            s.backoff[job.key] = now() + BACKOFF_MS;
           }
         });
       } catch (err) {

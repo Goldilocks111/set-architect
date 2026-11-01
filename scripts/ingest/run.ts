@@ -10,6 +10,7 @@ import { createFetcher, FetchError, BLOCK_STATUSES, SOFT_BLOCK_STATUS, type Fetc
 import { acquireLock, pidAlive, releaseLock, type IsAlive } from './lock';
 
 export const JOB_GAP_MS = 20_000;
+export const MAX_CONSECUTIVE_HARD_BLOCKS = 3;
 export const EMPTY_FRONTIER_SLEEP_MS = 30 * 60_000;
 
 export interface SeedTrack {
@@ -118,6 +119,8 @@ export async function runDriver(deps: DriverDeps): Promise<number> {
     if (!stopped()) await sleep(ms);
   };
   let jobs = 0;
+  let hardStreak = 0;
+  let hardSeen = deps.counters.hardBlocks;
   try {
     log(`ingest: driver started (pid ${pid})`);
     while (!stopped()) {
@@ -139,6 +142,10 @@ export async function runDriver(deps: DriverDeps): Promise<number> {
         await deps.ingestor.whenIdle();
         jobs++;
         const stats = await deps.store.stats();
+        const hardNow = deps.counters.hardBlocks;
+        hardStreak = hardNow > hardSeen ? hardStreak + 1 : 0;
+        hardSeen = hardNow;
+        const giveUp = hardStreak >= MAX_CONSECUTIVE_HARD_BLOCKS;
         appendFileSync(
           deps.growthPath,
           JSON.stringify({
@@ -149,8 +156,13 @@ export async function runDriver(deps: DriverDeps): Promise<number> {
             jobs,
             softBlocks: deps.counters.softBlocks,
             hardBlocks: deps.counters.hardBlocks,
+            ...(giveUp ? { stopped: 'repeated-hard-blocks' } : {}),
           }) + '\n'
         );
+        if (giveUp) {
+          log(`ingest: ${hardStreak} consecutive hard blocks; stopping for good`);
+          return 0;
+        }
       }
       await nap(JOB_GAP_MS);
     }
@@ -219,7 +231,12 @@ async function main(): Promise<number> {
 }
 
 if (process.argv[1]?.endsWith('ingest/run.ts')) {
-  main().then((code) => {
-    process.exitCode = code;
-  });
+  main()
+    .then((code) => {
+      process.exitCode = code;
+    })
+    .catch((err) => {
+      console.error(`ingest: fatal: ${(err as Error).stack ?? err}`);
+      process.exitCode = 1;
+    });
 }

@@ -85,3 +85,33 @@ describe('loadAdjacency', () => {
     expect(await adj.getNeighbors('a|b')).toEqual([]);
   });
 });
+
+describe('JsonAdjacencyStore cross-process safety', () => {
+  const mk = (file: string) => new JsonAdjacencyStore(file, { recheckMs: 0 });
+  it('a stale instance merges onto the fresh file instead of overwriting it', async () => {
+    const d = mkdtempSync(path.join(tmpdir(), 'xproc-'));
+    const file = path.join(d, 'adjacency.json');
+    const a = mk(file);
+    const b = mk(file);
+    await b.getNeighbors('warm'); // b loads the (empty) file and caches it
+    await a.ingest('t1', [{ artist: 'A', title: 'One' }, { artist: 'B', title: 'Two' }]);
+    await b.ingest('t2', [{ artist: 'C', title: 'Three' }, { artist: 'D', title: 'Four' }]);
+    const fresh = mk(file);
+    expect(await fresh.hasTracklist('t1')).toBe(true);
+    expect(await fresh.hasTracklist('t2')).toBe(true);
+    b.setPlayCount('x|y', 5);
+    expect(mk(file).playCountOf('x|y')).toBe(5);
+    expect(await mk(file).hasTracklist('t1')).toBe(true);
+    rmSync(d, { recursive: true, force: true });
+  });
+  it('a stale reader sees another process growth after the file changes', async () => {
+    const d = mkdtempSync(path.join(tmpdir(), 'xproc-'));
+    const file = path.join(d, 'adjacency.json');
+    const a = mk(file);
+    const b = mk(file);
+    await b.getNeighbors('warm');
+    await a.ingest('t1', [{ artist: 'A', title: 'One' }, { artist: 'B', title: 'Two' }]);
+    expect((await b.getNeighbors(trackKeyOf('A', 'One'))).length).toBe(1);
+    rmSync(d, { recursive: true, force: true });
+  });
+});
