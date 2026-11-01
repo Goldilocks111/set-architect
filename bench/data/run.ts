@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import { dirname, join } from 'node:path';
 import { dataDir } from '../../src/lib/dataDir';
 import { RequestGate, dayKey, loadDailyCounts, saveDailyCounts } from '../search/guard';
 import { createFetchGuard } from './guardFetch';
-import { ESSENTIALS, bpmAgrees, keyAgreement, maeEnergy, percentile, providersOnly, referencePairs, sourceBreakdown, yieldTable, type DataRow, type Essential } from './score';
+import { ESSENTIALS, bpmAgrees, keyAgreement, maeEnergy, percentile, pipelinePass, summarizePipeline, type PipelineRow, providersOnly, referencePairs, sourceBreakdown, yieldTable, type DataRow, type Essential } from './score';
 
 try {
   (process as any).loadEnvFile?.('.env');
@@ -15,6 +16,7 @@ const here = __dirname;
 const argv = process.argv.slice(2);
 const limitArg = argv.find((a) => a.startsWith('--limit='));
 const LIMIT = limitArg ? Number(limitArg.split('=')[1]) : undefined;
+const PIPELINE = argv.includes('--pipeline');
 
 /** Hard per-provider request budgets for one bench run (daily counts shared with the search bench). */
 const BUDGET: Record<string, number> = { spotify: 110, deezer: 400, musicbrainz: 200, reccobeats: 200 };
@@ -39,7 +41,16 @@ async function main(): Promise<void> {
   const subset = LIMIT ? tracks.slice(0, LIMIT) : tracks;
 
   // static import on purpose: if daily counts can't be shared with the search bench, fail loudly
-  const dailyFile = dataDir('search', 'bench-requests.json');
+  // The shared daily counter must stay at the REAL data dir even when --pipeline redirects the rest to a temp dir.
+  const realRoot = process.env.SETARCHITECT_DATA_DIR ?? join(os.homedir(), '.setarchitect');
+  const dailyFile = PIPELINE ? join(realRoot, 'search', 'bench-requests.json') : dataDir('search', 'bench-requests.json');
+  mkdirSync(dirname(dailyFile), { recursive: true });
+  if (PIPELINE) {
+    // Cold metadata cache: fresh temp dir, set BEFORE the resolver/metadataCache modules are (dynamically) imported.
+    // metadataCache resolves its path lazily via dataDir(), but nothing below imports it until after this line.
+    process.env.SETARCHITECT_DATA_DIR = mkdtempSync(join(os.tmpdir(), 'setarch-pipeline-'));
+    console.log(`pipeline mode: cold cache at ${process.env.SETARCHITECT_DATA_DIR}`);
+  }
   const day = dayKey();
   const store = {
     read: () => (existsSync(dailyFile) ? readFileSync(dailyFile, 'utf8') : null),
@@ -64,7 +75,53 @@ async function main(): Promise<void> {
   const guard = createFetchGuard({ real: globalThis.fetch, gates, gapMs: GAP_MS });
   const { stopped, refused } = guard;
   globalThis.fetch = guard.fetch;
-  const { resolveTrack } = await import('../../src/lib/resolver');
+  const { resolveTrack, resolveWithStatus } = await import('../../src/lib/resolver');
+  if (PIPELINE) {
+    // No background retries during the run: timers become no-ops (the queue is injected, so it never arms real ones).
+    const { setReresolveDeps } = await import('../../src/lib/reresolve');
+    setReresolveDeps({ setTimer: () => undefined });
+    const { dataDir: dd } = await import('../../src/lib/dataDir');
+    if (!dd('index', 'metadata.json').startsWith(process.env.SETARCHITECT_DATA_DIR!)) throw new Error('pipeline: metadata cache not in temp dir');
+    if (existsSync(dd('index', 'metadata.json'))) throw new Error('pipeline: metadata cache is not cold');
+
+    const prow: PipelineRow[] = [];
+    for (let i = 0; i < subset.length; i++) {
+      const t = subset[i];
+      const t0 = Date.now();
+      let state: PipelineRow['state'] = 'incomplete';
+      let reason: string | undefined;
+      let missing: PipelineRow['missing'] = [];
+      try {
+        const track = await resolveWithStatus(t.artist, t.title);
+        if (track.unresolved) {
+          reason = track.unresolved.reason;
+          missing = track.unresolved.missing;
+        } else state = 'complete';
+      } catch (err) {
+        reason = undefined; // a thrown resolve states no reason: fails the pass rule
+        console.log(`  ${t.id}: resolve threw (${(err as Error).message})`);
+      }
+      const elapsedMs = Date.now() - t0;
+      const r = { state, reason, elapsedMs };
+      prow.push({ id: t.id, bucket: t.bucket, state, ...(reason ? { reason } : {}), missing, elapsedMs, pass: pipelinePass(r) });
+      console.log(`[${i + 1}/${subset.length}] ${t.id}: ${state}${reason ? ` (${reason}: ${missing.join(',')})` : ''} ${elapsedMs}ms`);
+    }
+    const sum = summarizePipeline(prow);
+    const stoppedP = [...stopped.keys()];
+    const refusedP = Object.keys(refused);
+    const statusP = stoppedP.length ? `PARTIAL (rate-limited: ${stoppedP.join(', ')})` : refusedP.length ? `PARTIAL (budget exhausted: ${refusedP.join(', ')})` : sum.passed === sum.n ? 'PASS' : 'FAIL';
+    console.log(`\nPIPELINE STATUS: ${statusP}  pass ${sum.passed}/${sum.n}`);
+    console.log(`complete: all ${fmt(sum.complete.all)}  classic ${fmt(sum.complete.classic)}  recent ${fmt(sum.complete.recent)}  (target >= 90%, not a gate)`);
+    console.log('reasons: ' + (Object.entries(sum.reasons).map(([k, v]) => `${k} ${v}`).join('  ') || 'none'));
+    console.log(`elapsed: p50 ${sum.p50}ms  p95 ${sum.p95}ms`);
+    console.log(`Requests: ${[...gates].map(([k, g]) => `${k} ${g.count}/${BUDGET[k]}`).join('  ')}`);
+    if (stoppedP.length) console.log(`Stopped: ${[...stopped].map(([k, v]) => `${k} (${v})`).join('; ')}`);
+    const pOut = join(here, 'results', `${day}-pipeline.json`);
+    mkdirSync(dirname(pOut), { recursive: true });
+    writeFileSync(pOut, JSON.stringify({ day, status: statusP, stopped: Object.fromEntries(stopped), refused, summary: sum, rows: prow }, null, 2));
+    console.log(`\nWrote ${pOut}`);
+    return;
+  }
   const analysis = await tryImport('../../src/lib/analysis/previewAnalysis');
   const analyseFull: ((b: Uint8Array) => Promise<any>) | null =
     typeof analysis?.analyseFull === 'function' ? analysis.analyseFull : null;

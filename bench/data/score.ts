@@ -124,3 +124,49 @@ export function referencePairs<T extends number | string>(
   }
   return { pairs, bySource };
 }
+
+// ---- pipeline bench (resolveWithStatus end state per track)
+
+/** Spec: an incomplete track must resolve or state why within 60 s. */
+export const PIPELINE_LIMIT_MS = 60_000;
+
+export interface PipelineRow {
+  id: string;
+  bucket: 'classic' | 'recent';
+  state: 'complete' | 'incomplete';
+  reason?: string;
+  missing: Essential[];
+  elapsedMs: number;
+  pass: boolean;
+}
+
+/** Pass = (complete OR incomplete-with-a-stated-reason) within the time limit. */
+export function pipelinePass(r: { state: 'complete' | 'incomplete'; reason?: string; elapsedMs: number }): boolean {
+  return (r.state === 'complete' || !!r.reason) && r.elapsedMs <= PIPELINE_LIMIT_MS;
+}
+
+export function summarizePipeline(rows: PipelineRow[]): {
+  n: number;
+  passed: number;
+  complete: Record<'all' | 'classic' | 'recent', number>;
+  reasons: Record<string, number>;
+  p50: number;
+  p95: number;
+} {
+  const frac = (rs: PipelineRow[]) => (rs.length ? rs.filter((r) => r.state === 'complete').length / rs.length : 0);
+  const reasons: Record<string, number> = {};
+  for (const r of rows) if (r.state === 'incomplete') reasons[r.reason ?? 'none'] = (reasons[r.reason ?? 'none'] ?? 0) + 1;
+  const elapsed = rows.map((r) => r.elapsedMs);
+  return {
+    n: rows.length,
+    passed: rows.filter((r) => r.pass).length,
+    complete: {
+      all: frac(rows),
+      classic: frac(rows.filter((r) => r.bucket === 'classic')),
+      recent: frac(rows.filter((r) => r.bucket === 'recent')),
+    },
+    reasons,
+    p50: percentile(elapsed, 50),
+    p95: percentile(elapsed, 95),
+  };
+}
