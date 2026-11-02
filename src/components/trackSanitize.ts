@@ -57,7 +57,7 @@ export function sanitizeTrack(v: unknown): Track | null {
     title,
     remix: text(o.remix),
     version: text(o.version, 100),
-    durationMs: numIn(o.durationMs, 1, 3_600_000),
+    durationMs: numIn(o.durationMs, 1, 7_200_000), // same 2 h cap as manual overrides (overrideValidation)
     spotifyUrl: spotifyUrl(o.spotifyUrl),
     bpm: numIn(o.bpm, 40, 250),
     camelot,

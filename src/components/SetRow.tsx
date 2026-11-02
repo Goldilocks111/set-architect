@@ -2,9 +2,11 @@
 
 import { useState, type DragEvent } from 'react';
 import { DANCEABILITY_PRIOR_SOURCE, isComplete } from '@/lib/completeness';
+import { formatMinutes } from '@/lib/duration';
 import type { OverrideFields } from '@/lib/overrideValidation';
 import type { Track } from '@/types/track';
 import CompletenessBadge from './CompletenessBadge';
+import type { TrackTime } from './curveData';
 import OverrideEditor from './OverrideEditor';
 import { displayTitle, energyColor, fmtBpm, fmtDance, fmtEnergy, youtubeHref } from './trackFormat';
 
@@ -12,6 +14,8 @@ interface Props {
   track: Track;
   index: number;
   count: number;
+  /** Start (cumulative played time) and full length, from the set's one timing source. */
+  timing?: TrackTime;
   onRemove: (id: string) => void;
   onMove: (from: number, to: number) => void;
   dragOver: boolean;
@@ -31,6 +35,7 @@ export default function SetRow({
   track,
   index,
   count,
+  timing,
   onRemove,
   onMove,
   dragOver,
@@ -85,6 +90,7 @@ export default function SetRow({
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 text-[12.5px] text-[#8A8FA3] tabular-nums sm:flex-nowrap">
           <span className="basis-full truncate sm:basis-auto">{track.artist}</span>
+          {timing && <RowTiming timing={timing} />}
           <span className="shrink-0 rounded bg-[#232838] px-1.5 text-[11.5px] leading-[18px] text-[#C9CEDF]">
             {track.camelot ?? 'key ?'}
           </span>
@@ -154,5 +160,25 @@ export default function SetRow({
         />
       )}
     </li>
+  );
+}
+
+function RowTiming({ timing }: { timing: TrackTime }) {
+  const start = formatMinutes(timing.startMin * 60_000);
+  const length = `${timing.estimated ? '~' : ''}${formatMinutes(timing.durationMs)}`;
+  return (
+    <span className="shrink-0 text-[#C9CEDF]" data-timing={`${start} · ${length}`}>
+      <span title="Starts at this point of the set (played time)">{start}</span>
+      <span aria-hidden> · </span>
+      <span className="sr-only">, length </span>
+      {timing.estimated ? (
+        <span title="Length estimated: no source had this track's duration" className="italic">
+          {length}
+          <span className="sr-only"> (estimated)</span>
+        </span>
+      ) : (
+        <span title="Track length">{length}</span>
+      )}
+    </span>
   );
 }

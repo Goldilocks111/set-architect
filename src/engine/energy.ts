@@ -151,7 +151,8 @@ export function slotMidMinutes(
 /**
  * The minute at which the engine reads the target for each track: where the set before it ends, plus half that
  * set's average played track (its own length is not known when it is suggested). Index tracks.length is the
- * next track. Badges and the curve use the same readings, so they never disagree with a suggestion.
+ * next track. Badges read the target here, so they never disagree with a suggestion; the curve uses the same
+ * function (energyTargetAtMinute) but draws it at every minute of the planned length.
  */
 export function positionMinutes(
   tracks: Track[],
