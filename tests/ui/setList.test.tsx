@@ -4,6 +4,8 @@ import SetList from '@/components/SetList';
 import Builder from '@/components/Builder';
 import { transitionParts } from '@/components/TransitionBadge';
 import { STORAGE_KEY } from '@/components/persistence';
+import { buildCurveData } from '@/components/curveData';
+import { nextTrackTarget, suggestNext } from '@/engine';
 import type { Track } from '@/types/track';
 
 const full = (id: string, camelot: string, bpm: number, energy: number): Track => ({
@@ -60,6 +62,21 @@ describe('<SetList />', () => {
     expect(screen.getAllByLabelText(/^Transition:/)).toHaveLength(2);
     expect(container.textContent).not.toMatch(/NaN|undefined/);
     expect(screen.getAllByText('key ?').length).toBeGreaterThan(0);
+  });
+
+  it("the badge's energy verdict uses the same target the engine used to suggest that track", () => {
+    const arc = { minutes: 60, shape: 'build' } as const;
+    // a short opener, then a 30-minute track: the engine placed b at ~2' (target 4), not at its own middle (~13', target 5)
+    const a = { ...full('a', '8A', 124, 8), durationMs: 120_000, danceability: 0.6 };
+    const b = { ...full('b', '8A', 124, 6), durationMs: 1_800_000, danceability: 0.6 };
+    const target = nextTrackTarget(arc, [a]);
+    expect(target).toBe(4);
+    const [engine] = suggestNext({ arc, playlist: [a], candidates: [b] });
+    const engineEnergy = engine.reasons.find((r) => r.kind === 'energy')!.label;
+    expect(engineEnergy).toBe('Energy drop'); // E8 -> E6 lands 2 off target 4 (target 5 would read "Energy reset")
+    render(<SetList tracks={[a, b]} arc={arc} onRemove={() => {}} onMove={() => {}} />);
+    expect(screen.getByLabelText(/^Transition:/).getAttribute('aria-label')).toContain(`Energy: ${engineEnergy}`);
+    expect(buildCurveData([a, b], arc)[1].target).toBe(target);
   });
 
   it('move/remove buttons call back with indices and ids', () => {

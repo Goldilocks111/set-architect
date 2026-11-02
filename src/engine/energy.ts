@@ -62,7 +62,10 @@ export function energyTargetAtMinute(arc: Arc, minute: number): number {
   }
   // journey keeps the rulebook's own minute scale so 120-minute sets reproduce it exactly
   if (arc.shape === 'journey') return Math.round(interpolate(ONE_TWENTY_MIN, frac * 120));
-  return Math.round(interpolate(SHAPE_POINTS[arc.shape] ?? SHAPE_POINTS['warm-up'], frac));
+  const points = SHAPE_POINTS[arc.shape as keyof typeof SHAPE_POINTS];
+  // an unknown/corrupt shape reads as the default 'build' curve, as toArc would parse it
+  if (!points) return energyTargetAtMinute({ minutes: arc.minutes, shape: 'build' }, minute);
+  return Math.round(interpolate(points, frac));
 }
 
 const FALLBACK_DURATION_MS = 300_000;
@@ -119,8 +122,8 @@ export function plannedTrackCount(arc: Arc, playFraction = DEFAULT_PLAY_FRACTION
 
 /**
  * The minute at the middle of each track's played time, then of `extra` further slots as long as the set's
- * average played track (5:00 x fraction when empty). A track's target is read at its middle: with 4:00 played
- * per track this reproduces the rulebook's per-position 60/120 min templates exactly.
+ * average played track (5:00 x fraction when empty). With 4:00 played per track the middles reproduce the
+ * rulebook's per-position 60/120 min templates exactly (and equal positionMinutes).
  */
 export function slotMidMinutes(
   tracks: Track[],
@@ -140,24 +143,46 @@ export function slotMidMinutes(
   return out;
 }
 
-/** Arc target for each track of the set. */
+/**
+ * The minute at which the engine reads the target for each track: where the set before it ends, plus half that
+ * set's average played track (its own length is not known when it is suggested). Index tracks.length is the
+ * next track. Badges and the curve use the same readings, so they never disagree with a suggestion.
+ */
+export function positionMinutes(
+  tracks: Track[],
+  playFraction = DEFAULT_PLAY_FRACTION,
+  durationMsOf: (t: Track) => number = defaultDurationMs
+): number[] {
+  const nominal = averagePlayedMinutes([], playFraction, durationMsOf);
+  const out: number[] = [];
+  let at = 0;
+  for (let i = 0; i <= tracks.length; i++) {
+    out.push(at + (i ? at / i : nominal) / 2);
+    if (i < tracks.length) at += playedMinutes(tracks[i], playFraction, durationMsOf);
+  }
+  return out;
+}
+
+/** Arc target for each track of the set: exactly the one the engine used when that position was suggested. */
 export function trackTargets(
   arc: Arc,
   tracks: Track[],
   playFraction = DEFAULT_PLAY_FRACTION,
   durationMsOf: (t: Track) => number = defaultDurationMs
 ): number[] {
-  return slotMidMinutes(tracks, 0, playFraction, durationMsOf).map((m) => energyTargetAtMinute(arc, m));
+  return positionMinutes(tracks, playFraction, durationMsOf)
+    .slice(0, tracks.length)
+    .map((m) => energyTargetAtMinute(arc, m));
 }
 
-/** Arc target for the track that would be added next (it starts where the set's played minutes end). */
+/** Arc target for the track that would be added next. */
 export function nextTrackTarget(
   arc: Arc,
   tracks: Track[],
   playFraction = DEFAULT_PLAY_FRACTION,
   durationMsOf: (t: Track) => number = defaultDurationMs
 ): number {
-  return energyTargetAtMinute(arc, slotMidMinutes(tracks, 1, playFraction, durationMsOf)[tracks.length]);
+  return energyTargetAtMinute(arc, positionMinutes(tracks, playFraction, durationMsOf)[tracks.length]);
 }
 
 const distScore = (dist: number) => (dist <= 1 ? 1 : Math.max(0.3, 1 - 0.25 * (dist - 1)));

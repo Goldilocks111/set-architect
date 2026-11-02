@@ -6,6 +6,7 @@ export {
   energyTargetAtMinute,
   nextTrackTarget,
   plannedTrackCount,
+  positionMinutes,
   scoreEnergyTransition,
   setPlayedMinutes,
   slotMidMinutes,

@@ -5,7 +5,7 @@ import { QUALITY_CLASSES, quality } from './trackFormat';
 interface Props {
   from: Track;
   to: Track;
-  /** Arc energy target where `to` plays (engine trackTargets). */
+  /** The arc energy target the engine used for `to`'s position (engine trackTargets). */
   target: number;
 }
 

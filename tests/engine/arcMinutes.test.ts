@@ -167,6 +167,24 @@ describe('energyTargetAtMinute', () => {
   });
 });
 
+describe('one target per position, shared by engine, badges and curve', () => {
+  it('an unknown or corrupt shape falls back to build', () => {
+    for (const shape of ['rave', '', undefined, 42]) {
+      for (const m of [0, 10, 30, 49, 55, 60]) {
+        expect(energyTargetAtMinute({ minutes: 60, shape: shape as unknown as ArcShape }, m)).toBe(energyTargetAtMinute({ minutes: 60, shape: 'build' }, m));
+      }
+    }
+  });
+  it('trackTargets[i] is exactly the target the engine used to suggest track i (nextTrackTarget of the set before it)', () => {
+    const arc: Arc = { minutes: 60, shape: 'build' };
+    const tracks = [track('a', 120_000), track('b', 1_800_000), track('c', 200_000), track('d'), track('e', 900_000)];
+    const targets = trackTargets(arc, tracks);
+    tracks.forEach((_, i) => expect(targets[i], `#${i}`).toBe(nextTrackTarget(arc, tracks.slice(0, i))));
+    // b is read where the engine placed it (its own 30' length was unknown then): slot 0, not 12.75' -> slot 3
+    expect(targets[1]).toBe(4);
+  });
+});
+
 describe('rulebook equivalence: 15/30 tracks of 5:20 at 75% reproduce the old position targets', () => {
   it("{60,'build'} === energyTargetAt('60min', i, 15)", () => {
     expect(trackTargets({ minutes: 60, shape: 'build' }, set(15))).toEqual(LEGACY_60);
