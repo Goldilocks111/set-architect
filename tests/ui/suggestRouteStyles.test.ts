@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sanitizeTrack } from '@/components/trackSanitize';
-import { assembleSuggestions, MAX_STYLES_QUEUED_PER_REQUEST, type SuggestDeps } from '@/app/api/suggest/assemble';
+import { assembleSuggestions, MAX_STYLES_FILL_PER_REQUEST, MAX_STYLES_QUEUED_PER_REQUEST, type SuggestDeps } from '@/app/api/suggest/assemble';
 import { demoTracks } from '@/lib/demo';
 import { trackKeyOf, type Track } from '@/types/track';
 
@@ -89,5 +89,39 @@ describe('C1: styles reach the engine in the real app', () => {
     await assembleSuggestions({ playlist: [], template: '60min', plannedLength: 15, crate }, deps);
     expect(queueStyles.mock.calls.filter(([t], i) => queueStyles.mock.results[i].value === true)).toHaveLength(4);
     expect(queueStyles).toHaveBeenCalledTimes(5);
+  });
+
+  it('fill mode: up to 25 per request while the styles queue is short and Last.fm has headroom; back to 4 when it closes', async () => {
+    expect(MAX_STYLES_FILL_PER_REQUEST).toBe(25);
+    const crate = own(40, 3);
+    const cache = new Map<string, Entry>(crate.map((t) => [keyOf(t), entryOf(t)]));
+    const getCachedEntries: SuggestDeps['getCachedEntries'] = (keys) => new Map(keys.flatMap((k) => (cache.has(k) ? [[k, cache.get(k)!] as const] : [])));
+    const q1 = vi.fn((_t: Track) => true);
+    await assembleSuggestions({ playlist: [], template: '60min', plannedLength: 15, crate }, { getCachedEntries, queueStyles: q1, stylesFillOpen: () => true });
+    expect(q1).toHaveBeenCalledTimes(25);
+    let n = 0;
+    const q2 = vi.fn((_t: Track) => (n++, true));
+    await assembleSuggestions({ playlist: [], template: '60min', plannedLength: 15, crate }, { getCachedEntries, queueStyles: q2, stylesFillOpen: () => n < 10 });
+    expect(q2).toHaveBeenCalledTimes(10);
+    const q3 = vi.fn((_t: Track) => true);
+    await assembleSuggestions({ playlist: [], template: '60min', plannedLength: 15, crate }, { getCachedEntries, queueStyles: q3, stylesFillOpen: () => false });
+    expect(q3).toHaveBeenCalledTimes(4);
+  });
+
+  it('loadSuggestDeps opens fill only while the styles queue < 50 and Last.fm headroom >= 50%', async () => {
+    const len = vi.fn(() => 10);
+    (mocks.resolver as Record<string, unknown>).stylesQueueLength = len;
+    const breaker = await import('@/lib/search/breaker');
+    const head = vi.spyOn(breaker, 'budgetHeadroom');
+    const { loadSuggestDeps } = await import('@/app/api/suggest/assemble');
+    const deps = await loadSuggestDeps();
+    head.mockReturnValue(0.8);
+    expect(await deps.stylesFillOpen!()).toBe(true);
+    head.mockReturnValue(0.4);
+    expect(await deps.stylesFillOpen!()).toBe(false);
+    head.mockReturnValue(0.8);
+    len.mockReturnValue(50);
+    expect(await deps.stylesFillOpen!()).toBe(false);
+    head.mockRestore();
   });
 });

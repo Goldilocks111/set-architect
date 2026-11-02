@@ -6,6 +6,10 @@ import { trackKeyOf, type Suggestion } from '@/types/track';
 import {
   buildRatingFile,
   baselinePicks,
+  makeRunId,
+  normalizeName,
+  seedFromRunId,
+  writesRating,
   summarizeRatings,
   warmStep,
   auditCrate,
@@ -161,7 +165,7 @@ describe('buildRatingFile (blind, engine vs baseline)', () => {
     lastBpm: 124,
   }));
   it('two unlabelled lists of 10 per scenario; tracks carry artist/title only; nothing identifies the engine', () => {
-    const { file } = buildRatingFile(results, { seed: 7, fileId: 'f1' });
+    const { file } = buildRatingFile(results, { seed: 7, fileId: 'f1', lanePool: () => new Set(crate.map((c) => trackKeyOf(c.artist, c.title))) });
     const text = JSON.stringify(file);
     for (const banned of ['score', 'reason', 'compliant', 'Perfect match', 'styles', 'crate', 'plannedLength', 'engine', 'baseline', 'previewUrl', 'youtubeUrl', 'bpm'])
       expect(text, banned).not.toContain(banned);
@@ -177,7 +181,7 @@ describe('buildRatingFile (blind, engine vs baseline)', () => {
     expect(file.scenarios[0].set).toEqual([{ artist: 'A', title: 'B' }]);
   });
   it('the key (results file only) says which list is the engine; the engine list holds the top 10, shuffled', () => {
-    const { file, key } = buildRatingFile(results, { seed: 7, fileId: 'f1' });
+    const { file, key } = buildRatingFile(results, { seed: 7, fileId: 'f1', lanePool: () => new Set(crate.map((c) => trackKeyOf(c.artist, c.title))) });
     for (const s of file.scenarios) {
       const label = key[s.id].engine;
       expect(['A', 'B']).toContain(label);
@@ -188,40 +192,148 @@ describe('buildRatingFile (blind, engine vs baseline)', () => {
     }
   });
   it('deterministic per seed; the A/B order is randomized per scenario', () => {
-    const a = buildRatingFile(results, { seed: 7, fileId: 'f1' });
-    expect(buildRatingFile(results, { seed: 7, fileId: 'f1' })).toEqual(a);
+    const a = buildRatingFile(results, { seed: 7, fileId: 'f1', lanePool: () => new Set(crate.map((c) => trackKeyOf(c.artist, c.title))) });
+    expect(buildRatingFile(results, { seed: 7, fileId: 'f1', lanePool: () => new Set(crate.map((c) => trackKeyOf(c.artist, c.title))) })).toEqual(a);
     const labels = Object.values(a.key).map((k) => k.engine);
     expect(new Set(labels)).toEqual(new Set(['A', 'B']));
-    expect(buildRatingFile(results, { seed: 8, fileId: 'f1' }).file).not.toEqual(a.file);
+    expect(buildRatingFile(results, { seed: 8, fileId: 'f1', lanePool: () => new Set(crate.map((c) => trackKeyOf(c.artist, c.title))) }).file).not.toEqual(a.file);
   });
 });
 
-describe('baselinePicks', () => {
-  const crate = Array.from({ length: 60 }, (_, i) => ({ artist: `Crate ${i}`, title: `C${i}`, bpm: 100 + i }));
+describe('baselinePicks (lane + tempo matched)', () => {
+  const crate = Array.from({ length: 60 }, (_, i) => ({ artist: `Crate ${i}`, title: `C${i}`, bpm: 100 + i, styles: i >= 40 ? ['house'] : undefined }));
+  const k = (t: { artist: string; title: string }) => trackKeyOf(t.artist, t.title);
+  // lane pool "techno": crate 10..39 (bpm 110..139); "house" lane tracks only by cached styles: crate 40..59
+  const lanePool = new Set(crate.slice(10, 40).map(k));
   const engine = crate.filter((c) => c.bpm >= 120 && c.bpm <= 123).map(({ artist, title }) => ({ artist, title }));
-  it('10 seeded random crate tracks within ±6% BPM of the last set track, excluding engine picks', () => {
-    const picks = baselinePicks({ crate, lastBpm: 125, engine, seed: 3 });
+  const args = { crate, lane: 'techno', lanePool, lastBpm: 125, engine, seed: 3 };
+  it('10 seeded random tracks of the scenario lane within ±6% BPM of the last set track, excluding engine picks', () => {
+    const { picks, short } = baselinePicks(args);
     expect(picks).toHaveLength(10);
-    expect(baselinePicks({ crate, lastBpm: 125, engine, seed: 3 })).toEqual(picks);
-    expect(baselinePicks({ crate, lastBpm: 125, engine, seed: 4 })).not.toEqual(picks);
-    const engineKeys = new Set(engine.map((t) => t.title));
+    expect(short).toBe(0);
+    expect(baselinePicks(args).picks).toEqual(picks);
+    expect(baselinePicks({ ...args, seed: 4 }).picks).not.toEqual(picks);
+    const engineKeys = new Set(engine.map(k));
     for (const p of picks) {
+      expect(lanePool.has(k(p))).toBe(true);
       const bpm = crate.find((c) => c.title === p.title)!.bpm;
       expect(Math.abs(bpm - 125) / 125).toBeLessThanOrEqual(0.06);
-      expect(engineKeys.has(p.title)).toBe(false);
+      expect(engineKeys.has(k(p))).toBe(false);
     }
   });
-  it('uses engine picks only when the tempo-matched crate runs short, then the nearest-tempo rest', () => {
-    const small = crate.slice(18, 27); // bpm 118..126: 9 tracks, all within 6% of 122
-    const eng = [{ artist: 'Crate 20', title: 'C20' }];
-    const picks = baselinePicks({ crate: [...small, ...crate.slice(0, 3)], lastBpm: 122, engine: eng, seed: 1 });
+  it('lane membership is the pool lane OR cached styles containing the lane', () => {
+    const { picks } = baselinePicks({ ...args, lane: 'house', lanePool: new Set(), lastBpm: 150 });
     expect(picks).toHaveLength(10);
-    expect(picks.map((p) => p.title)).toContain('C20'); // only 8 non-engine matches, so the engine pick is reused
-    expect(picks.filter((p) => ['C0', 'C1', 'C2'].includes(p.title))).toHaveLength(1);
-    expect(picks.map((p) => p.title)).toContain('C2'); // nearest tempo (102) of the out-of-range rest
+    for (const p of picks) expect(crate.find((c) => c.title === p.title)!.styles).toContain('house');
   });
-  it('without a last-track BPM it draws from the whole crate', () => {
-    expect(baselinePicks({ crate, lastBpm: undefined, engine: [], seed: 1 })).toHaveLength(10);
+  it('never takes an off-lane track while the lane has tracks; fills from same-lane any-tempo (nearest first) when the tempo match runs short', () => {
+    const { picks, short } = baselinePicks({ ...args, lastBpm: 138, engine: [] }); // in lane+±6%: 130..139 (hi bound 146.3 / lo 129.7) = 10 -> make it short
+    expect(short).toBe(0);
+    const short2 = baselinePicks({ ...args, lastBpm: 160, engine: [] }); // nothing in the pool near 160 except via lane any-tempo
+    expect(short2.picks).toHaveLength(10);
+    expect(short2.picks.every((p) => lanePool.has(k(p)))).toBe(true);
+    expect(short2.picks.map((p) => crate.find((c) => c.title === p.title)!.bpm).sort((a, b) => b - a)[0]).toBe(139); // nearest to 160
+    expect(picks.every((p) => lanePool.has(k(p)))).toBe(true);
+  });
+  it('reports short when the lane itself has fewer than 10 tracks, and never reaches outside the lane', () => {
+    const tiny = new Set(crate.slice(10, 16).map(k));
+    const r = baselinePicks({ ...args, lanePool: tiny });
+    expect(r.picks).toHaveLength(6);
+    expect(r.short).toBe(4);
+    expect(r.picks.every((p) => tiny.has(k(p)))).toBe(true);
+  });
+  it('reuses engine picks only when no other same-lane track is left', () => {
+    const pool = new Set(crate.slice(10, 21).map(k)); // 11 lane tracks
+    const eng = crate.slice(10, 13).map(({ artist, title }) => ({ artist, title }));
+    const { picks } = baselinePicks({ ...args, lanePool: pool, engine: eng, lastBpm: 112 });
+    expect(picks).toHaveLength(10);
+    expect(picks.filter((p) => eng.some((e) => e.title === p.title))).toHaveLength(2);
+  });
+  it('without a last-track BPM it draws from the lane at any tempo', () => {
+    const { picks } = baselinePicks({ ...args, lastBpm: undefined, engine: [] });
+    expect(picks).toHaveLength(10);
+    expect(picks.every((p) => lanePool.has(k(p)))).toBe(true);
+  });
+});
+
+describe('rating validity (same names, trimmed lists, unique runs)', () => {
+  const lane = 'techno';
+  const mk = (i: number) => ({ artist: `crate  ${i} `, title: `c${i} `, bpm: 124 });
+  const crate = Array.from({ length: 40 }, (_, i) => mk(i));
+  const pool = crate.map((c) => ({ artist: `Pool Artist ${trackKeyOf(c.artist, c.title).split('|')[0]}`, title: `Pool ${c.title.trim().toUpperCase()}` }));
+  const run = (suggestions: Suggestion[], over: Partial<{ crate: typeof crate; lanePool: Set<string>; display: (r: { artist: string; title: string }) => { artist: string; title: string } | undefined }> = {}) =>
+    buildRatingFile(
+      [{ scenario: { ...sc('s0'), lane, crate }, suggestions, crate: over.crate ?? crate, lastBpm: 124 }],
+      { seed: 1, fileId: 'r', lanePool: () => over.lanePool ?? new Set(crate.map((c) => trackKeyOf(c.artist, c.title))), display: over.display },
+    );
+
+  it('normalizeName trims and collapses spaces but keeps casing', () => {
+    expect(normalizeName('  The  Chemical   Brothers ')).toBe('The Chemical Brothers');
+    expect(normalizeName('ÅME')).toBe('ÅME');
+  });
+
+  it('both lists get names from the same display source: no list carries a casing or spacing tell', () => {
+    // engine picks arrive title-cased from the key (the displayFromKey tell); the display source holds the real spelling
+    const sugs = ten((j) => ({ styles: ['techno'] })).map((s, j) => ({ ...s, track: { ...s.track, artist: `Crate  ${j}`, title: `C${j}` } }));
+    const display = (r: { artist: string; title: string }) => ({ artist: `dj  real ${trackKeyOf(r.artist, r.title)}`, title: ` Real-${r.title.toLowerCase()} ` });
+    const { file } = run(sugs, { display });
+    for (const l of file.scenarios[0].lists) for (const t of l.tracks) {
+      expect(t.artist).toBe(normalizeName(t.artist));
+      expect(t.title).toBe(normalizeName(t.title));
+      expect(t.artist.startsWith('dj real ')).toBe(true);
+      expect(t.title.startsWith('Real-')).toBe(true);
+    }
+  });
+
+  it('falls back to the given name (normalized) when the display source has none', () => {
+    const { file } = run(ten(() => ({})), { display: () => undefined });
+    for (const l of file.scenarios[0].lists) for (const t of l.tracks) expect(t.artist).toBe(normalizeName(t.artist));
+  });
+
+  it('a short baseline trims BOTH lists to the same length and reports it', () => {
+    const small = new Set(crate.slice(0, 7).map((c) => trackKeyOf(c.artist, c.title)));
+    const { file, short } = run(ten(() => ({})), { lanePool: small });
+    const [a, b] = file.scenarios[0].lists;
+    expect(a.tracks).toHaveLength(b.tracks.length);
+    expect(a.tracks.length).toBeLessThan(10);
+    expect(short).toEqual([{ id: 's0', engine: 10, baseline: expect.any(Number), used: a.tracks.length }]);
+  });
+
+  it('full lists report nothing short', () => {
+    expect(run(ten(() => ({}))).short).toEqual([]);
+  });
+
+  it('every baseline track is in the scenario lane (pool or cached styles)', () => {
+    const lanePool = new Set(crate.slice(0, 15).map((c) => trackKeyOf(c.artist, c.title)));
+    const withStyles = [...crate.slice(0, 15), ...crate.slice(15).map((c, i) => ({ ...c, styles: i < 5 ? ['techno'] : ['house'] }))];
+    const { file, key } = run(ten(() => ({})), { crate: withStyles, lanePool });
+    const baseline = file.scenarios[0].lists.find((l) => l.label === key.s0.baseline)!;
+    const ok = new Set([...crate.slice(0, 15), ...crate.slice(15, 20)].map((c) => trackKeyOf(c.artist, c.title)));
+    for (const t of baseline.tracks) expect(ok.has(trackKeyOf(t.artist, t.title))).toBe(true);
+  });
+  void pool;
+});
+
+describe('run ids', () => {
+  it('<day>-<HHMMss>-<rand4>, unique per run, seed derived from it', () => {
+    const now = new Date(2026, 10, 2, 9, 5, 7);
+    const id = makeRunId('2026-11-02', now, () => 0.5);
+    expect(id).toMatch(/^2026-11-02-090507-[0-9a-z]{4}$/);
+    expect(makeRunId('2026-11-02', now, () => 0.1)).not.toBe(id);
+    expect(seedFromRunId(id)).toBe(seedFromRunId(id));
+    expect(seedFromRunId(id)).not.toBe(seedFromRunId(makeRunId('2026-11-02', now, () => 0.9)));
+  });
+  it('the A/B assignment depends on the file id (a smoke key cannot reveal a full run)', () => {
+    const crate = Array.from({ length: 40 }, (_, i) => ({ artist: `C ${i}`, title: `T${i}`, bpm: 124 }));
+    const results = Array.from({ length: 10 }, (_, i) => ({ scenario: { ...sc(`s${i}`), crate }, suggestions: ten(), crate, lastBpm: 124 }));
+    const o = { lanePool: () => new Set(crate.map((c) => trackKeyOf(c.artist, c.title))) };
+    const a = buildRatingFile(results, { fileId: 'x-1', ...o }).key;
+    expect(buildRatingFile(results, { fileId: 'x-1', ...o }).key).toEqual(a);
+    expect(buildRatingFile(results, { fileId: 'x-2', ...o }).key).not.toEqual(a);
+  });
+  it('--limit smoke runs never write a rating file or key', () => {
+    expect(writesRating(undefined)).toBe(true);
+    expect(writesRating(3)).toBe(false);
   });
 });
 

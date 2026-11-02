@@ -22,7 +22,6 @@ export const TOP_N = 10;
 export const MIN_COMPLIANT = 8;
 /** Ready crate tracks the shared crate needs; the bench never demo-pads (deps.noStarterCrate). */
 export const MIN_CRATE_READY = 30;
-export const SHUFFLE_SEED = 20261102;
 
 /** Hard per-provider request budgets (daily counts shared with the other benches). YouTube is never automatic: 0. */
 export const RECS_BUDGET: Record<string, number> = { spotify: 60, deezer: 300, lastfm: 400, musicbrainz: 200, reccobeats: 200, youtube: 0 };
@@ -167,45 +166,85 @@ export type RatingKey = Record<string, { engine: 'A' | 'B'; baseline: 'A' | 'B' 
 /** Baseline tracks are drawn from the crate within this tempo distance of the last set track. */
 export const BASELINE_BPM_TOLERANCE = 0.06;
 
+/** One display spelling for every name in the rating file: trimmed, inner whitespace collapsed, casing kept. */
+export const normalizeName = (s: string): string => s.trim().replace(/\s+/g, ' ');
+
+export type CrateRef = TrackRef & { bpm?: number; styles?: string[] };
+
 /**
- * The control list: TOP_N seeded random crate tracks within ±6% BPM of the last set track, engine picks left out
- * while enough others match; short of that, matched engine picks, then the nearest-tempo rest. No BPM: whole crate.
+ * The control list: what a DJ does by hand. Seeded random crate tracks that are in the scenario lane (the lane's pool
+ * OR cached styles containing the lane) and within ±6% BPM of the last set track, engine picks left out while enough
+ * others exist. Short of TOP_N, it fills from the same lane at any tempo (nearest first), then reuses engine picks;
+ * it never leaves the lane. `short` counts the places the lane could not fill. No last BPM: the lane at any tempo.
  */
-export function baselinePicks(o: { crate: Array<TrackRef & { bpm?: number }>; lastBpm?: number; engine: TrackRef[]; seed: number }): TrackRef[] {
+export function baselinePicks(o: { crate: CrateRef[]; lane: string; lanePool: ReadonlySet<string>; lastBpm?: number; engine: TrackRef[]; seed: number }): { picks: TrackRef[]; short: number } {
   const key = (t: TrackRef) => trackKeyOf(t.artist, t.title);
   const engine = new Set(o.engine.map(key));
   const last = o.lastBpm;
   const near = (b?: number) => last === undefined || (b !== undefined && Math.abs(b - last) / last <= BASELINE_BPM_TOLERANCE);
-  const matched = o.crate.filter((t) => near(t.bpm));
+  const lane = o.crate.filter((t) => o.lanePool.has(key(t)) || t.styles?.includes(o.lane));
+  const nearest = (xs: CrateRef[]) => [...xs].sort((a, b) => Math.abs((a.bpm ?? Infinity) - last!) - Math.abs((b.bpm ?? Infinity) - last!));
+  const fresh = lane.filter((t) => !engine.has(key(t)));
+  const reused = lane.filter((t) => engine.has(key(t)));
   const tiers = [
-    seededShuffle(matched.filter((t) => !engine.has(key(t))), o.seed),
-    seededShuffle(matched.filter((t) => engine.has(key(t))), o.seed + 1),
-    o.crate.filter((t) => !near(t.bpm)).sort((a, b) => Math.abs((a.bpm ?? Infinity) - last!) - Math.abs((b.bpm ?? Infinity) - last!)),
+    seededShuffle(fresh.filter((t) => near(t.bpm)), o.seed),
+    nearest(fresh.filter((t) => !near(t.bpm))),
+    seededShuffle(reused.filter((t) => near(t.bpm)), o.seed + 1),
+    nearest(reused.filter((t) => !near(t.bpm))),
   ];
   const seen = new Set<string>();
-  const out: TrackRef[] = [];
+  const picks: TrackRef[] = [];
   for (const t of tiers.flat()) {
-    if (out.length >= TOP_N || seen.has(key(t))) continue;
+    if (picks.length >= TOP_N || seen.has(key(t))) continue;
     seen.add(key(t));
-    out.push({ artist: t.artist, title: t.title });
+    picks.push({ artist: t.artist, title: t.title });
   }
-  return out;
+  return { picks, short: TOP_N - picks.length };
 }
+
+/** `<day>-<HHMMss>-<rand4>`: unique per measured run; names the rating file and namespaces its A/B key. */
+export function makeRunId(day: string, now: Date, rand: () => number = Math.random): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  const r = Math.floor(rand() * 36 ** 4).toString(36).padStart(4, '0').slice(-4);
+  return `${day}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}-${r}`;
+}
+
+/** FNV-1a of the run id: the shuffle/A-B seed, so no two runs share a key. */
+export function seedFromRunId(id: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 0x01000193);
+  return h >>> 0;
+}
+
+/** Only a full measured run produces a rating file and key: a `--limit` smoke run must not leak or overwrite one. */
+export const writesRating = (limit?: number): boolean => limit === undefined;
 
 /**
  * The blind file and its key. Per scenario: the engine's top 10 and the baseline, each shuffled, presented as
  * List A / List B in a seeded random order. The file holds artist/title only; the key goes to the results file.
+ * Names on both lists go through `display` (cache display name, then pool entry) and `normalizeName`, so no spelling
+ * convention tells the lists apart. When the lane cannot fill the baseline, both lists are trimmed to the same
+ * length and the trim is returned in `short`.
  */
 export function buildRatingFile(
-  results: Array<{ scenario: Scenario; suggestions: Suggestion[]; crate: Array<TrackRef & { bpm?: number }>; lastBpm?: number }>,
-  opts: { seed?: number; fileId: string },
-): { file: RatingFile; key: RatingKey } {
-  const seed = opts.seed ?? SHUFFLE_SEED;
+  results: Array<{ scenario: Scenario; suggestions: Suggestion[]; crate: CrateRef[]; lastBpm?: number }>,
+  opts: { seed?: number; fileId: string; lanePool: (lane: string) => ReadonlySet<string>; display?: (t: TrackRef) => TrackRef | undefined },
+): { file: RatingFile; key: RatingKey; short: Array<{ id: string; engine: number; baseline: number; used: number }> } {
+  const seed = opts.seed ?? seedFromRunId(opts.fileId);
   const key: RatingKey = {};
+  const short: Array<{ id: string; engine: number; baseline: number; used: number }> = [];
+  const name = (t: TrackRef): TrackRef => {
+    const d = opts.display?.(t) ?? t;
+    return { artist: normalizeName(d.artist), title: normalizeName(d.title) };
+  };
   const scenarios = results.map(({ scenario, suggestions, crate, lastBpm }, i) => {
     const s = seed + i * 7919;
-    const engine = suggestions.slice(0, TOP_N).map(({ track: t }) => ({ artist: t.artist, title: t.title }));
-    const baseline = baselinePicks({ crate, lastBpm, engine, seed: s + 1 });
+    const engineAll = suggestions.slice(0, TOP_N).map(({ track: t }) => ({ artist: t.artist, title: t.title }));
+    const baselineAll = baselinePicks({ crate, lane: scenario.lane, lanePool: opts.lanePool(scenario.lane), lastBpm, engine: engineAll, seed: s + 1 }).picks;
+    const used = Math.min(engineAll.length, baselineAll.length);
+    if (used < TOP_N) short.push({ id: scenario.id, engine: engineAll.length, baseline: baselineAll.length, used });
+    const engine = engineAll.slice(0, used).map(name);
+    const baseline = baselineAll.slice(0, used).map(name);
     const engineFirst = rng(s + 2)() < 0.5;
     key[scenario.id] = engineFirst ? { engine: 'A', baseline: 'B' } : { engine: 'B', baseline: 'A' };
     const [a, b] = engineFirst ? [engine, baseline] : [baseline, engine];
@@ -213,14 +252,14 @@ export function buildRatingFile(
       id: scenario.id,
       name: scenario.name,
       template: scenario.template,
-      set: scenario.set.map(({ artist, title }) => ({ artist, title })),
+      set: scenario.set.map(name),
       lists: [
         { label: 'A' as const, tracks: seededShuffle(a, s + 3) },
         { label: 'B' as const, tracks: seededShuffle(b, s + 4) },
       ],
     };
   });
-  return { file: { version: 2, fileId: opts.fileId, scenarios }, key };
+  return { file: { version: 2, fileId: opts.fileId, scenarios }, key, short };
 }
 
 /** Acceptance: the engine list rated >= 7 on >= 8 scenarios AND rated above the baseline on >= 7. */

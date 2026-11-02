@@ -212,6 +212,9 @@ const stylesJobs = new Map<string, StylesJob>(); // queued or running, by track 
 const stylesQueue: string[] = []; // keys waiting for a worker, oldest first
 let stylesRunning = 0;
 
+/** Lookups waiting for a worker right now. */
+export const stylesQueueLength = (): number => stylesQueue.length;
+
 /** Resolves when every queued styles lookup has settled (tests, shutdown). */
 export async function settleStyles(): Promise<void> {
   while (stylesJobs.size) await Promise.allSettled([...stylesJobs.values()].map((j) => j.done));
