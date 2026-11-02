@@ -222,13 +222,13 @@ export async function settleStyles(): Promise<void> {
  * (2 at a time, 200 waiting; the oldest waiting one is dropped and simply re-queued by its next resolve, since no
  * marker was written), pace themselves, and land in the metadata cache for the next request. Never an essential:
  * a cached entry (styles, or a recent "no genre tags" marker) costs nothing, and a missing key, open breaker,
- * spent budget or failure just skips the step. Only real HTTP failures count against the breaker.
+ * spent budget or failure just skips the step. Only real HTTP failures count against the breaker. True when queued.
  */
-export function queueStyles(track: Track): void {
+export function queueStyles(track: Track): boolean {
   const key = trackKeyOf(track.artist, track.title);
-  if (stylesJobs.has(key) || !lastfmConfigured() || lastfmTagsDisabled()) return;
+  if (stylesJobs.has(key) || !lastfmConfigured() || lastfmTagsDisabled()) return false;
   const entry = getEntry(key);
-  if (!entry || stylesSettled(entry) || cooldownUntil(LASTFM)) return;
+  if (!entry || stylesSettled(entry) || cooldownUntil(LASTFM)) return false;
   let finish!: () => void;
   const done = new Promise<void>((r) => (finish = r));
   stylesJobs.set(key, { track, done, finish });
@@ -239,6 +239,7 @@ export function queueStyles(track: Track): void {
     stylesJobs.delete(dropped);
   }
   pumpStyles();
+  return true;
 }
 
 function pumpStyles(): void {

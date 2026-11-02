@@ -2,6 +2,7 @@ import { suggestNext as engineSuggestNext } from '@/engine';
 import { byComplianceThenScore } from '@/engine/suggest';
 import { isComplete } from '@/lib/completeness';
 import { demoTracks, isDemoMode } from '@/lib/demo';
+import { STYLES_RECHECK_MS } from '@/lib/metadataCache';
 import { trackKeyOf, type AdjacencyLookup, type ArcTemplate, type Suggestion, type Track } from '@/types/track';
 
 type DisplayName = { artist: string; title: string };
@@ -23,7 +24,7 @@ export type AdjacencyHandle = {
 export const PLAY_COUNT_MAX_BONUS = 0.05;
 export const playCountBonus = (n: number) => PLAY_COUNT_MAX_BONUS * Math.min(1, Math.log10(1 + n) / 3);
 
-type CachedEntry = { fields: Partial<Track>; sources?: Record<string, string>; reason?: string; retryAt?: number; resolvedAt?: number };
+type CachedEntry = { fields: Partial<Track>; sources?: Record<string, string>; reason?: string; retryAt?: number; resolvedAt?: number; stylesCheckedAt?: number };
 
 /** Optional collaborators; anything missing, throwing or too slow degrades to the demo pool. */
 export interface SuggestDeps {
@@ -36,6 +37,8 @@ export interface SuggestDeps {
   /** Fire-and-forget fill of one crate item (spotify/deezer/musicbrainz only, never iTunes); gated by provider budgets. */
   backgroundResolve?: (artist: string, title: string) => Promise<unknown>;
   getSimilarTracks?: (artist: string, title: string) => Promise<Array<{ artist: string; title: string; match: number }>>;
+  /** Queues a Last.fm styles lookup for a cached track (paced, budgeted, deduped); false when nothing was queued. */
+  queueStyles?: (track: Track) => boolean;
   loadAdjacency?: () => Promise<AdjacencyHandle>;
   suggestNext?: typeof engineSuggestNext;
   /** Overall budget for every external lookup in one request. */
@@ -48,10 +51,16 @@ export interface SuggestDeps {
 
 /** Incomplete crate items started in the background per suggest request, newest first. */
 export const MAX_CRATE_BACKGROUND_RESOLVES = 2;
+/** Styles lookups queued per suggest request (set tracks newest first, then crate, then cached candidates). */
+export const MAX_STYLES_QUEUED_PER_REQUEST = 4;
 const NEGATIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** The cache already settled this incomplete entry: its retry is not due, or a permanent miss is inside its 24 h window. */
 const isSettled = (entry: CachedEntry | undefined): boolean =>
   !!entry?.reason && (entry.retryAt !== undefined ? entry.retryAt > Date.now() : (entry.resolvedAt ?? 0) + NEGATIVE_WINDOW_MS > Date.now());
+/** The cache holds no styles for this track and no recent "no genre tags" marker: worth one Last.fm lookup. */
+const needsStyles = (entry: CachedEntry | undefined): entry is CachedEntry =>
+  !!entry && !entry.fields.styles?.length && entry.sources?.styles !== 'manual' &&
+  !(entry.stylesCheckedAt !== undefined && Date.now() - entry.stylesCheckedAt < STYLES_RECHECK_MS);
 const crateInflight = new Set<string>();
 export function resetCrateBackground(): void {
   crateInflight.clear();
@@ -158,6 +167,14 @@ async function safe<T>(fn: (() => Promise<T>) | undefined, fallback: T): Promise
   }
 }
 
+function safeSync<T>(fn: () => T, fallback: T): T {
+  try {
+    return fn();
+  } catch {
+    return fallback;
+  }
+}
+
 /** Resolves to `fallback` if `p` hasn't settled within `ms`; rejections also yield `fallback`. */
 function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
   return new Promise((resolve) => {
@@ -188,23 +205,34 @@ export async function assembleSuggestions(
   deps: SuggestDeps
 ): Promise<{ suggestions: Suggestion[]; crateKnown: CrateKnown[] }> {
   // Crate items are enriched from the metadata cache only (manual > provider, no provider calls); incomplete ones
-  // stay out of scoring until the cache has them.
+  // stay out of scoring until the cache has them. One snapshot covers the crate and the set.
   const crateReady: Track[] = [];
   const crateKnown: CrateKnown[] = [];
   const crateItems = input.crate ?? [];
   const crateKeys = crateItems.map(keyOf);
+  const setKeys = input.playlist.map(keyOf);
+  const allKeys = [...new Set([...crateKeys, ...setKeys])];
   const entries = await safe(
     async () =>
-      deps.getCachedEntries?.(crateKeys) ??
-      new Map(crateKeys.flatMap((k) => { const e = deps.getCachedEntry?.(k); return e ? [[k, e] as const] : []; })),
+      deps.getCachedEntries?.(allKeys) ??
+      new Map(allKeys.flatMap((k) => { const e = deps.getCachedEntry?.(k); return e ? [[k, e] as const] : []; })),
     new Map<string, CachedEntry>()
   );
+  // Set tracks carry the cached styles (the client's copy may predate the styles lookup): the lane profile needs them.
+  const playlist: Track[] = input.playlist.map((t, i) => {
+    const styles = entries.get(setKeys[i])?.fields.styles;
+    return styles?.length ? { ...t, styles } : t;
+  });
+  // Tracks the cache knows but has no styles for, in queue order: set newest first, then complete crate items.
+  const stylesWanted: Track[] = [];
+  for (let i = playlist.length - 1; i >= 0; i--) if (needsStyles(entries.get(setKeys[i]))) stylesWanted.push(playlist[i]);
   const toFill: Array<{ artist: string; title: string; key: string }> = [];
   crateItems.forEach((c, i) => {
     const entry = entries.get(crateKeys[i]);
     const t: Track = entry ? { ...c, ...entry.fields, id: c.id, artist: c.artist, title: c.title, sources: { ...c.sources, ...entry.sources } } : c;
     if (isComplete(t)) {
       crateReady.push(t);
+      if (needsStyles(entry)) stylesWanted.push(t);
       if (entry) {
         const styles = (t as Track & { styles?: string[] }).styles;
         crateKnown.push({ key: crateKeys[i], bpm: t.bpm!, camelot: t.camelot!, energy: t.energy!, danceability: t.danceability!, ...(styles?.length ? { styles } : {}) });
@@ -225,7 +253,7 @@ export async function assembleSuggestions(
   const pool = crateReady.length < DEMO_CRATE_MIN && !deps.noStarterCrate ? [...crateReady, ...demoTracks()] : crateReady;
   const poolByKey = new Map(pool.map((t) => [keyOf(t), t]));
   // Incomplete set tracks have no usable essentials, so they can't anchor neighbor/similarity lookups.
-  const completeSet = input.playlist.filter(isComplete);
+  const completeSet = playlist.filter(isComplete);
   const last = completeSet[completeSet.length - 1];
   // Similarity seeds: the last 3 complete set tracks, most recent first, each source's match scaled by its weight.
   const simSeeds = completeSet.slice(-SIMILAR_SEED_WEIGHTS.length).reverse();
@@ -313,8 +341,17 @@ export async function assembleSuggestions(
       title: e.title,
       sources: { ...entry.sources },
     };
-    if (hit && isComplete(hit)) cached.push(hit);
-    else if (!isSettled(entry)) toResolve.push(e); // not-due ones must not hog the per-refresh slice of MAX_CANDIDATE_RESOLVES
+    if (hit && isComplete(hit)) {
+      cached.push(hit);
+      if (needsStyles(entry)) stylesWanted.push(hit);
+    } else if (!isSettled(entry)) toResolve.push(e); // not-due ones must not hog the per-refresh slice of MAX_CANDIDATE_RESOLVES
+  }
+  if (deps.queueStyles) {
+    let queued = 0;
+    for (const t of stylesWanted) {
+      if (queued >= MAX_STYLES_QUEUED_PER_REQUEST) break;
+      if (safeSync(() => deps.queueStyles!(t), false)) queued++;
+    }
   }
   // Resolves that finish inside the budget are used; at the budget the signal stops the rest (what they found is
   // cached as 'timeout' and retried server-side, so a later refresh gets them from the cache).
@@ -348,7 +385,7 @@ export async function assembleSuggestions(
     ctrl.abort(); // nothing left running; also releases anyone still waiting on a shared promise
   }
 
-  const inSet = new Set(input.playlist.flatMap((t) => [t.id, keyOf(t)]));
+  const inSet = new Set(playlist.flatMap((t) => [t.id, keyOf(t)]));
   const candidates: Track[] = [];
   const candidateKeys = new Set<string>();
   for (const t of [...cached, ...resolved, ...pool]) {
@@ -361,7 +398,7 @@ export async function assembleSuggestions(
 
   const suggest = deps.suggestNext ?? engineSuggestNext;
   const suggestions = suggest({
-    playlist: input.playlist,
+    playlist,
     candidates,
     template: input.template,
     plannedLength: input.plannedLength,
@@ -409,6 +446,7 @@ export async function loadSuggestDeps(): Promise<SuggestDeps> {
       return resolver.resolveWithStatus(artist, title, { ...opts, ...(without.length ? { without } : {}) });
     };
     deps.getSimilarTracks = resolver.getSimilarTracks;
+    deps.queueStyles = (t) => resolver.queueStyles(t);
     deps.backgroundResolve = async (artist, title) => {
       // Only while Spotify and Deezer both have >= 50% budget headroom and no cooldown; iTunes is left out of this path entirely.
       const { budgetHeadroom, CANDIDATE_MIN_HEADROOM } = await import('@/lib/search/breaker');
