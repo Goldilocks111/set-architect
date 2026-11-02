@@ -93,6 +93,26 @@ describe('lastfmTopTags', () => {
     expect(at[1] - at[0]).toBeGreaterThanOrEqual(55);
     expect(at[2] - at[1]).toBeGreaterThanOrEqual(55);
   });
+  it('an already-aborted lookup sends no request', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    const f = mockFetch([['gettoptags', () => tags(['techno', 5])]]);
+    const ctrl = new AbortController();
+    ctrl.abort();
+    await expect(lastfmTopTags('A', 'T', { signal: ctrl.signal })).rejects.toThrow(/skipped/);
+    expect(f).not.toHaveBeenCalled();
+  });
+  it('aborting while waiting for a pacing slot never fires the request afterwards', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    configureLastfmPacing(150);
+    const f = mockFetch([['gettoptags', () => tags(['techno', 5], ['house', 4])]]);
+    await lastfmTopTags('A', 'T'); // takes the first slot
+    const ctrl = new AbortController();
+    const p = lastfmTopTags('B', 'U', { signal: ctrl.signal });
+    setTimeout(() => ctrl.abort(), 30);
+    await expect(p).rejects.toThrow(/skipped/);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(f).toHaveBeenCalledTimes(1);
+  });
   it('mood tags do not count toward the 2-genre threshold', async () => {
     vi.stubEnv('LASTFM_API_KEY', 'k');
     const f = mockFetch([

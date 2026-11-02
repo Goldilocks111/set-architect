@@ -10,12 +10,15 @@ class LastfmError extends Error {
   }
 }
 
-/** Thrown when the caller's budget refuses a request: nothing was sent, nothing failed. */
-export class LastfmBudgetError extends Error {
-  constructor() {
-    super('lastfm budget spent');
+/** Thrown when the caller's budget refuses a request or the caller aborted: nothing was sent, nothing failed. */
+export class LastfmSkippedError extends Error {
+  constructor(why: 'budget' | 'aborted') {
+    super(`lastfm lookup skipped: ${why}`);
   }
 }
+
+/** Per HTTP call, counted from the moment the request is sent (waiting for a pacing slot is not part of it). */
+export const LASTFM_TIMEOUT_MS = 4000;
 
 const KEY_ERRORS = new Set([4, 9, 10, 26]); // invalid key / session / suspended: retrying never helps
 let disabled = false;
@@ -32,21 +35,33 @@ export function resetLastfmTags(): void {
   disabled = false;
   nextSlot = 0;
 }
-async function pace(): Promise<void> {
+async function pace(signal?: AbortSignal): Promise<void> {
   const now = Date.now();
   const at = Math.max(now, nextSlot);
   nextSlot = at + paceMs;
-  if (at > now) await new Promise((r) => setTimeout(r, at - now));
+  if (at > now)
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', done);
+        resolve();
+      };
+      const timer = setTimeout(done, at - now);
+      signal?.addEventListener('abort', done, { once: true });
+    });
 }
 
-async function topTags(method: string, params: Record<string, string>, key: string, take?: () => boolean): Promise<Tag[]> {
-  if (take && !take()) throw new LastfmBudgetError();
-  await pace();
+async function topTags(method: string, params: Record<string, string>, key: string, take?: () => boolean, signal?: AbortSignal): Promise<Tag[]> {
+  if (signal?.aborted) throw new LastfmSkippedError('aborted');
+  if (take && !take()) throw new LastfmSkippedError('budget');
+  await pace(signal);
+  if (signal?.aborted) throw new LastfmSkippedError('aborted'); // never fire a request the caller gave up on
   const qs = Object.entries(params)
     .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
     .join('&');
   const data = await fetchJson<{ toptags?: { tag?: Array<{ name: string; count: number | string }> }; error?: number; message?: string }>(
-    `https://ws.audioscrobbler.com/2.0/?method=${method}&${qs}&api_key=${encodeURIComponent(key)}&format=json`
+    `https://ws.audioscrobbler.com/2.0/?method=${method}&${qs}&api_key=${encodeURIComponent(key)}&format=json`,
+    { timeoutMs: LASTFM_TIMEOUT_MS, retries: 0, signal }
   );
   if (data.error !== undefined) {
     const code = Number(data.error);
@@ -67,14 +82,14 @@ const genreTags = (tags: Tag[]) => tags.filter((t) => laneOfTag(t.name)).length;
 
 /**
  * Track tags; when fewer than 2 are genres, the artist's tags are added with their weights halved. `take` is called
- * once before each HTTP request (false → LastfmBudgetError).
+ * once before each HTTP request (false → LastfmSkippedError); `signal` cancels the lookup.
  */
-export async function lastfmTopTags(artist: string, title: string, opts: { take?: () => boolean } = {}): Promise<Tag[]> {
+export async function lastfmTopTags(artist: string, title: string, opts: { take?: () => boolean; signal?: AbortSignal } = {}): Promise<Tag[]> {
   const key = process.env.LASTFM_API_KEY;
   if (!key) return [];
   if (disabled) throw new LastfmError(0, 'disabled after a key error');
-  const tags = await topTags('track.gettoptags', { artist, track: title }, key, opts.take);
+  const tags = await topTags('track.gettoptags', { artist, track: title }, key, opts.take, opts.signal);
   if (genreTags(tags) >= 2) return tags;
-  const artistTags = await topTags('artist.gettoptags', { artist }, key, opts.take);
+  const artistTags = await topTags('artist.gettoptags', { artist }, key, opts.take, opts.signal);
   return [...tags, ...artistTags.map((t) => ({ name: t.name, count: t.count / 2 }))];
 }
