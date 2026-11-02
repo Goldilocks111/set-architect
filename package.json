@@ -11,7 +11,8 @@
     "scrape": "tsx scripts/scraper/cli.ts",
     "ingest:live": "tsx scripts/ingest/run.ts",
     "bench:search": "tsx bench/search/run.ts",
-    "bench:data": "tsx bench/data/run.ts"
+    "bench:data": "tsx bench/data/run.ts",
+    "bench:recs": "tsx bench/recs/run.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

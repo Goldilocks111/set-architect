@@ -6,6 +6,7 @@ export const HOSTS: Array<[RegExp, string]> = [
   [/(^|\.)spotify\.com$/, 'spotify'],
   [/(^|\.)musicbrainz\.org$/, 'musicbrainz'],
   [/(^|\.)reccobeats\.com$/, 'reccobeats'],
+  [/(^|\.)audioscrobbler\.com$/, 'lastfm'],
 ];
 
 /** Thrown (not an HttpError) so the app's persisted breaker never sees bench refusals. */
