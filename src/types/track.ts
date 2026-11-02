@@ -23,6 +23,7 @@ export interface Track {
   artworkUrl?: string;
   youtubeUrl?: string;
   year?: number;
+  styles?: string[]; // up to 3 DJ lanes (see lib/style/taxonomy), from Last.fm tags; not an essential
   sources: Record<string, string>; // field name -> source adapter name
   unresolved?: { reason: IncompleteReason; missing: Essential[]; retryAt?: number }; // set when an essential is missing
 }

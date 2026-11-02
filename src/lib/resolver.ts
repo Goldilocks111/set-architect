@@ -1,6 +1,6 @@
 import { trackKeyOf, type Track } from '@/types/track';
 import { ESSENTIALS, RETRYABLE_REASONS, missingEssentials, type IncompleteReason } from './completeness';
-import { getEntry, putPrior, putResolved, type CacheEntry } from './metadataCache';
+import { getEntry, putPrior, putResolved, putStyles, stylesSettled, type CacheEntry } from './metadataCache';
 import { scheduleRetry } from './reresolve';
 import { searchDemoTracks } from './demo';
 import { withTimeout } from './http';
@@ -9,6 +9,8 @@ import { acousticbrainzAdapter } from './sources/acousticbrainz';
 import { deezerAdapter } from './sources/deezer';
 import { getSongBpmAdapter } from './sources/getsongbpm';
 import { itunesAdapter } from './sources/itunes';
+import { lastfmTopTags } from './sources/lastfmTags';
+import { lanesFromTags } from './style/taxonomy';
 import { lastfmConfigured, lastfmSimilar, type SimilarItem } from './sources/lastfm';
 import { listenbrainzSimilar } from './sources/listenbrainz';
 import { musicbrainzAdapter } from './sources/musicbrainz';
@@ -25,6 +27,7 @@ import type { MergedHit } from './search/types';
 export const ADAPTER_TIMEOUT_MS = 4000;
 
 const GUARDED = new Set<string>(['spotify', 'deezer', 'itunes', 'musicbrainz']);
+const STYLES_PROVIDER = 'lastfm';
 const isGuarded = (name: string): name is MergedHit['providers'][number] => GUARDED.has(name);
 
 // youtube is appended last: keyless it only builds a search URL, so it costs nothing.
@@ -179,6 +182,36 @@ export async function resolveWithStatus(
   artist: string,
   title: string,
   opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string }; signal?: AbortSignal } = {}
+): Promise<Track> {
+  const track = await resolveCore(artist, title, opts);
+  return track.unresolved || opts.signal?.aborted ? track : withStyles(track);
+}
+
+/**
+ * Style lanes from Last.fm tags, after the essentials. Never an essential: a cached entry (styles, or a recent
+ * "no genre tags" marker) costs nothing, and a missing key, open breaker, spent budget or failure just skips the step.
+ */
+async function withStyles(track: Track): Promise<Track> {
+  const key = trackKeyOf(track.artist, track.title);
+  const entry = getEntry(key);
+  if (!entry || stylesSettled(entry) || !lastfmConfigured()) return track;
+  if (cooldownUntil(STYLES_PROVIDER) || !takeBudget(STYLES_PROVIDER, { app: true })) return track;
+  try {
+    const tags = await withTimeout(lastfmTopTags(track.artist, track.title), ADAPTER_TIMEOUT_MS, 'lastfm');
+    recordSuccess(STYLES_PROVIDER);
+    const styles = lanesFromTags(tags);
+    putStyles(key, styles);
+    return styles.length ? { ...track, styles, sources: { ...track.sources, styles: 'lastfm-tags' } } : track;
+  } catch (err) {
+    recordFailure(STYLES_PROVIDER, err);
+    return track;
+  }
+}
+
+async function resolveCore(
+  artist: string,
+  title: string,
+  opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string }; signal?: AbortSignal }
 ): Promise<Track> {
   const key = trackKeyOf(artist, title);
   const budgetMs = opts.budgetMs ?? RESOLVE_BUDGET_MS;
