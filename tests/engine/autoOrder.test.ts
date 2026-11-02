@@ -101,9 +101,11 @@ describe('autoOrder', () => {
 
   it('is deterministic by seed', () => {
     const crate = shuffle(scriptedChain(4, 20), 9);
-    const a = autoOrder(crate, build, { seed: 42 });
-    const b = autoOrder(crate, build, { seed: 42 });
+    // the wall-clock safety cutoff is off so a loaded machine can't end one run early
+    const a = autoOrder(crate, build, { seed: 42, maxMs: Infinity });
+    const b = autoOrder(crate, build, { seed: 42, maxMs: Infinity });
     expect(b).toEqual(a);
+    expect(autoOrder(crate, build, { seed: 42 }).order).toHaveLength(20);
   });
 
   it('keepFirst / keepLast pin the current opener and closer', () => {
