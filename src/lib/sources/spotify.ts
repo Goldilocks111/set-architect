@@ -85,10 +85,10 @@ export const spotifyAdapter: SourceAdapter = {
   configured: () => !!creds(),
   async enrich(partial) {
     const items = await search(`${partial.artist} ${partial.title}`);
-    const hit = items.find((t) => t.artists?.some((a) => artistMatches(partial.artist, a.name)) && titleMatches(partial.title, t.name));
+    const hit = items.find((t) => t.artists?.some((a) => artistMatches(partial.artist, a.name)) && titleMatches(partial.title, t.name, partial.artist));
     if (!hit) return {};
     const out: Partial<Track> = { spotifyId: hit.id };
-    if (hit.name && hit.artists?.[0]?.name) Object.assign(out, { artist: hit.artists[0].name, title: hit.name }); // display name only
+    if (hit.name && hit.artists?.[0]?.name) Object.assign(out, { artist: (hit.artists ?? []).map((a) => a.name).join(', '), title: hit.name }); // display name only
     if (hit.external_urls?.spotify) out.spotifyUrl = hit.external_urls.spotify;
     if (partial.popularity === undefined && typeof hit.popularity === 'number') out.popularity = hit.popularity;
     if (partial.isrc === undefined && hit.external_ids?.isrc) out.isrc = hit.external_ids.isrc;

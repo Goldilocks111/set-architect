@@ -311,6 +311,10 @@ describe('suggestNext', () => {
       expect(primaryArtist('A x B')).toBe('a');
       expect(primaryArtist('A, B')).toBe('a');
       expect(primaryArtist('A & B')).toBe('a');
+      // an empty first credit falls back to the whole normalized artist
+      expect(primaryArtist('&ME')).toBe('me');
+      expect(primaryArtist('Ft. Lauderdale')).toBe('ft lauderdale');
+      expect(primaryArtist(', ')).toBe('');
     });
     it('5 same-artist high scorers: only 2 reach the top 10, the rest fill from further down', () => {
       const same = Array.from({ length: 5 }, (_, i) => t(`s${i}`, { artist: 'Same DJ', ...good }));

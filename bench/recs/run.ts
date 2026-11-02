@@ -190,11 +190,9 @@ async function main(): Promise<void> {
   }
   // Lane membership for the baseline: the scenario lane's pool, or cached styles containing it (added in the crate rows).
   const poolKeys = Object.fromEntries(Object.entries(POOLS).map(([lane, list]) => [lane, new Set(list.map((t) => trackKeyOf(t.artist, t.title)))]));
-  // Names: the provider's display name (cache) when every track on a scenario's sheet has one, else the pool spelling
-  // for the whole scenario. Lookups only for tracks that will appear on the sheet (set + both lists).
-  const poolName = new Map(Object.values(POOLS).flat().map((t) => [trackKeyOf(t.artist, t.title), t] as const));
+  // Names: the provider's display name (cache) when every track on a scenario's sheet has one, else one key-derived
+  // spelling for the whole scenario. Lookups only for tracks that will appear on the sheet (set + both lists).
   const provider = (t: { artist: string; title: string }) => getEntry(trackKeyOf(t.artist, t.title))?.display;
-  const pool = (t: { artist: string; title: string }) => poolName.get(trackKeyOf(t.artist, t.title));
   const draft = buildRatingFile(results, { fileId: runId, lanePool: (lane) => poolKeys[lane] ?? new Set() }); // same picks as the final file; only the spelling differs
   const onSheet = new Map<string, { artist: string; title: string }>();
   for (const s of draft.file.scenarios) for (const t of [...s.set, ...s.lists.flatMap((l) => l.tracks)]) onSheet.set(trackKeyOf(t.artist, t.title), t);
@@ -205,8 +203,8 @@ async function main(): Promise<void> {
     await resolveWithStatus(t.artist, t.title, { without: [...BENCH_WITHOUT, 'spotify', 'reccobeats', 'musicbrainz', 'getsongbpm', 'soundstat'] });
   }
   // The key (which list is the engine) lives here only; the rating file the owner sees has List A / List B.
-  const rating = buildRatingFile(results, { fileId: runId, lanePool: (lane) => poolKeys[lane] ?? new Set(), provider, pool });
-  for (const [id, mode] of Object.entries(rating.naming)) if (mode === 'pool') console.log(`naming: ${id} uses pool spelling (a sheet track has no provider display name)`);
+  const rating = buildRatingFile(results, { fileId: runId, lanePool: (lane) => poolKeys[lane] ?? new Set(), provider });
+  for (const [id, mode] of Object.entries(rating.naming)) if (mode === 'pool') console.log(`naming: ${id} uses the uniform key spelling for every track (a sheet track has no provider display name)`);
   console.log(`baseline off-tempo tracks drawn: ${Object.entries(rating.offTempo).map(([id, n]) => `${id} ${n}`).join(', ')} (> ${MAX_OFF_TEMPO} trims both lists)`);
   for (const sh of rating.short) console.log(`baselineShort: ${sh.id}: engine ${sh.engine}, baseline ${sh.baseline} -> both lists trimmed to ${sh.used}`);
   writeFileSync(out, JSON.stringify({ ...base, baselineShort: rating.short, baselineOffTempo: rating.offTempo, namingMode: rating.naming, ratingFileId: rating.file.fileId, ratingKey: rating.key }, null, 2));

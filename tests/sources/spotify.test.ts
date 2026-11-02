@@ -94,4 +94,8 @@ describe('spotify', () => {
     mockFetch([tokenRoute, ['api.spotify.com', () => json({ tracks: { items: [{ ...hit, id: 'WRONG', name: 'Aerodynamic' }, { ...hit, name: 'One More Time - Radio Edit' }] } })]]);
     expect((await spotifyAdapter.enrich(base())).spotifyId).toBe('SP1');
   });
+  it('the display name joins every credited artist', async () => {
+    mockFetch([tokenRoute, ['api.spotify.com', () => json({ tracks: { items: [{ ...hit, artists: [{ name: 'Daft Punk' }, { name: 'Romanthony' }] }] } })]]);
+    expect((await spotifyAdapter.enrich(base())).artist).toBe('Daft Punk, Romanthony');
+  });
 });

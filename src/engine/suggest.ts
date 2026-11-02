@@ -1,5 +1,7 @@
 import type { ArcTemplate, Suggestion, SuggestionReason, Track, Weights } from '@/types/track';
 import { trackKeyOf } from '@/types/track';
+import { primaryArtist } from '@/lib/primaryArtist';
+export { primaryArtist };
 import { isEnergyBoostKey, parseCamelot, scoreKeyTransition } from './camelot';
 import { scoreBpmTransition } from './bpm';
 import { isComplete } from '@/lib/completeness';
@@ -158,12 +160,6 @@ export function suggestNext(args: {
 
 /** At most this many picks per primary artist in the returned list. */
 export const MAX_PER_ARTIST = 2;
-
-/** First credited artist, normalized the way track keys are ("A feat. B", "A & B", "A x B" -> a). */
-export function primaryArtist(artist: string): string {
-  const first = artist.split(/\s*(?:,|;|\/|&|\bfeat\b\.?|\bft\b\.?|\bfeaturing\b|\bvs\b\.?|\bx\b(?![-\w]))\s*/i)[0] ?? artist;
-  return trackKeyOf(first, '').split('|')[0];
-}
 
 /**
  * Artist diversity: walks the ranked list in order (compliance tiers stay intact) and skips a candidate once its

@@ -51,13 +51,21 @@ describe('provider display names persist in the metadata cache', () => {
 });
 
 describe('a display name is accepted only for the same recording', () => {
-  it('a feat. variant matched by the adapter is not stored as the display name (keys differ); an (Original Mix) variant is', async () => {
+  it('a feat. variant of the same recording is stored (same recording, same primary artist); an (Original Mix) variant too', async () => {
     mockFetch([deezer('Real Artist', 'Real Title (feat. Someone)'), ['itunes.apple.com', () => json({ results: [] })], ['musicbrainz.org', () => json({ recordings: [] })]]);
     await resolveWithStatus('Real Artist', 'Real Title');
-    expect(getEntry(trackKeyOf('Real Artist', 'Real Title'))?.display).toBeUndefined();
+    expect(getEntry(trackKeyOf('Real Artist', 'Real Title'))?.display).toEqual({ artist: 'Real Artist', title: 'Real Title (feat. Someone)' });
     mockFetch([deezer('REAL Artist', 'Other Title (Original Mix)'), ['itunes.apple.com', () => json({ results: [] })], ['musicbrainz.org', () => json({ recordings: [] })]]);
     await resolveWithStatus('REAL Artist', 'Other Title');
     expect(getEntry(trackKeyOf('REAL Artist', 'Other Title'))?.display).toEqual({ artist: 'REAL Artist', title: 'Other Title (Original Mix)' });
+  });
+  it('a collab spelling with the same primary artist is stored; a different primary artist is not', async () => {
+    mockFetch([deezer('Real Artist & Friend', 'Real Title'), ['itunes.apple.com', () => json({ results: [] })], ['musicbrainz.org', () => json({ recordings: [] })]]);
+    await resolveWithStatus('Real Artist', 'Real Title');
+    expect(getEntry(trackKeyOf('Real Artist', 'Real Title'))?.display).toEqual({ artist: 'Real Artist & Friend', title: 'Real Title' });
+    mockFetch([deezer('Real Artist Band', 'Another Title'), ['itunes.apple.com', () => json({ results: [] })], ['musicbrainz.org', () => json({ recordings: [] })]]);
+    await resolveWithStatus('Real', 'Another Title');
+    expect(getEntry(trackKeyOf('Real', 'Another Title'))?.display).toBeUndefined();
   });
   it('a wrong-song hit leaves the cache without its preview or display name', async () => {
     mockFetch([deezer('Real Artist', 'A Different Song'), ['itunes.apple.com', () => json({ results: [] })], ['musicbrainz.org', () => json({ recordings: [] })]]);

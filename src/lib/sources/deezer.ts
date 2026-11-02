@@ -75,7 +75,7 @@ async function findHit(partial: Track): Promise<DeezerTrack | undefined> {
       const res = await fetchJson<{ data?: DeezerTrack[] }>(
         `${BASE}/search?q=${encodeURIComponent(q)}&limit=5`
       );
-      const hit = (res.data ?? []).find((t) => artistMatches(partial.artist, t.artist?.name) && titleMatches(partial.title, t.title));
+      const hit = (res.data ?? []).find((t) => artistMatches(partial.artist, t.artist?.name) && titleMatches(partial.title, t.title, partial.artist));
       if (hit) return hit;
     } catch (err) {
       if (q === attempts[0]) throw err;

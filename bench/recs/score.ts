@@ -174,6 +174,14 @@ export const normalizeName = (s: string): string => s.trim().replace(/\s+/g, ' '
 export const inTempo = (last: number | undefined, bpm: number | undefined): boolean =>
   last === undefined || (bpm !== undefined && (scoreBpmTransition(last, bpm).relation !== 'clash' || Math.abs(bpm - last) / last <= BASELINE_BPM_TOLERANCE));
 
+const titleCase = (s: string) => s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+
+/** The key-derived spelling (normalized key parts, title-cased, no punctuation), identical for every track it renders. */
+export function formatFromKey(key: string): TrackRef {
+  const [artist = '', title = ''] = key.split('|');
+  return { artist: titleCase(artist), title: titleCase(title) };
+}
+
 export type CrateRef = TrackRef & { bpm?: number; styles?: string[] };
 
 /**
@@ -212,7 +220,7 @@ export function baselinePicks(o: { crate: CrateRef[]; lane: string; lanePool: Re
 /** Off-tempo tracks the baseline may keep before both lists are trimmed further. */
 export const MAX_OFF_TEMPO = 2;
 
-/** Where a scenario's names came from: the provider's display names (every shown track has one), else the pool/normalized spelling for all. */
+/** Where a scenario's names came from: the provider's display names (every shown track has one), else one key-derived formatter for all. */
 export type NamingMode = 'provider' | 'pool';
 
 /** `<day>-<HHMMss>-<rand4>`: unique per measured run; names the rating file and namespaces its A/B key. */
@@ -241,7 +249,7 @@ export const writesRating = (limit?: number): boolean => limit === undefined;
  */
 export function buildRatingFile(
   results: Array<{ scenario: Scenario; suggestions: Suggestion[]; crate: CrateRef[]; lastBpm?: number }>,
-  opts: { seed?: number; fileId: string; lanePool: (lane: string) => ReadonlySet<string>; provider?: (t: TrackRef) => TrackRef | undefined; pool?: (t: TrackRef) => TrackRef | undefined },
+  opts: { seed?: number; fileId: string; lanePool: (lane: string) => ReadonlySet<string>; provider?: (t: TrackRef) => TrackRef | undefined },
 ): { file: RatingFile; key: RatingKey; short: Array<{ id: string; engine: number; baseline: number; offTempo: number; used: number }>; offTempo: Record<string, number>; naming: Record<string, NamingMode> } {
   const seed = opts.seed ?? seedFromRunId(opts.fileId);
   const key: RatingKey = {};
@@ -261,11 +269,11 @@ export function buildRatingFile(
     const used = Math.min(engineAll.length, baselineAll.length);
     if (used < TOP_N) short.push({ id: scenario.id, engine: engineAll.length, baseline: drawn.picks.length, offTempo: drawn.offTempo, used });
     // One rule per scenario: provider display names only when EVERY shown track (set + both lists) has one; otherwise
-    // every track uses the pool entry, else its normalized given name, so no list is spelled differently from the other.
+    // every track (set, engine externals, baseline) goes through the one key formatter, so spelling cannot tell the lists apart.
     const shown = [...scenario.set, ...engineAll.slice(0, used), ...baselineAll.slice(0, used)];
     const mode: NamingMode = opts.provider && shown.every((t) => opts.provider!(t)) ? 'provider' : 'pool';
     naming[scenario.id] = mode;
-    const name = (t: TrackRef): TrackRef => clean(mode === 'provider' ? opts.provider!(t)! : (opts.pool?.(t) ?? t));
+    const name = (t: TrackRef): TrackRef => clean(mode === 'provider' ? opts.provider!(t)! : formatFromKey(trackKeyOf(t.artist, t.title)));
     const engine = engineAll.slice(0, used).map(name);
     const baseline = baselineAll.slice(0, used).map(name);
     const engineFirst = rng(s + 2)() < 0.5;

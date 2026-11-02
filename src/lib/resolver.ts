@@ -21,6 +21,8 @@ import { spotifyAdapter } from './sources/spotify';
 import type { SourceAdapter } from './sources/types';
 import { youtubeAdapter } from './sources/youtube';
 import { cachedMergedSearch } from './search/cache';
+import { primaryArtist } from './primaryArtist';
+import { titleMatches } from './sources/match';
 import { budgetHeadroom, cooldownUntil, recordFailure, recordSuccess, takeBudget } from './search/breaker';
 import { defaultProviders, firstRoundProviders, mergedSearch } from './search/merge';
 import type { MergedHit } from './search/types';
@@ -102,8 +104,8 @@ async function resolveInto(track: Track, run: ResolveRun): Promise<Track> {
       const partial = await withTimeout(adapter.enrich({ ...track }), adapter.timeoutMs ?? ADAPTER_TIMEOUT_MS, adapter.name);
       if (run.aborted) return track;
       if (guarded) recordSuccess(guarded);
-      // only the same recording supplies a display name (same key once Original/Extended Mix qualifiers drop out)
-      if (!run.display && (adapter.name === 'deezer' || adapter.name === 'spotify') && partial?.artist && partial?.title && trackKeyOf(partial.artist, partial.title) === trackKeyOf(track.artist, track.title)) run.display = { artist: partial.artist, title: partial.title };
+      // only the same recording by the same primary artist supplies a display name (feat./collab credits and length cuts are fine)
+      if (!run.display && (adapter.name === 'deezer' || adapter.name === 'spotify') && partial?.artist && partial?.title && titleMatches(track.title, partial.title, track.artist) && primaryArtist(partial.artist) === primaryArtist(track.artist)) run.display = { artist: partial.artist, title: partial.title };
       if (adapter.name === 'deezer') run.deezerPreview = partial?.previewUrl;
       const overrides = OVERRIDES[adapter.name] ?? [];
       for (const [field, value] of Object.entries(partial ?? {}) as Array<[keyof Track, unknown]>) {

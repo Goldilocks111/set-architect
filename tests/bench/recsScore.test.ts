@@ -8,6 +8,7 @@ import {
   baselinePicks,
   makeRunId,
   normalizeName,
+  formatFromKey,
   seedFromRunId,
   writesRating,
   summarizeRatings,
@@ -261,10 +262,10 @@ describe('rating validity (same names, trimmed lists, unique runs)', () => {
   const mk = (i: number) => ({ artist: `crate  ${i} `, title: `c${i} `, bpm: 124 });
   const crate = Array.from({ length: 40 }, (_, i) => mk(i));
   const pool = crate.map((c) => ({ artist: `Pool Artist ${trackKeyOf(c.artist, c.title).split('|')[0]}`, title: `Pool ${c.title.trim().toUpperCase()}` }));
-  const run = (suggestions: Suggestion[], over: Partial<{ crate: typeof crate; lanePool: Set<string>; provider: (r: { artist: string; title: string }) => { artist: string; title: string } | undefined; pool: (r: { artist: string; title: string }) => { artist: string; title: string } | undefined }> = {}) =>
+  const run = (suggestions: Suggestion[], over: Partial<{ crate: typeof crate; lanePool: Set<string>; provider: (r: { artist: string; title: string }) => { artist: string; title: string } | undefined }> = {}) =>
     buildRatingFile(
       [{ scenario: { ...sc('s0'), lane, crate }, suggestions, crate: over.crate ?? crate, lastBpm: 124 }],
-      { seed: 1, fileId: 'r', lanePool: () => over.lanePool ?? new Set(crate.map((c) => trackKeyOf(c.artist, c.title))), provider: over.provider, pool: over.pool },
+      { seed: 1, fileId: 'r', lanePool: () => over.lanePool ?? new Set(crate.map((c) => trackKeyOf(c.artist, c.title))), provider: over.provider },
     );
 
   it('normalizeName trims and collapses spaces but keeps casing', () => {
@@ -347,26 +348,40 @@ describe('off-tempo baseline tracks (half/double-time count as in tempo)', () =>
 
 describe('naming mode per scenario (uniform rule)', () => {
   const crate = Array.from({ length: 40 }, (_, i) => ({ artist: `crate  ${i}`, title: `c${i}`, bpm: 124 }));
-  const lane = () => new Set(crate.map((c) => trackKeyOf(c.artist, c.title)));
-  const sugs = ten(() => ({})).map((s, j) => ({ ...s, track: { ...s.track, artist: `crate ${j}`, title: `c${j}` } }));
-  const run = (provider: (r: { artist: string; title: string }) => { artist: string; title: string } | undefined) =>
-    buildRatingFile([{ scenario: { ...sc('s0'), crate }, suggestions: sugs, crate, lastBpm: 124 }], {
-      fileId: 'r', lanePool: lane, provider, pool: (r) => ({ artist: `Pool ${r.artist.trim()}`, title: `Pool ${r.title}` }),
-    });
+  const keyOf = (c: { artist: string; title: string }) => trackKeyOf(c.artist, c.title);
+  const lane = () => new Set(crate.slice(0, 15).map(keyOf));
+  const sugs = ten(() => ({})).map((s, j) => ({ ...s, track: { ...s.track, artist: `Crate ${j}`, title: `C${j}` } }));
+  const run = (provider: (r: { artist: string; title: string }) => { artist: string; title: string } | undefined, suggestions = sugs) =>
+    buildRatingFile([{ scenario: { ...sc('s0'), crate }, suggestions, crate, lastBpm: 124 }], { fileId: 'r', lanePool: lane, provider });
+  const prov = (t: { artist: string; title: string }) => ({ artist: `PROV ${t.artist}`, title: `PROV ${t.title}` });
+
   it('every shown track has a provider name: provider mode, all names from the provider', () => {
-    const r = run((t) => ({ artist: `PROV ${t.artist}`, title: `PROV ${t.title}` }));
+    const r = run(prov);
     expect(r.naming).toEqual({ s0: 'provider' });
     for (const l of r.file.scenarios[0].lists) for (const t of l.tracks) expect(t.artist.startsWith('PROV ')).toBe(true);
   });
-  it('ONE shown track without a provider name switches the WHOLE scenario to pool/normalized spelling', () => {
-    const r = run((t) => (t.title === 'c3' ? undefined : { artist: `PROV ${t.artist}`, title: `PROV ${t.title}` }));
+  it('ONE shown track without a provider name switches the whole scenario to the one key formatter, for EVERY track', () => {
+    const r = run((t) => (t.title === 'c3' ? undefined : prov(t)));
     expect(r.naming).toEqual({ s0: 'pool' });
-    for (const l of r.file.scenarios[0].lists) for (const t of l.tracks) expect(t.artist.startsWith('Pool ')).toBe(true);
-    expect(r.file.scenarios[0].set[0].artist).toMatch(/^Pool /);
+    // set, engine externals (given as hand/1001TL spellings) and baseline crate tracks all come out as the same transform
+    const fmt = (artist: string, title: string) => formatFromKey(trackKeyOf(artist, title));
+    for (const l of r.file.scenarios[0].lists) for (const t of l.tracks) expect(t).toEqual(fmt(t.artist, t.title));
+    expect(r.file.scenarios[0].set).toEqual([fmt('A', 'B')]);
+  });
+  it('pool mode removes the spelling tell between an engine external and a baseline track', () => {
+    const external = { ...sugs[0], track: { ...sugs[0].track, artist: 'Eric  Prydz', title: 'Opus (Eric Prydz Remix)' } };
+    const r = run(() => undefined, [external, ...sugs.slice(1)]);
+    const all = r.file.scenarios[0].lists.flatMap((l) => l.tracks);
+    expect(all).toContainEqual(formatFromKey(trackKeyOf('Eric Prydz', 'Opus (Eric Prydz Remix)')));
+    for (const t of all) expect(t.artist).toBe(t.artist.replace(/\b[a-z]/g, (c) => c.toUpperCase())); // title-cased, no parentheses or punctuation
+    for (const t of all) expect(t.title).not.toMatch(/[()[\]'’.,!?]/);
   });
   it('a provider gap on a track that is not shown does not matter', () => {
-    const r = run((t) => (t.title === 'c39' && false ? undefined : { artist: `PROV ${t.artist}`, title: `PROV ${t.title}` }));
+    const notShown = keyOf(crate[30]); // outside the 15-track lane: never on the sheet
+    const r = run((t) => (trackKeyOf(t.artist, t.title) === notShown ? undefined : prov(t)));
     expect(r.naming.s0).toBe('provider');
+    // and the same function does flip the mode when the gap is a shown track
+    expect(run((t) => (t.title === 'C2' ? undefined : prov(t))).naming.s0).toBe('pool');
   });
 });
 
