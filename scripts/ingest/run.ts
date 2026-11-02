@@ -11,6 +11,7 @@ import { acquireLock, pidAlive, releaseLock, type IsAlive } from './lock';
 
 export const JOB_GAP_MS = 20_000;
 export const MAX_CONSECUTIVE_HARD_BLOCKS = 3;
+export const MAX_SLEEP_CHUNK_MS = 60_000;
 export const EMPTY_FRONTIER_SLEEP_MS = 30 * 60_000;
 
 export interface SeedTrack {
@@ -115,8 +116,11 @@ export async function runDriver(deps: DriverDeps): Promise<number> {
     log('ingest: another driver is already running; exiting');
     return 1;
   }
+  // Waits in <= 60 s chunks against the wall clock: setTimeout does not advance while the machine sleeps,
+  // so one long timer could overshoot by hours; each chunk re-checks Date.now() against the target.
   const nap = async (ms: number) => {
-    if (!stopped()) await sleep(ms);
+    const target = now() + ms;
+    while (!stopped() && now() < target) await sleep(Math.min(MAX_SLEEP_CHUNK_MS, target - now()));
   };
   let jobs = 0;
   let hardStreak = 0;

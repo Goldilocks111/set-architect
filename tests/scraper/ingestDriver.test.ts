@@ -55,7 +55,7 @@ describe('lock', () => {
   });
 });
 
-function harness(over: Partial<Parameters<typeof runDriver>[0]> = {}) {
+function harness(over: Partial<Parameters<typeof runDriver>[0]> = {}, maxSleeps = 6) {
   let t = 1_000_000;
   const sleeps: number[] = [];
   const ac = new AbortController();
@@ -85,7 +85,7 @@ function harness(over: Partial<Parameters<typeof runDriver>[0]> = {}) {
     sleep: async (ms) => {
       sleeps.push(ms);
       t += ms;
-      if (sleeps.length >= 6) ac.abort();
+      if (sleeps.length >= maxSleeps) ac.abort();
     },
     log: () => {},
     signal: ac.signal,
@@ -93,7 +93,7 @@ function harness(over: Partial<Parameters<typeof runDriver>[0]> = {}) {
     isAlive: () => true,
     ...over,
   };
-  return { deps, sleeps, ensured, ac, growthPath, lockPath, statePath, now: () => t };
+  return { deps, sleeps, ensured, ac, growthPath, lockPath, statePath, now: () => t, advance: (ms: number) => void (t += ms) };
 }
 
 describe('runDriver', () => {
@@ -107,22 +107,25 @@ describe('runDriver', () => {
     expect(typeof lines[0].ts).toBe('number');
     expect(lines[1].jobs).toBe(2);
     expect(h.sleeps[0]).toBe(20_000);
+    expect(Math.max(...h.sleeps)).toBeLessThanOrEqual(60_000);
   });
 
   it('sleeps until pausedUntil instead of fetching', async () => {
-    const h = harness();
+    const h = harness({}, 80);
     writeFileSync(h.statePath, JSON.stringify({ searched: {}, backoff: {}, pausedUntil: h.now() + 3_600_000 }));
     await runDriver(h.deps);
-    expect(h.sleeps[0]).toBe(3_600_000);
+    expect(h.sleeps.slice(0, 60).every((x) => x === 60_000)).toBe(true);
+    expect(h.sleeps.slice(0, 60).reduce((a, b) => a + b, 0)).toBe(3_600_000);
     expect(h.ensured[0]).toBe('A|One');
     expect(h.sleeps.length).toBeGreaterThan(1);
   });
 
   it('sleeps 30 min and recomputes when the frontier is empty', async () => {
-    const h = harness({ seeds: [] });
+    const h = harness({ seeds: [] }, 40);
     await runDriver(h.deps);
     expect(h.ensured).toEqual([]);
-    expect(h.sleeps[0]).toBe(30 * 60_000);
+    expect(h.sleeps.slice(0, 30).reduce((a, b) => a + b, 0)).toBe(30 * 60_000);
+    expect(Math.max(...h.sleeps)).toBeLessThanOrEqual(60_000);
   });
 
   it('exits 1 without touching a lock held by a live pid', async () => {
@@ -144,7 +147,7 @@ describe('runDriver', () => {
 describe('repeated hard blocks', () => {
   it('stops after 3 consecutive hard-block jobs, releases the lock and logs the reason', async () => {
     const counters = { softBlocks: 0, hardBlocks: 0 };
-    const h = harness({ counters, seeds: [1, 2, 3, 4, 5].map((n) => ({ artist: `Art${n}`, title: `T${n}` })) });
+    const h = harness({ counters, seeds: [1, 2, 3, 4, 5].map((n) => ({ artist: `Art${n}`, title: `T${n}` })) }, 500);
     h.deps.ingestor.ensureNeighborsFor = async (a, ti) => {
       h.ensured.push(`${a}|${ti}`);
       counters.hardBlocks++;
@@ -201,5 +204,26 @@ describe('liveEnabled gating by the driver lock', () => {
       vi.useRealTimers();
       vi.unstubAllEnvs();
     }
+  });
+});
+
+describe('wall-clock waits', () => {
+  it('a 60 min pause resumes on the next chunk when the wall clock jumps 2 h (laptop sleep)', async () => {
+    let jumped = false;
+    const h = harness();
+    writeFileSync(h.statePath, JSON.stringify({ searched: {}, backoff: {}, pausedUntil: h.now() + 3_600_000 }));
+    const base = h.deps.sleep!;
+    h.deps.sleep = async (ms) => {
+      await base(ms);
+      if (!jumped) {
+        jumped = true;
+        h.advance(2 * 3_600_000);
+      }
+    };
+    await runDriver(h.deps);
+    expect(h.ensured[0]).toBe('A|One');
+    // first chunk, then the jump, then no further pause chunks: the next sleep is the 20 s job gap
+    expect(h.sleeps[0]).toBe(60_000);
+    expect(h.sleeps[1]).toBe(20_000);
   });
 });
