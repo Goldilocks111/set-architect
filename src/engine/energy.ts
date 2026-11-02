@@ -1,4 +1,5 @@
-import { clampPlayFraction, DEFAULT_PLAY_FRACTION } from '@/lib/arc';
+import { clampPlayFraction } from '@/lib/arc';
+import { DEFAULT_PLAY_FRACTION, durationOf } from '@/lib/duration';
 import type { Arc, ArcShape, Track } from '@/types/track';
 
 // Rulebook §3, one target per quarter-hour slot of the 60 min template (T1–T15): the 'build' shape.
@@ -30,13 +31,13 @@ const SHAPE_POINTS: Record<Exclude<ArcShape, 'build'>, Array<[number, number]>> 
     [0.75, 5],
     [1, 6],
   ],
-  // Peak-time slot: starts at 7, one reset (9 -> 7.5) mid-set, main peak 10 from ~85% to the hand-over.
+  // Peak-time slot: starts at 7, one -2 reset (9 -> 7, rulebook §3) mid-set, main peak 10 from ~85% to the hand-over.
   'peak-time': [
     [0, 7],
     [0.3, 8.5],
     [0.5, 9],
-    [0.55, 7.5],
-    [0.62, 7.5],
+    [0.55, 7],
+    [0.62, 7],
     [0.85, 10],
     [1, 10],
   ],
@@ -66,10 +67,10 @@ export function energyTargetAtMinute(arc: Arc, minute: number): number {
 
 const FALLBACK_DURATION_MS = 300_000;
 
-/** Local fallback until real/estimated durations are wired in: the track's own length, else 5:00. */
-export const defaultDurationMs = (t: Track): number => t.durationMs ?? FALLBACK_DURATION_MS;
+/** The track's real length, else its estimate (extended 6:30, radio/edit 3:30, otherwise 5:00). */
+export const defaultDurationMs = (t: Track): number => durationOf(t).ms;
 
-/** Minutes of `t` actually played; a missing, zero or non-finite duration counts as 5:00, never NaN. */
+/** Minutes of `t` actually played; a duration source answering zero or non-finite counts as 5:00, never NaN. */
 function playedMinutes(t: Track, playFraction: number, durationMsOf: (t: Track) => number): number {
   const ms = durationMsOf(t);
   const safe = typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? ms : FALLBACK_DURATION_MS;

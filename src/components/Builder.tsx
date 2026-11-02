@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { isComplete, RETRYABLE_REASONS, withDanceabilityPrior } from '@/lib/completeness';
 import type { OverrideFields } from '@/lib/overrideValidation';
-import { plannedTrackCount } from '@/engine';
+import { plannedTrackCount, setPlayedMinutes } from '@/engine';
 import type { Track } from '@/types/track';
 import ArcPicker from './ArcPicker';
 import BillingActions from './BillingActions';
@@ -22,7 +22,6 @@ import { loadLocal, saveLocal } from './persistence';
 import { initialPlaylistState, playlistReducer, type LoadableState, type PlaylistAction } from './playlistReducer';
 import { fetchResolved, needsMetadata } from './trackFormat';
 
-const MINUTES_PER_TRACK = 4;
 /** Counted from enqueue: a track not answered by now is shown as incomplete ('timeout'); the server retries on its own. */
 export const RESOLVE_CAP_MS = 60_000;
 const MAX_IN_FLIGHT = 2;
@@ -281,7 +280,8 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
     },
     [requeue, dispatch]
   );
-  const minutes = tracks.length * MINUTES_PER_TRACK;
+  // played minutes from real durations (estimates when missing) at the chosen play fraction
+  const minutes = Math.round(setPlayedMinutes(tracks, playFraction));
 
   return (
     <div className="flex min-h-screen flex-col bg-[#12141C] font-[family-name:var(--font-body)] text-[#E8E4DA]">

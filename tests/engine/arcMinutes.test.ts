@@ -48,7 +48,13 @@ describe('startMinutes / setPlayedMinutes', () => {
     expect(starts).toEqual([0, 3.75, 7.5, 11.25, 15]);
     expect(setPlayedMinutes(tracks)).toBe(20);
   });
-  it('takes the duration source as a parameter (Task 1 durationOf plugs in here)', () => {
+  it('a track with no duration uses its durationOf estimate: extended 6:30, radio edit 3:30', () => {
+    const ext: Track = { id: 'x', artist: 'A', title: 'Song (Extended Mix)', sources: {} };
+    const edit: Track = { id: 'r', artist: 'A', title: 'Song', version: 'Radio Edit', sources: {} };
+    expect(startMinutes([ext, edit, track('z')], 1)).toEqual([0, 6.5, 10]);
+    expect(setPlayedMinutes([ext, edit], 1)).toBe(10);
+  });
+  it('takes the duration source as a parameter', () => {
     expect(startMinutes(set(3), 1, () => 60_000)).toEqual([0, 1, 2]);
   });
   it('clamps an out-of-range play fraction to 50-100%', () => {
@@ -128,6 +134,19 @@ describe('energyTargetAtMinute', () => {
     }
   });
 
+  it('peak-time reset drops at least two levels (rulebook §3 reset), at 60, 120 and 240 min', () => {
+    for (const minutes of [60, 120, 240]) {
+      const pts = Array.from({ length: minutes + 1 }, (_, m) => energyTargetAtMinute({ minutes, shape: 'peak-time' }, m));
+      const top = pts.indexOf(9); // the first peak, before the reset
+      const peakBefore = Math.max(...pts.slice(0, top + 1));
+      const afterDrop = pts.findIndex((e, i) => i > top && e < pts[i - 1]);
+      let bottom = afterDrop;
+      while (pts[bottom + 1] <= pts[bottom]) bottom++;
+      expect(peakBefore - pts[bottom], `${minutes} min`).toBeGreaterThanOrEqual(2);
+      expect(peakBefore - pts[bottom], `${minutes} min`).toBeLessThanOrEqual(3); // a reset, not a crash
+    }
+  });
+
   it('peak-time runs 7 to 10 with exactly one reset', () => {
     const arc: Arc = { minutes: 120, shape: 'peak-time' };
     const pts = Array.from({ length: 121 }, (_, m) => energyTargetAtMinute(arc, m));
@@ -135,9 +154,13 @@ describe('energyTargetAtMinute', () => {
     expect(Math.min(...pts)).toBe(7);
     expect(Math.max(...pts)).toBe(10);
     expect(pts[120]).toBe(10);
+    // a reset is one rise-to-fall turn; holds on the way down (9, 8, 8, 7) are still the same reset
     let drops = 0;
+    let lastDir = 0;
     for (let i = 1; i < pts.length; i++) {
-      if (pts[i] < pts[i - 1] && !(pts[i - 1] < pts[i - 2])) drops++;
+      const dir = Math.sign(pts[i] - pts[i - 1]);
+      if (dir < 0 && lastDir >= 0) drops++;
+      if (dir !== 0) lastDir = dir;
       expect(pts[i - 1] - pts[i]).toBeLessThanOrEqual(2); // a reset, never a crash
     }
     expect(drops).toBe(1);

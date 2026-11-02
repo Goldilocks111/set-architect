@@ -1,4 +1,5 @@
 import type { Arc, ArcShape } from '@/types/track';
+import { DEFAULT_PLAY_FRACTION } from './duration';
 
 export const ARC_SHAPES: readonly ArcShape[] = ['build', 'journey', 'warm-up', 'peak-time'];
 export const ARC_PRESETS = [30, 60, 90, 120, 180, 240] as const;
@@ -6,8 +7,8 @@ export const ARC_MIN_MINUTES = 15;
 export const ARC_MAX_MINUTES = 480;
 export const DEFAULT_ARC: Arc = { minutes: 60, shape: 'build' };
 
-/** Share of each track actually played before the next one is mixed in. */
-export const DEFAULT_PLAY_FRACTION = 0.75;
+// One default play fraction for the app: it lives with the durations it scales.
+export { DEFAULT_PLAY_FRACTION };
 export const PLAY_FRACTION_MIN = 0.5;
 export const PLAY_FRACTION_MAX = 1;
 
