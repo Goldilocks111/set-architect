@@ -162,7 +162,10 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
     return null;
   }, []);
 
-  /** Mixed In Key values land as manual; danceability is never in a MIK file, so the resolver is asked for it. */
+  /**
+   * Mixed In Key values land as manual. Danceability is never in a MIK file: a row with energy is completed by the
+   * danceability prior (reducer + server cache); anything still missing is asked of the resolver.
+   */
   const applyMik = useCallback(
     (updates: Array<{ id: string; fields: OverrideFields }>) => {
       let next = state;

@@ -90,7 +90,7 @@ describe('Builder with MIK import', () => {
   beforeAll(() => {
     Element.prototype.scrollIntoView = vi.fn();
   });
-  it('enriches a set track from the imported file and re-requests the missing danceability', async () => {
+  it('enriches a set track from the imported file; bpm/key/energy rows are completed by the danceability prior', async () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ tracks: [track('t1', 'Artist A', 'Song One')], template: '60min' }));
     const urls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: RequestInit) => {
@@ -100,11 +100,15 @@ describe('Builder with MIK import', () => {
     }));
     const { container } = render(<Builder demo getSongBpmConfigured={false} />);
     await act(async () => {});
+    const before = urls.length; // the load itself re-requests the incomplete track
     fireEvent.change(container.querySelector('input[type=file]')!, { target: { files: [csv('Artist,Title,Key,BPM,Energy\nArtist A,Song One,8A,126,6')] } });
     await waitFor(() => expect(screen.getByText(/Imported 1, matched 1 in this set/)).toBeInTheDocument());
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
     expect(stored.tracks[0]).toMatchObject({ bpm: 126, camelot: '8A', energy: 6 });
     expect(stored.tracks[0].sources.bpm).toBe('manual');
-    await waitFor(() => expect(urls.some((u) => !u.includes('/override') && u.includes('/api/'))).toBe(true));
+    expect(stored.tracks[0]).toMatchObject({ danceability: 0.75, sources: { danceability: 'estimate-prior' } });
+    expect(stored.tracks[0].unresolved).toBeUndefined();
+    expect(screen.getByText('Complete')).toBeInTheDocument();
+    expect(urls.slice(before).some((u) => u.startsWith('/api/search/resolve'))).toBe(false); // nothing left to resolve
   });
 });

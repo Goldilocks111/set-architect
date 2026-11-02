@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { dataDir } from './dataDir';
-import { ESSENTIALS, missingEssentials, type Essential, type IncompleteReason } from './completeness';
+import { ESSENTIALS, missingEssentials, withDanceabilityPrior, type Essential, type IncompleteReason } from './completeness';
 import type { Track } from '@/types/track';
 
 export interface CacheEntry {
@@ -43,6 +43,16 @@ export function getEntry(key: string): CacheEntry | undefined {
 }
 
 const asTrack = (fields: Partial<Track>): Track => ({ id: '', artist: '', title: '', sources: {}, ...fields });
+
+/** Fills danceability from energy when it is missing (see danceabilityPrior); true when it changed the entry. */
+function fillPrior(e: CacheEntry): boolean {
+  const t = asTrack(e.fields);
+  const filled = withDanceabilityPrior({ ...t, sources: e.sources });
+  if (filled === t || filled.danceability === undefined) return false;
+  e.fields.danceability = filled.danceability;
+  e.sources.danceability = filled.sources.danceability;
+  return true;
+}
 
 /** Re-derives reason from the merged fields: a complete entry carries none. */
 function settle(e: CacheEntry, reason?: IncompleteReason): void {
@@ -92,6 +102,7 @@ function applyManual(cache: Record<string, CacheEntry>, key: string, fields: Par
     (entry.fields as Record<string, unknown>)[f] = v;
     entry.sources[f] = 'manual';
   }
+  fillPrior(entry); // a MIK/manual row with energy is complete without asking any provider for danceability
   settle(entry);
   cache[key] = entry;
   return entry;
@@ -110,6 +121,16 @@ export function putManualMany(items: Array<{ key: string; fields: Partial<Pick<T
   const entries = items.map(({ key, fields }) => applyManual(cache, key, fields));
   if (items.length) write(cache);
   return entries;
+}
+
+/** Resolution is done for this track: fill the danceability prior if it applies and persist it. */
+export function putPrior(key: string): CacheEntry | undefined {
+  const cache = read();
+  const e = cache[key];
+  if (!e || !fillPrior(e)) return e;
+  settle(e);
+  write(cache);
+  return e;
 }
 
 /** Records (or clears) when the re-resolve queue will next try this track. */

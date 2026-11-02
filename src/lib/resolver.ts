@@ -1,6 +1,6 @@
 import { trackKeyOf, type Track } from '@/types/track';
 import { ESSENTIALS, RETRYABLE_REASONS, missingEssentials, type IncompleteReason } from './completeness';
-import { getEntry, putResolved } from './metadataCache';
+import { getEntry, putPrior, putResolved, type CacheEntry } from './metadataCache';
 import { scheduleRetry } from './reresolve';
 import { searchDemoTracks } from './demo';
 import { withTimeout } from './http';
@@ -145,6 +145,9 @@ function reasonFor(track: Track, run: ResolveRun): IncompleteReason {
   return 'analysis-failed';
 }
 
+/** `base` with a cache entry's fields and sources laid over it. */
+const fromEntry = (base: Track, entry: CacheEntry): Track => ({ ...base, ...entry.fields, sources: { ...base.sources, ...entry.sources } });
+
 export const RESOLVE_BUDGET_MS = 45_000;
 const NEGATIVE_CACHE_MS = 24 * 60 * 60_000;
 
@@ -190,8 +193,13 @@ export async function resolveWithStatus(
       const retryable = RETRYABLE_REASONS.includes(cached.reason) && cached.retryAt !== undefined;
       const until = retryable ? cached.retryAt! : cached.resolvedAt + NEGATIVE_CACHE_MS;
       if (until > Date.now()) {
-        fromCache.unresolved = { reason: cached.reason, missing: missingNow, ...(cached.retryAt ? { retryAt: cached.retryAt } : {}) };
-        return fromCache;
+        // nothing more is coming for this track (permanent reason or retries exhausted): the danceability prior may complete it
+        const filled = retryable ? undefined : putPrior(key);
+        const served = filled ? fromEntry(fromCache, filled) : fromCache;
+        const missing = missingEssentials(served);
+        if (!missing.length) return withFreshPreview(served, budgetMs);
+        served.unresolved = { reason: cached.reason, missing, ...(cached.retryAt ? { retryAt: cached.retryAt } : {}) };
+        return served;
       }
     }
   }
@@ -224,6 +232,17 @@ export async function resolveWithStatus(
     // after putResolved: the backoff step is picked from the entry's attempt count
     const retryAt = scheduleRetry(artist, title, merged.unresolved.reason);
     if (retryAt !== undefined) merged.unresolved = { ...merged.unresolved, retryAt };
+    else {
+      // resolution is done: fill the danceability prior if energy is known
+      const filled = putPrior(key);
+      if (filled) {
+        const out = fromEntry(merged, filled);
+        const still = missingEssentials(out);
+        if (still.length) out.unresolved = { ...merged.unresolved, missing: still };
+        else delete out.unresolved;
+        return out;
+      }
+    }
   }
   return merged;
 }

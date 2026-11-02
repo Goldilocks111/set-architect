@@ -21,3 +21,20 @@ export function missingEssentials(t: Track): Essential[] {
 export function isComplete(t: Track): boolean {
   return missingEssentials(t).length === 0;
 }
+
+/** Source label for a danceability filled from energy because no provider or analysis supplied one. */
+export const DANCEABILITY_PRIOR_SOURCE = 'estimate-prior';
+
+/**
+ * Owner ruling (final review I3): local danceability is no better than a constant, so a track whose danceability is
+ * still missing after resolution, but whose energy is known, gets clamp(0.45 + 0.05 × energy, 0, 1) to 2 dp.
+ */
+export function danceabilityPrior(energy: number): number {
+  return Math.round(Math.min(1, Math.max(0, 0.45 + 0.05 * energy)) * 100) / 100;
+}
+
+/** Fills a missing danceability from energy (never replaces a value); returns `t` itself when nothing changes. */
+export function withDanceabilityPrior(t: Track): Track {
+  if (present(t, 'danceability') || !present(t, 'energy')) return t;
+  return { ...t, danceability: danceabilityPrior(t.energy!), sources: { ...t.sources, danceability: DANCEABILITY_PRIOR_SOURCE } };
+}
