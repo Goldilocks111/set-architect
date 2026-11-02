@@ -69,3 +69,12 @@ forbids it explicitly and nothing is stored. **A paid product (Stripe plumbing e
 from Content commercially. Before any paid launch, get Deezer's written approval under §IX, or move key/energy analysis to a
 licensed source (SoundStat, or user-supplied audio). The quotes came through a page-to-text tool, so check the wording on the live
 page before relying on it.
+
+## 6. Erratum (2026-11-02, later the same day)
+The Deezer and Spotify enrichment adapters accepted the first result by the right **artist** without
+checking the title, so for a track a provider lacked, another song by that artist could supply the
+preview (→ local key/energy/danceability) and the Spotify id (→ ReccoBeats reference values). Fixed in
+Phase 3 Task 8 (`src/lib/sources/match.ts`: artist + title + version identity). Some rows of the run in
+§1–§3 may therefore compare the wrong recordings; the accuracy numbers are provisional until the
+Phase 1 acceptance run (cold cache, fixed matcher) and a re-run of the U2 bench reproduce them.
+Pre-fix caches were moved to `~/.setarchitect/backup-2026-11-02-prematchfix/`.

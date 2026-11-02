@@ -139,3 +139,11 @@ through subagents working off `docs/specs/build-plan.md`.
     always run tsc after every merge, not just tests.
   - A test asserting random ciphertext lacks a 2-letter string fails ~4% of runs — flaky tests
     can be real test bugs, not load.
+- 2026-11-02 (Phase 3 Task 8): blind A/B rating made fair (lane+tempo-matched baseline, one naming
+  rule per scenario, unique run ids); engine caps 2 tracks per primary artist in the top 10.
+  DATA BUG found + fixed: Deezer/Spotify enrichment matched on artist only, so a missing track could
+  take another song's preview/Spotify id (→ wrong BPM/key/energy). New recording matcher
+  `src/lib/sources/match.ts` (parseVersion-based: base title + version kind + remixer; edits/extended/
+  12"/remaster = same recording). Pre-fix caches moved to ~/.setarchitect/backup-2026-11-02-prematchfix;
+  U2 accuracy numbers flagged provisional (erratum in docs/research/data-yield-bench.md §6).
+  Lesson: "first hit by the right artist" is never a match — always verify title + version.
