@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ArcTemplate, Suggestion, Track } from '@/types/track';
 import { crateForRequest, EMPTY_CRATE_COPY, isCrateComplete, type CrateKnownItem, type CrateTrack } from './crate';
+import { isInSet, recordingKeys } from './recordingKeys';
 import RadioControl, { RADIO_COUNTDOWN_S, radioPick, RadioStatus } from './RadioControl';
 import SuggestionCard from './SuggestionCard';
 import { displayTitle } from './trackFormat';
@@ -48,6 +49,9 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd, 
   const sectionRef = useRef<HTMLElement>(null);
   const proposed = useRef(new Set<string>());
   const radioAdded = useRef<string | null>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const watchdog = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(watchdog.current), []);
   const prevShape = useRef('');
   const last = tracks[tracks.length - 1];
   const lastKey = last ? `${last.artist}|${last.title}` : '';
@@ -117,6 +121,7 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd, 
   }, [shapeKey, dataKey, crateKey, template, plannedLength, retry, lastKey]);
 
   const stopRadio = useCallback((why = '') => {
+    clearTimeout(watchdog.current);
     setRadio(false);
     setCountdown(null);
     setRadioNote(why);
@@ -136,31 +141,32 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd, 
     if (!radio || before === shapeKey) return;
     const own = radioAdded.current !== null && shapeKey === `${before}\n${radioAdded.current}`.replace(/^\n/, '');
     radioAdded.current = null;
+    if (own) clearTimeout(watchdog.current);
     if (!own) stopRadio('Radio stopped: the set changed.');
   }, [shapeKey, radio, stopRadio]);
 
-  // Using the search box (or anything else outside this panel) also stops it.
+  // Focusing or typing in the search box means the owner is steering. (Clicks elsewhere, previews, scrolling don't.)
   useEffect(() => {
     if (!radio) return;
-    const outside = (e: Event) => {
+    const onSearch = (e: Event) => {
       const el = e.target as HTMLElement | null;
-      return !!el && !sectionRef.current?.contains(el);
+      if (el?.closest?.('[role="combobox"]') && !sectionRef.current?.contains(el)) stopRadio('Radio stopped: you took over.');
     };
-    const onPointer = (e: Event) => outside(e) && stopRadio('Radio stopped: you took over.');
-    const onKey = (e: Event) => {
-      const el = e.target as HTMLElement | null;
-      if (el && outside(e) && (el.closest('input,textarea,select') || el.isContentEditable)) stopRadio('Radio stopped: you took over.');
-    };
-    document.addEventListener('pointerdown', onPointer, true);
-    document.addEventListener('keydown', onKey, true);
+    document.addEventListener('focusin', onSearch, true);
+    document.addEventListener('keydown', onSearch, true);
     return () => {
-      document.removeEventListener('pointerdown', onPointer, true);
-      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('focusin', onSearch, true);
+      document.removeEventListener('keydown', onSearch, true);
     };
   }, [radio, stopRadio]);
 
   // Radio: once suggestions are fresh for the current set and nothing is in flight, count down, then add the pick.
-  const pick = useMemo(() => radioPick(suggestions), [suggestions]);
+  // a recording already in the set (under another id) would make add() a no-op: skip it
+  const pick = useMemo(() => {
+    const inSet = new Set(latest.current.flatMap(recordingKeys));
+    return radioPick(suggestions.filter((s) => !isInSet(inSet, s.track)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suggestions, shapeKey]);
   const fresh = status === 'done' && suggestedFor === shapeKey;
   const pickId = pick?.track.id;
   useEffect(() => {
@@ -180,7 +186,13 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd, 
       setCountdown(null);
       proposed.current.add(pick.track.id);
       radioAdded.current = pick.track.id;
+      const before = latest.current.length;
       onAdd(pick.track);
+      // add() ignores a recording the set already has: don't sit "on" silently
+      clearTimeout(watchdog.current);
+      watchdog.current = setTimeout(() => {
+        if (latest.current.length <= before) stopRadio(`Radio stopped — couldn't add ${displayTitle(pick.track)}`);
+      }, 2000);
     }, 1000);
     return () => {
       clearInterval(timer);
@@ -198,10 +210,13 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd, 
         </h2>
         <span className="flex items-baseline gap-2">
           {status === 'loading' && <span className="text-xs text-[#8A8FA3]">Scoring…</span>}
-          <RadioControl on={radio} onToggle={toggleRadio} />
+          <RadioControl on={radio} onToggle={toggleRadio} toggleRef={toggleRef} />
         </span>
       </header>
-      <RadioStatus on={radio} pending={countdown} note={radioNote} onCancel={() => stopRadio('Radio cancelled.')} />
+      <RadioStatus on={radio} pending={countdown} note={radioNote} onCancel={() => {
+          stopRadio('Radio cancelled.');
+          toggleRef.current?.focus();
+        }} />
       {digging && (
         <p className="mb-1 text-xs italic text-[#8A8FA3]">
           Digging through real DJ sets… suggestions improve as sets are indexed

@@ -32,7 +32,9 @@ function Harness({ planned = 3, busy = false }: { planned?: number; busy?: boole
   return (
     <div>
       <button onClick={() => setTracks((p) => [...p, t('manual')])}>manual add</button>
-      <input aria-label="search" />
+      <h1>page header</h1>
+      <button>preview</button>
+      <input aria-label="search" role="combobox" />
       <SuggestionBox
         tracks={tracks}
         template="60min"
@@ -82,7 +84,8 @@ describe('Radio mode', () => {
     expect(status).toHaveAttribute('aria-live', 'polite');
     expect(status.textContent).toMatch(/Adding T c1 in 4/);
     await tick(1000);
-    expect(status.textContent).toMatch(/in 3/);
+    expect(screen.getByTestId('radio-countdown').textContent).toMatch(/in 3/);
+    expect(status.textContent).toMatch(/in 4 seconds/); // announced once, not every tick
     await tick(2900);
     expect(added).toEqual([]);
     await tick(200);
@@ -123,11 +126,33 @@ describe('Radio mode', () => {
     expect(screen.getByRole('switch', { name: /radio/i })).toHaveAttribute('aria-checked', 'false');
   });
 
-  it('stops when the user interacts with search', async () => {
+  it('does not stop for clicks on a preview button or the page header', async () => {
     render(<Harness planned={5} />);
     await radioOn();
     await tick(1000);
-    fireEvent.keyDown(screen.getByLabelText('search'), { key: 'a' });
+    fireEvent.pointerDown(screen.getByText('page header'));
+    fireEvent.pointerDown(screen.getByText('preview'));
+    fireEvent.click(screen.getByText('preview'));
+    await tick(4_000);
+    expect(added).toEqual(['c1']);
+    expect(screen.getByRole('switch', { name: /radio/i })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('stops when the user focuses the search box', async () => {
+    render(<Harness planned={5} />);
+    await radioOn();
+    await tick(1000);
+    fireEvent.focusIn(screen.getByRole('combobox'));
+    await tick(10_000);
+    expect(added).toEqual([]);
+    expect(screen.getByRole('switch', { name: /radio/i })).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('stops when the user types in search', async () => {
+    render(<Harness planned={5} />);
+    await radioOn();
+    await tick(1000);
+    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'a' });
     await tick(10_000);
     expect(added).toEqual([]);
     expect(screen.getByRole('switch', { name: /radio/i })).toHaveAttribute('aria-checked', 'false');
@@ -162,6 +187,60 @@ describe('Radio mode', () => {
     await tick(10_000);
     expect(added).toEqual(['dup']);
     expect(screen.getByRole('switch', { name: /radio/i })).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('skips a pick that is the same recording as a track in the set under another id', async () => {
+    const dupe = sug('other-id');
+    dupe.track = { ...dupe.track, artist: 'A a', title: 'T a' }; // same artist/title as set track 'a'
+    respond = (pl) => ok([dupe, sug(`c${pl.length}`)]);
+    render(<Harness planned={5} />);
+    await radioOn();
+    await tick(4_200);
+    expect(added).toEqual(['c1']);
+  });
+
+  it('stops visibly if the set does not grow after radio adds', async () => {
+    function Stuck() {
+      return <SuggestionBox tracks={[t('a')]} template="60min" plannedLength={5} onAdd={(x) => added.push(x.id)} />;
+    }
+    render(<Stuck />);
+    await radioOn();
+    await tick(4_200);
+    expect(added).toEqual(['c1']);
+    await tick(2_200);
+    expect(screen.getByRole('switch', { name: /radio/i })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('status').textContent).toMatch(/Radio stopped — couldn't add T c1/);
+  });
+
+  it('returns focus to the Radio toggle after Cancel', async () => {
+    render(<Harness planned={5} />);
+    await radioOn();
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+    expect(screen.getByRole('switch', { name: /radio/i })).toHaveFocus();
+  });
+
+  it('unmounting mid-countdown fires nothing', async () => {
+    const { unmount } = render(<Harness planned={5} />);
+    await radioOn();
+    await tick(1000);
+    unmount();
+    await tick(10_000);
+    expect(added).toEqual([]);
+  });
+
+  it('a refresh that changes the top pick restarts the countdown for the new pick, never adding the stale one', async () => {
+    let top = 'old';
+    respond = () => ok([sug(top)]);
+    const { rerender } = render(<Harness planned={5} />);
+    await radioOn();
+    await tick(2_000);
+    top = 'new';
+    // an enrichment-style refresh: same ids, new data -> new suggestions for the same set
+    await act(async () => { rerender(<Harness planned={6} />); });
+    await tick(500);
+    expect(screen.getByRole('status').textContent).toMatch(/Adding T new/);
+    await tick(4_200);
+    expect(added).toEqual(['new']);
   });
 
   it('waits while the add queue is busy (no parallel adds)', async () => {

@@ -1,5 +1,6 @@
 'use client';
 
+import type { Ref } from 'react';
 import type { Suggestion } from '@/types/track';
 import { displayTitle } from './trackFormat';
 
@@ -35,9 +36,10 @@ interface Props {
   onCancel: () => void;
 }
 
-export default function RadioControl({ on, onToggle }: Pick<Props, 'on' | 'onToggle'>) {
+export default function RadioControl({ on, onToggle, toggleRef }: Pick<Props, 'on' | 'onToggle'> & { toggleRef?: Ref<HTMLButtonElement> }) {
   return (
       <button
+        ref={toggleRef}
         type="button"
         role="switch"
         aria-checked={on}
@@ -52,13 +54,22 @@ export default function RadioControl({ on, onToggle }: Pick<Props, 'on' | 'onTog
   );
 }
 
-/** The polite live region under the header: countdown with Cancel, or why radio stopped. */
+/**
+ * Under the header. The live region only changes when a pick starts (announced once, not every second);
+ * the ticking countdown and Cancel sit beside it, hidden from the announcer.
+ */
 export function RadioStatus({ on, pending, note, onCancel }: Pick<Props, 'on' | 'pending' | 'note' | 'onCancel'>) {
+  const counting = on && pending;
   return (
-    <div role="status" aria-live="polite" className={on || note ? 'mb-2 text-xs text-[#8A8FA3]' : 'sr-only'}>
-      {on && pending && (
+    <div className={on || note ? 'mb-2 text-xs text-[#8A8FA3]' : 'sr-only'}>
+      <span role="status" aria-live="polite" className={counting ? 'sr-only' : undefined}>
+        {counting ? `Adding ${displayTitle(pending.suggestion.track)} in ${RADIO_COUNTDOWN_S} seconds. Cancel is available.` : note}
+      </span>
+      {counting && (
         <>
-          Adding <span className="text-[#E8E4DA]">{displayTitle(pending.suggestion.track)}</span> in {pending.seconds}…{' '}
+          <span aria-hidden data-testid="radio-countdown">
+            Adding <span className="text-[#E8E4DA]">{displayTitle(pending.suggestion.track)}</span> in {pending.seconds}…
+          </span>{' '}
           <button
             type="button"
             onClick={onCancel}
@@ -68,7 +79,6 @@ export function RadioStatus({ on, pending, note, onCancel }: Pick<Props, 'on' | 
           </button>
         </>
       )}
-      {!(on && pending) && note}
     </div>
   );
 }
