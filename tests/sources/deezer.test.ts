@@ -65,4 +65,17 @@ describe('deezer', () => {
     expect(t.sources.previewUrl).toBe('deezer');
   });
   it('is always configured', () => expect(deezerAdapter.configured()).toBe(true));
+  it('a hit by the right artist but a different song is rejected: its preview/isrc/popularity never reach the cache', async () => {
+    mockFetch([['/search', () => json({ data: [{ ...hit, id: 7, title: 'Harder Better Faster Stronger', preview: 'https://cdn/wrong.mp3' }] })]]);
+    expect(await deezerAdapter.enrich(base())).toEqual({});
+  });
+  it('picks the right song when the wrong one ranks first; (Original Mix) and (feat. X) variants still match', async () => {
+    mockFetch([
+      ['/track/', () => json({}, 404)],
+      ['/search', () => json({ data: [{ ...hit, id: 7, title: 'Aerodynamic', preview: 'wrong' }, { ...hit, title: 'One More Time (Original Mix)' }] })],
+    ]);
+    expect((await deezerAdapter.enrich(base())).previewUrl).toBe('https://cdn/p.mp3');
+    mockFetch([['/track/', () => json({}, 404)], ['/search', () => json({ data: [{ ...hit, title: 'One More Time (feat. Romanthony)' }] })]]);
+    expect((await deezerAdapter.enrich(base())).previewUrl).toBe('https://cdn/p.mp3');
+  });
 });

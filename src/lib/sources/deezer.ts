@@ -1,4 +1,5 @@
 import type { Track } from '@/types/track';
+import { titleMatches } from './match';
 import { fetchJson } from '../http';
 import type { SourceAdapter } from './types';
 
@@ -74,7 +75,7 @@ async function findHit(partial: Track): Promise<DeezerTrack | undefined> {
       const res = await fetchJson<{ data?: DeezerTrack[] }>(
         `${BASE}/search?q=${encodeURIComponent(q)}&limit=5`
       );
-      const hit = (res.data ?? []).find((t) => artistMatches(partial.artist, t.artist?.name));
+      const hit = (res.data ?? []).find((t) => artistMatches(partial.artist, t.artist?.name) && titleMatches(partial.title, t.title, partial.artist));
       if (hit) return hit;
     } catch (err) {
       if (q === attempts[0]) throw err;
@@ -90,6 +91,8 @@ export const deezerAdapter: SourceAdapter = {
     const hit = await findHit(partial);
     if (!hit) return {};
     const out = mapTrack(hit);
+    // the provider's own spelling: the resolver keeps it as the display name (it never replaces the caller's artist/title)
+    if (hit.artist?.name && hit.title) Object.assign(out, { artist: hit.artist.name, title: hit.title });
     try {
       // Search results omit release_date; the track endpoint has it.
       const detail = await fetchJson<DeezerTrack>(`${BASE}/track/${hit.id}`);

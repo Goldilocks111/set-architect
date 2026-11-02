@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_WEIGHTS, suggestNext } from '@/engine/suggest';
+import { DEFAULT_WEIGHTS, primaryArtist, suggestNext } from '@/engine/suggest';
 import { trackKeyOf, type Track } from '@/types/track';
 
 const t = (id: string, o: Partial<Track> = {}): Track => ({
@@ -297,6 +297,55 @@ describe('suggestNext', () => {
         expect(all.filter((s) => s.compliant)).toHaveLength(10);
       }
       expect(checked).toBeGreaterThan(50);
+    });
+  });
+
+  describe('artist diversity (at most 2 per primary artist)', () => {
+    const lastT = t('last', { bpm: 128, camelot: '8A', energy: 5 });
+    const good = { bpm: 128, camelot: '8A', energy: 5 };
+    it('primaryArtist splits credits on whole words only', () => {
+      for (const a of ['Featurecast', 'Ftampa', 'Vsevolod', 'X-Press 2', 'Xavier']) expect(primaryArtist(a), a).toBe(trackKeyOf(a, '').split('|')[0]);
+      expect(primaryArtist('Same DJ feat. X')).toBe('same dj');
+      expect(primaryArtist('A ft. B')).toBe('a');
+      expect(primaryArtist('A vs. B')).toBe('a');
+      expect(primaryArtist('A x B')).toBe('a');
+      expect(primaryArtist('A, B')).toBe('a');
+      expect(primaryArtist('A & B')).toBe('a');
+      // an empty first credit falls back to the whole normalized artist
+      expect(primaryArtist('&ME')).toBe('me');
+      expect(primaryArtist('Ft. Lauderdale')).toBe('ft lauderdale');
+      expect(primaryArtist(', ')).toBe('');
+    });
+    it('5 same-artist high scorers: only 2 reach the top 10, the rest fill from further down', () => {
+      const same = Array.from({ length: 5 }, (_, i) => t(`s${i}`, { artist: 'Same DJ', ...good }));
+      const others = Array.from({ length: 10 }, (_, i) => t(`o${i}`, { bpm: 129, camelot: '8A', energy: 5 }));
+      const out = suggestNext({ ...base, playlist: [lastT], candidates: [...same, ...others] });
+      expect(out).toHaveLength(10);
+      expect(out.filter((s) => s.track.artist === 'Same DJ')).toHaveLength(2);
+    });
+    it('primary artist = first credit, normalized ("Same DJ feat. X", "same dj & Y" count as Same DJ)', () => {
+      const cs = ['Same DJ feat. X', 'same dj & Y', 'SAME DJ', 'Same DJ x Z'].map((a, i) => t(`c${i}`, { artist: a, ...good }));
+      const others = Array.from({ length: 6 }, (_, i) => t(`o${i}`, { bpm: 129, camelot: '8A', energy: 5 }));
+      const out = suggestNext({ ...base, playlist: [lastT], candidates: [...cs, ...others] });
+      expect(out.filter((s) => /same dj/i.test(s.track.artist))).toHaveLength(2);
+    });
+    it('compliance-first still holds when enough compliant tracks from distinct artists exist', () => {
+      const compliantSame = Array.from({ length: 4 }, (_, i) => t(`cs${i}`, { artist: 'Same DJ', ...good }));
+      const compliantOthers = Array.from({ length: 8 }, (_, i) => t(`co${i}`, { bpm: 129, camelot: '8A', energy: 5 }));
+      const off = Array.from({ length: 5 }, (_, i) => t(`x${i}`, { bpm: 90, camelot: '2B', energy: 9 }));
+      const out = suggestNext({ ...base, playlist: [lastT], candidates: [...off, ...compliantSame, ...compliantOthers] });
+      expect(out).toHaveLength(10);
+      expect(out.every((s) => s.compliant)).toBe(true);
+      const firstNon = out.findIndex((s) => !s.compliant);
+      expect(firstNon).toBe(-1);
+    });
+    it('a compliant candidate never ranks below a non-compliant one after the cap', () => {
+      const compliantSame = Array.from({ length: 4 }, (_, i) => t(`cs${i}`, { artist: 'Same DJ', ...good }));
+      const off = Array.from({ length: 8 }, (_, i) => t(`x${i}`, { bpm: 90, camelot: '2B', energy: 9 }));
+      const out = suggestNext({ ...base, playlist: [lastT], candidates: [...off, ...compliantSame] });
+      expect(out.filter((s) => s.compliant)).toHaveLength(2);
+      const flags = out.map((s) => Number(!!s.compliant));
+      expect(flags).toEqual([...flags].sort((a, b) => b - a));
     });
   });
 });

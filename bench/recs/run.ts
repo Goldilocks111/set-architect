@@ -4,7 +4,7 @@ import { dataDir, dataRoot } from '../../src/lib/dataDir';
 import { activeCooldowns, degradedProviders, readCooldowns } from '../data/cooldowns';
 import { createFetchGuard } from '../data/guardFetch';
 import { RequestGate, dayKey, loadDailyCounts, saveDailyCounts } from '../search/guard';
-import { SHUFFLE_SEED, TOP_N, BENCH_WITHOUT, warmStep, RECS_BUDGET, poolLimitedScenarios, withCrates, auditCrate, buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, isWarmEntry, selectWarmTargets, warmStylesMode, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
+import { TOP_N, MAX_OFF_TEMPO, makeRunId, writesRating, BENCH_WITHOUT, warmStep, RECS_BUDGET, poolLimitedScenarios, withCrates, auditCrate, buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, isWarmEntry, selectWarmTargets, warmStylesMode, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
 import type { Suggestion, Track } from '../../src/types/track';
 
 try {
@@ -45,6 +45,7 @@ async function main(): Promise<void> {
   }
 
   const day = dayKey();
+  const runId = makeRunId(day, new Date()); // names this run's results + rating files and namespaces its A/B key
   const dailyFile = dataDir('search', 'bench-requests.json');
   mkdirSync(dirname(dailyFile), { recursive: true });
   const store = {
@@ -126,7 +127,7 @@ async function main(): Promise<void> {
   setReresolveDeps({ setTimer: () => undefined });
 
   const toCrate = (r: { artist: string; title: string }, i: number): Track => ({ id: `crate-${i}`, artist: r.artist, title: r.title, sources: {} });
-  const results: Array<{ scenario: Scenario; suggestions: Suggestion[]; crate: Array<{ artist: string; title: string; bpm?: number }>; lastBpm?: number }> = [];
+  const results: Array<{ scenario: Scenario; suggestions: Suggestion[]; crate: Array<{ artist: string; title: string; bpm?: number; styles?: string[] }>; lastBpm?: number }> = [];
   const rows: Array<ScenarioScore & Record<string, unknown> & { id: string; crateReady: number; crateSize: number; compliantAvailable: number }> = [];
   for (const [i, sc] of subset.entries()) {
     const t0 = Date.now();
@@ -150,7 +151,10 @@ async function main(): Promise<void> {
     );
     // the baseline list draws from the same crate, tempo-matched to the last set track that has a BPM
     const lastBpm = [...playlist].reverse().find((t) => t.bpm !== undefined)?.bpm;
-    const crateBpm = (sc.crate ?? []).map((c) => ({ artist: c.artist, title: c.title, bpm: getEntry(trackKeyOf(c.artist, c.title))?.fields.bpm }));
+    const crateBpm = (sc.crate ?? []).map((c) => {
+      const f = getEntry(trackKeyOf(c.artist, c.title))?.fields;
+      return { artist: c.artist, title: c.title, bpm: f?.bpm, styles: f?.styles };
+    });
     results.push({ scenario: sc, suggestions, crate: crateBpm, lastBpm });
     rows.push({
       id: sc.id, lane: sc.lane, setSize: sc.set.length, incompleteInSet: incomplete, crateReady: crateKnown.length, crateSize: (sc.crate ?? []).length, compliantAvailable, poolLimited: compliantAvailable < TOP_N, ...score, audit, pass: criterion3Holds(score),
@@ -175,12 +179,36 @@ async function main(): Promise<void> {
   if (stopped.length) console.log(`Stopped: ${[...guard.stopped].map(([k, v]) => `${k} (${v})`).join('; ')}`);
   if (cooldowns.length) console.log(`Breaker cooling down (start or during run): ${cooldowns.join(', ')}`);
 
-  const out = join(here, 'results', `${day}.json`);
+  const out = join(here, 'results', `${runId}.json`);
   mkdirSync(dirname(out), { recursive: true });
+  const base = { day, runId, status, stopped: Object.fromEntries(guard.stopped), refused: guard.refused, summary: sum, poolLimited, rows };
+  if (!writesRating(LIMIT)) {
+    // smoke run: no rating file and no key, so it can neither overwrite nor reveal a full run's
+    writeFileSync(out, JSON.stringify(base, null, 2));
+    console.log(`\nWrote ${out} (smoke run: no rating file)`);
+    return;
+  }
+  // Lane membership for the baseline: the scenario lane's pool, or cached styles containing it (added in the crate rows).
+  const poolKeys = Object.fromEntries(Object.entries(POOLS).map(([lane, list]) => [lane, new Set(list.map((t) => trackKeyOf(t.artist, t.title)))]));
+  // Names: the provider's display name (cache) when every track on a scenario's sheet has one, else one key-derived
+  // spelling for the whole scenario. Lookups only for tracks that will appear on the sheet (set + both lists).
+  const provider = (t: { artist: string; title: string }) => getEntry(trackKeyOf(t.artist, t.title))?.display;
+  const draft = buildRatingFile(results, { fileId: runId, lanePool: (lane) => poolKeys[lane] ?? new Set() }); // same picks as the final file; only the spelling differs
+  const onSheet = new Map<string, { artist: string; title: string }>();
+  for (const s of draft.file.scenarios) for (const t of [...s.set, ...s.lists.flatMap((l) => l.tracks)]) onSheet.set(trackKeyOf(t.artist, t.title), t);
+  const missingNames = [...onSheet.values()].filter((t) => !provider(t));
+  console.log(`names: ${onSheet.size - missingNames.length}/${onSheet.size} sheet tracks have a provider display name; looking up ${missingNames.length}`);
+  for (const t of missingNames) {
+    if (guard.stopped.has('deezer') || 'deezer' in guard.refused) break;
+    await resolveWithStatus(t.artist, t.title, { without: [...BENCH_WITHOUT, 'spotify', 'reccobeats', 'musicbrainz', 'getsongbpm', 'soundstat'] });
+  }
   // The key (which list is the engine) lives here only; the rating file the owner sees has List A / List B.
-  const rating = buildRatingFile(results, { fileId: `${day}-${SHUFFLE_SEED}` });
-  writeFileSync(out, JSON.stringify({ day, status, stopped: Object.fromEntries(guard.stopped), refused: guard.refused, summary: sum, poolLimited, rows, ratingFileId: rating.file.fileId, ratingKey: rating.key }, null, 2));
-  const ratingOut = join(here, 'results', `${day}-rating.json`);
+  const rating = buildRatingFile(results, { fileId: runId, lanePool: (lane) => poolKeys[lane] ?? new Set(), provider });
+  for (const [id, mode] of Object.entries(rating.naming)) if (mode === 'pool') console.log(`naming: ${id} uses the uniform key spelling for every track (a sheet track has no provider display name)`);
+  console.log(`baseline off-tempo tracks drawn: ${Object.entries(rating.offTempo).map(([id, n]) => `${id} ${n}`).join(', ')} (> ${MAX_OFF_TEMPO} trims both lists)`);
+  for (const sh of rating.short) console.log(`baselineShort: ${sh.id}: engine ${sh.engine}, baseline ${sh.baseline} -> both lists trimmed to ${sh.used}`);
+  writeFileSync(out, JSON.stringify({ ...base, baselineShort: rating.short, baselineOffTempo: rating.offTempo, namingMode: rating.naming, ratingFileId: rating.file.fileId, ratingKey: rating.key }, null, 2));
+  const ratingOut = join(here, 'results', `${runId}-rating.json`);
   writeFileSync(ratingOut, JSON.stringify(rating.file, null, 2));
   console.log(`\nWrote ${out}\nWrote ${ratingOut} (blind: hand this to the owner, open /rate in dev; score the export with npm run bench:recs:ratings -- <export.json> ${out})`);
 }

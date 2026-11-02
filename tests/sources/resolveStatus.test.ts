@@ -7,7 +7,7 @@ import { json, mockFetch } from './helpers';
 const analysePreview = vi.fn();
 vi.mock('@/lib/analysis/previewAnalysis', () => ({ analysePreview: (...a: unknown[]) => analysePreview(...a), ANALYSIS_TIMEOUT_MS: 5000 }));
 
-import { queueStyles, resolveWithStatus, settleStyles, STYLES_QUEUE_CAP } from '@/lib/resolver';
+import { queueStyles, resolveWithStatus, settleStyles, stylesFillOpen, STYLES_FILL_MAX_QUEUE, STYLES_QUEUE_CAP } from '@/lib/resolver';
 import { configureLastfmPacing, resetLastfmTags } from '@/lib/sources/lastfmTags';
 import { getEntry, putManual, putResolved } from '@/lib/metadataCache';
 import { dataDir } from '@/lib/dataDir';
@@ -355,6 +355,7 @@ describe('styles queue', () => {
     const at: number[] = [];
     mockFetch([['audioscrobbler', async () => {
       at.push(Date.now());
+      resetBudgets(); // the 120/min budget and its 50% styles floor are not under test here
       maxInflight = Math.max(maxInflight, ++inflight);
       await new Promise((r) => setTimeout(r, 5));
       inflight--;
@@ -385,6 +386,36 @@ describe('styles queue', () => {
     expect(getEntry(trackKeyOf('Art2', 'Trk2'))?.fields.styles).toBeUndefined();
     expect(getEntry(trackKeyOf('Art209', 'Trk209'))?.fields.styles).toEqual(['techno', 'house']);
   }, 20_000);
+
+  it('a styles job spends nothing once Last.fm headroom is under 50% (70/120 used); a similarity lookup still can', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    const f = mockFetch([['audioscrobbler', () => two()]]);
+    for (let i = 0; i < 70; i++) expect(takeBudget('lastfm', { app: true })).toBe(true);
+    const t = seed(900);
+    expect(stylesFillOpen()).toBe(false);
+    queueStyles(t);
+    await settleStyles();
+    expect(f).not.toHaveBeenCalled();
+    expect(getEntry(trackKeyOf(t.artist, t.title))?.stylesCheckedAt).toBeUndefined(); // skipped, not marked: its next resolve re-queues it
+    expect(getEntry(trackKeyOf(t.artist, t.title))?.fields.styles).toBeUndefined();
+    expect(cooldownUntil('lastfm')).toBe(0);
+    expect(takeBudget('lastfm', { app: true })).toBe(true); // similarity is not starved
+  });
+
+  it('stylesFillOpen: queue under its fill limit AND Last.fm headroom >= 50%', async () => {
+    expect(stylesFillOpen()).toBe(true);
+    for (let i = 0; i < 61; i++) takeBudget('lastfm', { app: true });
+    expect(stylesFillOpen()).toBe(false);
+    resetBudgets();
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    mockFetch([['audioscrobbler', async () => { await gate; return two(); }]]);
+    for (let i = 0; i < 2 + STYLES_FILL_MAX_QUEUE; i++) queueStyles(seed(1000 + i));
+    expect(stylesFillOpen()).toBe(false);
+    release();
+    await settleStyles();
+  });
 
   it('queueStyles failures never fail resolveWithStatus', async () => {
     vi.stubEnv('LASTFM_API_KEY', 'k');

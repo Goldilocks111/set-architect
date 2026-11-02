@@ -73,6 +73,23 @@ describe('RatingSession', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('the YouTube link is the same label and a search URL for every track, before and after a preview is found', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ track: { artist: 'Artist A3', title: 'Track 0-A3', previewUrl: 'https://cdn-preview.dzcdn.net/x.mp3', youtubeUrl: 'https://www.youtube.com/watch?v=abc123', sources: {} } }))));
+    render(<RatingSession />);
+    await screen.findByLabelText('Rating file');
+    await upload(mkFile(1));
+    await screen.findByText('Scenario 0');
+    const a = screen.getByRole('region', { name: 'List A' });
+    fireEvent.click(within(a).getAllByRole('button', { name: /Find a preview/ })[3]);
+    await waitFor(() => expect(document.querySelector('audio')).not.toBeNull());
+    expect(screen.queryByText('Open on YouTube')).toBeNull();
+    const links = screen.getAllByText('Search on YouTube');
+    expect(links).toHaveLength(20);
+    for (const l of links) expect(l.getAttribute('href')).toMatch(/^https:\/\/www\.youtube\.com\/results\?search_query=Artist%20/);
+    expect(links.every((l) => !/watch\?v=/.test(l.getAttribute('href')!))).toBe(true);
+    expect(within(a).getAllByText('Search on YouTube')[3].getAttribute('href')).toBe('https://www.youtube.com/results?search_query=Artist%20A3%20Track%200-A3');
+  });
+
   it('says so when no preview is found', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ track: { artist: 'x', title: 'y', sources: {} } }))));
     render(<RatingSession />);

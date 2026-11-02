@@ -1,5 +1,7 @@
 import type { ArcTemplate, Suggestion, SuggestionReason, Track, Weights } from '@/types/track';
 import { trackKeyOf } from '@/types/track';
+import { primaryArtist } from '@/lib/primaryArtist';
+export { primaryArtist };
 import { isEnergyBoostKey, parseCamelot, scoreKeyTransition } from './camelot';
 import { scoreBpmTransition } from './bpm';
 import { isComplete } from '@/lib/completeness';
@@ -153,7 +155,27 @@ export function suggestNext(args: {
     out.push({ track, score, reasons, compliant });
   }
   // Criterion 3: every compliant candidate ranks above every non-compliant one; each tier by score.
-  return out.sort(byComplianceThenScore).slice(0, args.limit ?? MAX_RESULTS);
+  return capPerArtist(out.sort(byComplianceThenScore), args.limit ?? MAX_RESULTS);
+}
+
+/** At most this many picks per primary artist in the returned list. */
+export const MAX_PER_ARTIST = 2;
+
+/**
+ * Artist diversity: walks the ranked list in order (compliance tiers stay intact) and skips a candidate once its
+ * primary artist already has MAX_PER_ARTIST picks, filling from further down until `limit` are chosen.
+ */
+export function capPerArtist(ranked: Suggestion[], limit: number, max = MAX_PER_ARTIST): Suggestion[] {
+  const counts = new Map<string, number>();
+  const out: Suggestion[] = [];
+  for (const s of ranked) {
+    if (out.length >= limit) break;
+    const a = primaryArtist(s.track.artist);
+    if (a && (counts.get(a) ?? 0) >= max) continue;
+    counts.set(a, (counts.get(a) ?? 0) + 1);
+    out.push(s);
+  }
+  return out;
 }
 
 /** Compliant first, then score; suggestions without the flag share the non-compliant tier. */

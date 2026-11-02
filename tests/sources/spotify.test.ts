@@ -4,6 +4,7 @@ import { base, json, mockFetch } from './helpers';
 
 const hit = {
   id: 'SP1',
+  name: 'One More Time',
   popularity: 77,
   external_urls: { spotify: 'https://open.spotify.com/track/SP1' },
   external_ids: { isrc: 'ISRC9' },
@@ -34,6 +35,8 @@ describe('spotify', () => {
   it('maps id, url, popularity and isrc from the matching hit', async () => {
     const f = mockFetch([tokenRoute, ['api.spotify.com/v1/search', () => json({ tracks: { items: [hit] } })]]);
     expect(await spotifyAdapter.enrich(base())).toEqual({
+      artist: 'Daft Punk',
+      title: 'One More Time',
       spotifyId: 'SP1',
       spotifyUrl: 'https://open.spotify.com/track/SP1',
       popularity: 77,
@@ -47,7 +50,7 @@ describe('spotify', () => {
   it('does not overwrite popularity/isrc already known', async () => {
     mockFetch([tokenRoute, ['api.spotify.com', () => json({ tracks: { items: [hit] } })]]);
     const out = await spotifyAdapter.enrich(base({ popularity: 10, isrc: 'X' }));
-    expect(out).toEqual({ spotifyId: 'SP1', spotifyUrl: 'https://open.spotify.com/track/SP1' });
+    expect(out).toEqual({ artist: 'Daft Punk', title: 'One More Time', spotifyId: 'SP1', spotifyUrl: 'https://open.spotify.com/track/SP1' });
   });
 
   it('artist mismatch → {}', async () => {
@@ -81,5 +84,18 @@ describe('spotify', () => {
       mockFetch([tokenRoute, ['api.spotify.com', () => json({}, status)]]);
       await expect(spotifyAdapter.enrich(base())).rejects.toThrow();
     }
+  });
+
+  it('a hit by the right artist but a different song is rejected (no spotifyId, so ReccoBeats never reads the wrong song)', async () => {
+    mockFetch([tokenRoute, ['api.spotify.com', () => json({ tracks: { items: [{ ...hit, id: 'WRONG', name: 'Aerodynamic' }] } })]]);
+    expect(await spotifyAdapter.enrich(base())).toEqual({});
+  });
+  it('takes the matching song when a different one by the same artist ranks first', async () => {
+    mockFetch([tokenRoute, ['api.spotify.com', () => json({ tracks: { items: [{ ...hit, id: 'WRONG', name: 'Aerodynamic' }, { ...hit, name: 'One More Time - Radio Edit' }] } })]]);
+    expect((await spotifyAdapter.enrich(base())).spotifyId).toBe('SP1');
+  });
+  it('the display name joins every credited artist', async () => {
+    mockFetch([tokenRoute, ['api.spotify.com', () => json({ tracks: { items: [{ ...hit, artists: [{ name: 'Daft Punk' }, { name: 'Romanthony' }] }] } })]]);
+    expect((await spotifyAdapter.enrich(base())).artist).toBe('Daft Punk, Romanthony');
   });
 });

@@ -1,6 +1,6 @@
 import { trackKeyOf, type Track } from '@/types/track';
 import { ESSENTIALS, RETRYABLE_REASONS, missingEssentials, type IncompleteReason } from './completeness';
-import { getEntry, putPrior, putResolved, putStyles, stylesSettled, type CacheEntry } from './metadataCache';
+import { getEntry, putDisplay, putPrior, putResolved, putStyles, stylesSettled, type CacheEntry } from './metadataCache';
 import { scheduleRetry } from './reresolve';
 import { searchDemoTracks } from './demo';
 import { withTimeout } from './http';
@@ -21,7 +21,9 @@ import { spotifyAdapter } from './sources/spotify';
 import type { SourceAdapter } from './sources/types';
 import { youtubeAdapter } from './sources/youtube';
 import { cachedMergedSearch } from './search/cache';
-import { cooldownUntil, recordFailure, recordSuccess, takeBudget } from './search/breaker';
+import { primaryArtist } from './primaryArtist';
+import { titleMatches } from './sources/match';
+import { budgetHeadroom, cooldownUntil, recordFailure, recordSuccess, takeBudget } from './search/breaker';
 import { defaultProviders, firstRoundProviders, mergedSearch } from './search/merge';
 import type { MergedHit } from './search/types';
 
@@ -59,6 +61,7 @@ interface ResolveRun {
   timedOut: boolean;
   deezerPreview?: string;
   analysed: boolean;
+  display?: { artist: string; title: string }; // the first provider match's own spelling
 }
 
 const newRun = (deadline?: number): ResolveRun => ({ deadline, aborted: false, providersSkipped: false, timedOut: false, analysed: false });
@@ -101,6 +104,8 @@ async function resolveInto(track: Track, run: ResolveRun): Promise<Track> {
       const partial = await withTimeout(adapter.enrich({ ...track }), adapter.timeoutMs ?? ADAPTER_TIMEOUT_MS, adapter.name);
       if (run.aborted) return track;
       if (guarded) recordSuccess(guarded);
+      // only the same recording by the same primary artist supplies a display name (feat./collab credits and length cuts are fine)
+      if (!run.display && (adapter.name === 'deezer' || adapter.name === 'spotify') && partial?.artist && partial?.title && titleMatches(track.title, partial.title, track.artist) && primaryArtist(partial.artist) === primaryArtist(track.artist)) run.display = { artist: partial.artist, title: partial.title };
       if (adapter.name === 'deezer') run.deezerPreview = partial?.previewUrl;
       const overrides = OVERRIDES[adapter.name] ?? [];
       for (const [field, value] of Object.entries(partial ?? {}) as Array<[keyof Track, unknown]>) {
@@ -172,6 +177,7 @@ async function withFreshPreview(cached: Track, budgetMs: number, without?: strin
     // best-effort: the cached essentials are still good
   }
   run.aborted = true;
+  if (run.display) putDisplay(trackKeyOf(cached.artist, cached.title), run.display); // backfills entries cached before names were kept
   return { ...track, sources: { ...track.sources } };
 }
 
@@ -211,6 +217,18 @@ export const STYLES_QUEUE_CAP = 200;
 const stylesJobs = new Map<string, StylesJob>(); // queued or running, by track key: the dedupe set
 const stylesQueue: string[] = []; // keys waiting for a worker, oldest first
 let stylesRunning = 0;
+
+/** Lookups waiting for a worker right now. */
+export const stylesQueueLength = (): number => stylesQueue.length;
+
+/** Styles fill (up to 25 per suggest request, MIK import) runs only while fewer than this many lookups wait. */
+export const STYLES_FILL_MAX_QUEUE = 50;
+/** Styles lookups leave at least this fraction of Last.fm's app minute budget unspent, so similarity is never starved. */
+export const STYLES_MIN_HEADROOM = 0.5;
+const stylesHeadroomOk = () => budgetHeadroom(LASTFM, { app: true }) >= STYLES_MIN_HEADROOM;
+
+/** True while the styles queue is short AND Last.fm has >= 50% of its minute budget left. */
+export const stylesFillOpen = (): boolean => stylesQueue.length < STYLES_FILL_MAX_QUEUE && stylesHeadroomOk();
 
 /** Resolves when every queued styles lookup has settled (tests, shutdown). */
 export async function settleStyles(): Promise<void> {
@@ -258,7 +276,8 @@ function pumpStyles(): void {
 }
 
 async function runStyles(key: string, track: Track): Promise<void> {
-  if (cooldownUntil(LASTFM)) return;
+  // Under half the minute budget left: skip without a marker (the track's next resolve re-queues it); similarity keeps it.
+  if (cooldownUntil(LASTFM) || !stylesHeadroomOk()) return;
   const take = () => !cooldownUntil(LASTFM) && takeBudget(LASTFM, { app: true });
   try {
     // no outer timeout: each HTTP call carries its own, started when it is sent (not while waiting for a pacing slot)
@@ -322,7 +341,7 @@ async function resolveCore(
   for (const f of ESSENTIALS) if (prior?.sources[f] !== 'manual' && result[f] !== undefined) (prospective as unknown as Record<string, unknown>)[f] = result[f];
   const missing = missingEssentials(prospective);
   if (missing.length) result.unresolved = { reason: reasonFor(result, run), missing };
-  const entry = putResolved(key, result);
+  const entry = putResolved(key, result, Date.now(), run.display);
   const merged: Track = { ...result, ...entry.fields, sources: { ...result.sources, ...entry.sources } };
   if (!missing.length) delete merged.unresolved;
   else if (merged.unresolved) {

@@ -86,19 +86,20 @@ const ring = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visib
 const linkCls = `text-[12px] text-[#8A8FA3] underline-offset-2 hover:text-[#E8E4DA] hover:underline ${ring}`;
 const btn = `rounded-md border border-[#E8E4DA]/25 px-3 py-1.5 text-[13px] text-[#E8E4DA] hover:border-[#E8E4DA]/60 disabled:opacity-40 ${ring}`;
 
-type Preview = { state: 'idle' } | { state: 'loading' } | { state: 'none' } | { state: 'found'; url: string; youtubeUrl?: string };
+type Preview = { state: 'idle' } | { state: 'loading' } | { state: 'none' } | { state: 'found'; url: string };
 
 /** No preview ships in the file (it would tell the lists apart, and expires anyway): the owner asks per track. */
 function TrackRow({ t }: { t: RTrack }) {
   const [preview, setPreview] = useState<Preview>({ state: 'idle' });
   const label = `${t.artist} - ${t.title}`;
   const found = preview.state === 'found' ? preview : undefined;
-  const yt = found?.youtubeUrl ?? `https://www.youtube.com/results?search_query=${encodeURIComponent(label)}`;
+  // always the same search link: a direct video URL (only some tracks have one) would tell the lists apart
+  const yt = `https://www.youtube.com/results?search_query=${encodeURIComponent(`${t.artist} ${t.title}`)}`; // same form as sources/youtube youtubeSearchUrl (not imported: that module is server-side)
   const find = async () => {
     setPreview({ state: 'loading' });
     const r = await fetchResolved(t);
     const url = safeHttpUrl(r?.previewUrl);
-    setPreview(url ? { state: 'found', url, youtubeUrl: safeHttpUrl(r?.youtubeUrl) } : { state: 'none' });
+    setPreview(url ? { state: 'found', url } : { state: 'none' });
   };
   return (
     <li className="flex flex-col gap-1.5 rounded-lg border border-[#E8E4DA]/10 bg-[#1A1D28] p-3">
@@ -115,7 +116,7 @@ function TrackRow({ t }: { t: RTrack }) {
         )}
         {preview.state === 'none' && <span className="text-[12px] text-[#8A8FA3]">No preview found</span>}
         <a href={yt} target="_blank" rel="noopener noreferrer" className={linkCls}>
-          {found?.youtubeUrl ? 'Open on YouTube' : 'Search on YouTube'}
+          Search on YouTube
         </a>
       </div>
     </li>

@@ -40,6 +40,8 @@ export interface SuggestDeps {
   getSimilarTracks?: (artist: string, title: string) => Promise<Array<{ artist: string; title: string; match: number }>>;
   /** Queues a Last.fm styles lookup for a cached track (paced, budgeted, deduped); false when nothing was queued. */
   queueStyles?: (track: Track) => boolean;
+  /** True while the styles queue is short and Last.fm has budget to spare: the request may queue up to MAX_STYLES_FILL_PER_REQUEST. */
+  stylesFillOpen?: () => boolean | Promise<boolean>;
   loadAdjacency?: () => Promise<AdjacencyHandle>;
   suggestNext?: typeof engineSuggestNext;
   /** Overall budget for every external lookup in one request. */
@@ -57,6 +59,8 @@ export interface SuggestDeps {
 export const MAX_CRATE_BACKGROUND_RESOLVES = 2;
 /** Styles lookups queued per suggest request (set tracks newest first, then crate, then cached candidates). */
 export const MAX_STYLES_QUEUED_PER_REQUEST = 4;
+/** Fill mode: how many a request may queue while `stylesFillOpen` holds (the library's styles fill over a few sessions). */
+export const MAX_STYLES_FILL_PER_REQUEST = 25;
 const NEGATIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** The cache already settled this incomplete entry: its retry is not due, or a permanent miss is inside its 24 h window. */
 const isSettled = (entry: CachedEntry | undefined): boolean =>
@@ -355,7 +359,9 @@ export async function assembleSuggestions(
   if (deps.queueStyles) {
     let queued = 0;
     for (const t of stylesWanted) {
-      if (queued >= MAX_STYLES_QUEUED_PER_REQUEST) break;
+      if (queued >= MAX_STYLES_FILL_PER_REQUEST) break;
+      // past the base cap only while fill mode stays open (checked per track: the queue grows as this loop adds)
+      if (queued >= MAX_STYLES_QUEUED_PER_REQUEST && !(deps.stylesFillOpen && (await safe(async () => deps.stylesFillOpen!(), false)))) break;
       if (safeSync(() => deps.queueStyles!(t), false)) queued++;
     }
   }
@@ -458,6 +464,7 @@ export async function loadSuggestDeps(): Promise<SuggestDeps> {
     };
     deps.getSimilarTracks = resolver.getSimilarTracks;
     deps.queueStyles = (t) => resolver.queueStyles(t);
+    deps.stylesFillOpen = () => resolver.stylesFillOpen();
     deps.backgroundResolve = async (artist, title) => {
       // Only while Spotify and Deezer both have >= 50% budget headroom and no cooldown; iTunes and YouTube are left out
       // of this path entirely (retries included).

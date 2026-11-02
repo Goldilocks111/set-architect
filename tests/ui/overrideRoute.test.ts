@@ -10,6 +10,7 @@ import { POST } from '@/app/api/tracks/override/route';
 import { validateOverride } from '@/lib/overrideValidation';
 import { getEntry, putResolved } from '@/lib/metadataCache';
 import { resolveWithStatus } from '@/lib/resolver';
+import * as resolver from '@/lib/resolver';
 import { trackKeyOf } from '@/types/track';
 
 const post = (body: unknown, headers: Record<string, string> = { 'content-type': 'application/json' }) =>
@@ -139,5 +140,29 @@ describe('POST /api/tracks/override batch', () => {
     auth.getCurrentUser.mockResolvedValue(null);
     expect((await post(body)).status).toBe(401);
     expect(getEntry(trackKeyOf('Art 1', 'Tune 1'))).toBeUndefined();
+  });
+
+  it('a batch import queues styles lookups for the imported rows, stopping when the fill gate closes', async () => {
+    const q = vi.spyOn(resolver, 'queueStyles').mockReturnValue(true);
+    const open = vi.spyOn(resolver, 'stylesFillOpen').mockReturnValue(true);
+    const items = Array.from({ length: 5 }, (_, i) => ({ artist: `Art ${i}`, title: `Tit ${i}`, fields: ok }));
+    expect((await post({ items })).status).toBe(200);
+    expect(q).toHaveBeenCalledTimes(5);
+    expect(q.mock.calls[0][0]).toMatchObject({ artist: 'Art 0', title: 'Tit 0' });
+    q.mockClear();
+    open.mockImplementation(() => q.mock.calls.length < 2); // queue full (50) or Last.fm under 50% headroom mid-import
+    expect((await post({ items })).status).toBe(200);
+    expect(q).toHaveBeenCalledTimes(2);
+    q.mockClear();
+    open.mockReturnValue(false);
+    expect((await post({ items })).status).toBe(200);
+    expect(q).not.toHaveBeenCalled();
+    q.mockRestore();
+    open.mockRestore();
+  });
+  it('a styles queue failure never fails the import', async () => {
+    const q = vi.spyOn(resolver, 'queueStyles').mockImplementation(() => { throw new Error('boom'); });
+    expect((await post({ items: [{ artist: 'A', title: 'T', fields: ok }] })).status).toBe(200);
+    q.mockRestore();
   });
 });

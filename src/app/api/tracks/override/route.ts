@@ -18,6 +18,22 @@ function trackFrom(key: string, artist: string, title: string, entry: ReturnType
 }
 
 /**
+ * Imported rows get their Last.fm styles in the background (paced, budgeted, deduped by the resolver queue). Stops at
+ * the fill cap (or low Last.fm headroom) rather than evicting waiting lookups; never fails the import.
+ */
+async function queueImportedStyles(tracks: Track[]): Promise<void> {
+  try {
+    const { queueStyles, stylesFillOpen } = await import('@/lib/resolver');
+    for (const t of tracks) {
+      if (!stylesFillOpen()) break; // fill cap (50 waiting) or Last.fm under 50% headroom
+      queueStyles(t);
+    }
+  } catch {
+    // styles are optional: the import already succeeded
+  }
+}
+
+/**
  * Manual values for one track: POST {artist, title, fields: {bpm?, camelot?, energy?, danceability?}}
  * or a batch: POST {items: [{artist, title, fields}]} (<= MAX_BATCH) -> {applied, rejected: [{index, error}], tracks}
  */
@@ -57,6 +73,7 @@ export async function POST(request: Request) {
     });
     const entries = putManualMany(valid.map((v) => ({ key: v.key, fields: v.fields })));
     const tracks = valid.map((v, i) => trackFrom(v.key, v.artist, v.title, entries[i]));
+    await queueImportedStyles(tracks);
     return Response.json({ applied: valid.length, rejected, tracks });
   }
   const artist = clean(b.artist);
