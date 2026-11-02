@@ -29,7 +29,7 @@ export interface Track {
 }
 
 export interface SuggestionReason {
-  kind: 'key' | 'bpm' | 'energy' | 'cooccurrence' | 'similarity';
+  kind: 'key' | 'bpm' | 'energy' | 'cooccurrence' | 'similarity' | 'style';
   label: string;
   score: number; // 0..1 contribution before weighting
 }
@@ -38,6 +38,8 @@ export interface Suggestion {
   track: Track;
   score: number;
   reasons: SuggestionReason[];
+  /** Criterion 3: key-compatible AND within ±6% tempo AND energy toward the arc target (engine/compliance). */
+  compliant?: boolean;
 }
 
 export type ArcTemplate = '60min' | '120min';
@@ -48,6 +50,7 @@ export interface Weights {
   energy: number;
   cooccurrence: number;
   similarity: number;
+  style: number;
 }
 
 export interface AdjacencyLookup {

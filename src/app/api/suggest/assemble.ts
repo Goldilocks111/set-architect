@@ -1,4 +1,5 @@
 import { suggestNext as engineSuggestNext } from '@/engine';
+import { byComplianceThenScore } from '@/engine/suggest';
 import { isComplete } from '@/lib/completeness';
 import { demoTracks, isDemoMode } from '@/lib/demo';
 import { trackKeyOf, type AdjacencyLookup, type ArcTemplate, type Suggestion, type Track } from '@/types/track';
@@ -79,6 +80,8 @@ export interface SuggestInput {
 export const DEMO_CRATE_MIN = 30;
 
 const MAX_EXTERNAL = 8;
+/** Similarity lookups seed from the last 3 complete set tracks, newest first; each source's match is scaled by these. */
+export const SIMILAR_SEED_WEIGHTS = [1, 0.6, 0.3];
 /** Cache misses resolved per refresh; the rest wait for a later refresh (by then earlier ones are cached). */
 export const MAX_CANDIDATE_RESOLVES = 4;
 /** Candidate resolves running at once across all suggest requests, so they can't starve the user's own resolves. */
@@ -220,7 +223,10 @@ export async function assembleSuggestions(
   const pool = crateReady.length < DEMO_CRATE_MIN ? [...crateReady, ...demoTracks()] : crateReady;
   const poolByKey = new Map(pool.map((t) => [keyOf(t), t]));
   // Incomplete set tracks have no usable essentials, so they can't anchor neighbor/similarity lookups.
-  const last = input.playlist.filter(isComplete).pop();
+  const completeSet = input.playlist.filter(isComplete);
+  const last = completeSet[completeSet.length - 1];
+  // Similarity seeds: the last 3 complete set tracks, most recent first, each source's match scaled by its weight.
+  const simSeeds = completeSet.slice(-SIMILAR_SEED_WEIGHTS.length).reverse();
 
   const adjacency = new Map<string, number>();
   const similarity = new Map<string, number>();
@@ -249,7 +255,20 @@ export async function assembleSuggestions(
         callCap(),
         []
       ),
-      withTimeout(safe(deps.getSimilarTracks && (() => deps.getSimilarTracks!(last.artist, last.title)), []), callCap(), []),
+      Promise.all(
+        simSeeds.map((seed, i) =>
+          withTimeout(
+            safe(
+              deps.getSimilarTracks &&
+                (async () =>
+                  (await deps.getSimilarTracks!(seed.artist, seed.title)).map((s) => ({ ...s, match: s.match * SIMILAR_SEED_WEIGHTS[i] }))),
+              []
+            ),
+            callCap(),
+            []
+          )
+        )
+      ),
     ]);
 
     neighbors
@@ -262,12 +281,17 @@ export async function assembleSuggestions(
         external.push({ ...(nameOf?.(n.trackKey) ?? displayFromKey(n.trackKey)), key: n.trackKey });
       });
 
-    [...similar]
-      .sort((a, b) => b.match - a.match)
+    // Merged per candidate by max, then the strongest MAX_EXTERNAL become candidates.
+    const merged = new Map<string, { artist: string; title: string; match: number }>();
+    for (const s of similar.flat()) {
+      const key = keyOf(s);
+      if ((merged.get(key)?.match ?? -1) < s.match) merged.set(key, s);
+    }
+    [...merged]
+      .sort((a, b) => b[1].match - a[1].match)
       .slice(0, MAX_EXTERNAL)
-      .forEach((s) => {
-        const key = keyOf(s);
-        similarity.set(key, Math.max(similarity.get(key) ?? 0, s.match));
+      .forEach(([key, s]) => {
+        similarity.set(key, s.match);
         external.push({ artist: s.artist, title: s.title, key });
       });
   }
@@ -363,7 +387,8 @@ export async function assembleSuggestions(
       s.reasons.push({ kind: 'cooccurrence', label: `In ${n} DJ set${n === 1 ? '' : 's'}`, score: bonus / PLAY_COUNT_MAX_BONUS });
       bonused = true;
     }
-    if (bonused) suggestions.sort((a, b) => b.score - a.score);
+    // The bonus reorders within a compliance tier only: a compliant suggestion never drops below a non-compliant one.
+    if (bonused) suggestions.sort(byComplianceThenScore);
   }
 
   return { suggestions, crateKnown };
