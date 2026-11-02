@@ -279,6 +279,24 @@ export function selectWarmTargets(refs: TrackRef[], isCompleteInCache: (r: Track
   return { todo, complete: refs.length - todo.length };
 }
 
+/** Providers warm mode cannot do without: Deezer and MusicBrainz complete tracks keyless (with AcousticBrainz and preview analysis). */
+export const WARM_ESSENTIAL_PROVIDERS = ['deezer', 'musicbrainz'];
+/** Guard provider names that are also resolver adapters, so a spent one can be skipped via `without`. */
+const SKIPPABLE_ADAPTERS = new Set(['spotify', 'reccobeats']);
+
+/**
+ * Warm mode after each resolve: stop only when Deezer or MusicBrainz is refused or rate-limited. A spent Spotify (or
+ * ReccoBeats) budget just leaves that adapter out from then on (losing spotifyId -> ReccoBeats values); a spent
+ * Last.fm only means styles stop settling.
+ */
+export function warmStep(o: { stopped: string[]; refused: string[] }): { stop: boolean; without: string[] } {
+  const out = new Set([...o.stopped, ...o.refused]);
+  return {
+    stop: WARM_ESSENTIAL_PROVIDERS.some((p) => out.has(p)),
+    without: [...BENCH_WITHOUT, ...[...out].filter((p) => SKIPPABLE_ADAPTERS.has(p) && !BENCH_WITHOUT.includes(p))],
+  };
+}
+
 /** Whether warm mode can count styles; when it cannot, it counts essentials only and says why (lane fit will be blind). */
 export function warmStylesMode(o: { hasKey: boolean; tagsDisabled: boolean }): { countStyles: boolean; reason?: string } {
   if (!o.hasKey) return { countStyles: false, reason: 'LASTFM_API_KEY is not set, so styles can never settle' };

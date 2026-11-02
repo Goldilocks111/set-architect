@@ -7,6 +7,7 @@ import {
   buildRatingFile,
   baselinePicks,
   summarizeRatings,
+  warmStep,
   auditCrate,
   isWarmEntry,
   warmStylesMode,
@@ -377,5 +378,28 @@ describe('warm mode selection', () => {
     const { todo, complete } = selectWarmTargets(refs, (r) => done.has(`${r.artist.toLowerCase()}|${r.title}`));
     expect(todo.map((t) => t.title)).toEqual(['one', 'three']);
     expect(complete).toBe(1);
+  });
+});
+
+describe('warmStep (I6: keep warming after the Spotify budget is spent)', () => {
+  it('nothing degraded: continue with the bench exclusions only', () => {
+    expect(warmStep({ stopped: [], refused: [] })).toEqual({ stop: false, without: ['itunes', 'youtube'] });
+  });
+  it('Spotify refused (budget) or rate-limited: continue on Deezer + MusicBrainz, Spotify skipped via without', () => {
+    expect(warmStep({ stopped: [], refused: ['spotify'] })).toEqual({ stop: false, without: ['itunes', 'youtube', 'spotify'] });
+    expect(warmStep({ stopped: ['spotify'], refused: [] })).toEqual({ stop: false, without: ['itunes', 'youtube', 'spotify'] });
+  });
+  it('Last.fm or ReccoBeats out: still continue (ReccoBeats skipped; styles simply do not settle)', () => {
+    expect(warmStep({ stopped: ['lastfm'], refused: ['reccobeats'] })).toEqual({ stop: false, without: ['itunes', 'youtube', 'reccobeats'] });
+  });
+  it('stops only when Deezer or MusicBrainz is refused or rate-limited', () => {
+    expect(warmStep({ stopped: [], refused: ['deezer'] }).stop).toBe(true);
+    expect(warmStep({ stopped: ['musicbrainz'], refused: ['spotify'] }).stop).toBe(true);
+    expect(warmStep({ stopped: ['deezer-cdn'], refused: [] }).stop).toBe(false);
+  });
+  it('run.ts uses it in the warm loop instead of stopping at the first refusal', () => {
+    const run = readFileSync(join(__dirname, '../../bench/recs/run.ts'), 'utf8');
+    expect(run).toMatch(/warmStep\(/);
+    expect(run).not.toMatch(/if \(guard\.stopped\.size \|\| Object\.keys\(guard\.refused\)\.length\) break/);
   });
 });

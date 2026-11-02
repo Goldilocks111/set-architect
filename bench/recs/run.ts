@@ -4,7 +4,7 @@ import { dataDir, dataRoot } from '../../src/lib/dataDir';
 import { activeCooldowns, degradedProviders, readCooldowns } from '../data/cooldowns';
 import { createFetchGuard } from '../data/guardFetch';
 import { RequestGate, dayKey, loadDailyCounts, saveDailyCounts } from '../search/guard';
-import { SHUFFLE_SEED, TOP_N, BENCH_WITHOUT, RECS_BUDGET, poolLimitedScenarios, withCrates, auditCrate, buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, isWarmEntry, selectWarmTargets, warmStylesMode, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
+import { SHUFFLE_SEED, TOP_N, BENCH_WITHOUT, warmStep, RECS_BUDGET, poolLimitedScenarios, withCrates, auditCrate, buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, isWarmEntry, selectWarmTargets, warmStylesMode, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
 import type { Suggestion, Track } from '../../src/types/track';
 
 try {
@@ -91,9 +91,14 @@ async function main(): Promise<void> {
       });
     const { todo } = selectWarmTargets(refs, isWarm);
     console.log(`warm: ${refs.length - todo.length}/${refs.length} warm, resolving ${todo.length}`);
+    let skipped = '';
     for (const [i, r] of todo.entries()) {
-      if (guard.stopped.size || Object.keys(guard.refused).length) break; // a stopped or exhausted provider ends the run
-      const t = await resolveWithStatus(r.artist, r.title, { without: BENCH_WITHOUT, retryWithout: BENCH_WITHOUT });
+      // only a stopped/exhausted Deezer or MusicBrainz ends the run; a spent Spotify budget is skipped from then on
+      const step = warmStep({ stopped: [...guard.stopped.keys()], refused: Object.keys(guard.refused) });
+      if (step.stop) break;
+      const now = step.without.filter((p) => !BENCH_WITHOUT.includes(p)).join(',');
+      if (now !== skipped) console.log(`warm: continuing without ${(skipped = now)} (budget spent or rate-limited)`);
+      const t = await resolveWithStatus(r.artist, r.title, { without: step.without, retryWithout: BENCH_WITHOUT });
       if (i % 150 === 149) await settleStyles(); // keep the styles queue under its cap (200 waiting)
       if (i % 10 === 9) console.log(`  ${i + 1}/${todo.length}${t.unresolved ? ' (last: incomplete)' : ''}`);
     }
