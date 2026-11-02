@@ -4,7 +4,7 @@ import { dataDir, dataRoot } from '../../src/lib/dataDir';
 import { activeCooldowns, degradedProviders, readCooldowns } from '../data/cooldowns';
 import { createFetchGuard } from '../data/guardFetch';
 import { RequestGate, dayKey, loadDailyCounts, saveDailyCounts } from '../search/guard';
-import { buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, isWarmEntry, selectWarmTargets, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
+import { auditCrate, buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, isWarmEntry, selectWarmTargets, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
 import type { Suggestion, Track } from '../../src/types/track';
 
 try {
@@ -14,6 +14,7 @@ try {
 }
 
 const here = __dirname;
+const POOLS: Record<string, Array<{ artist: string; title: string }>> = JSON.parse(readFileSync(join(__dirname, 'pools.json'), 'utf8'));
 const limitArg = process.argv.slice(2).find((a) => a.startsWith('--limit='));
 const WARM = process.argv.slice(2).includes('--warm');
 const LIMIT = limitArg ? Number(limitArg.split('=')[1]) : undefined;
@@ -74,16 +75,19 @@ async function main(): Promise<void> {
     const refs = uniqueScenarioTracks(subset);
     console.log(`warm: ${refs.length} unique tracks across ${subset.length} scenarios`);
     // warm = essentials complete AND styles settled; a complete track with unsettled styles is a free cache hit that re-queues its styles lookup
+    const stylesPossible = !!process.env.LASTFM_API_KEY?.trim();
+    if (!stylesPossible) console.log('warm: LASTFM_API_KEY is not set, so styles can never settle; counting essentials only (lane fit will be blind)');
     const isWarm = (r: { artist: string; title: string }) =>
       isWarmEntry(getEntry(trackKeyOf(r.artist, r.title)), {
         isComplete: (f) => isComplete({ id: 'w', artist: r.artist, title: r.title, sources: {}, ...f } as Track),
-        stylesSettled,
+        stylesSettled: (e) => !stylesPossible || stylesSettled(e),
       });
     const { todo } = selectWarmTargets(refs, isWarm);
     console.log(`warm: ${refs.length - todo.length}/${refs.length} warm, resolving ${todo.length}`);
     for (const [i, r] of todo.entries()) {
       if (guard.stopped.size || Object.keys(guard.refused).length) break; // a stopped or exhausted provider ends the run
       const t = await resolveWithStatus(r.artist, r.title, { without: ['itunes'], retryWithout: ['itunes'] });
+      if (i % 150 === 149) await settleStyles(); // keep the styles queue under its cap (200 waiting)
       if (i % 10 === 9) console.log(`  ${i + 1}/${todo.length}${t.unresolved ? ' (last: incomplete)' : ''}`);
     }
     await settleStyles(); // the final count includes the styles lookups queued above
@@ -96,6 +100,8 @@ async function main(): Promise<void> {
     console.log(`Requests: ${[...gates].map(([k, g]) => `${k} ${g.count}/${BUDGET[k]}`).join('  ')}`);
     return;
   }
+  const { getEntry } = await import('../../src/lib/metadataCache');
+  const { trackKeyOf } = await import('../../src/types/track');
   const { assembleSuggestions, loadSuggestDeps } = await import('../../src/app/api/suggest/assemble');
   const deps = await loadSuggestDeps();
   // Results must not depend on scenario order: no background crate fills, no scheduled retries; styles settle between scenarios.
@@ -118,13 +124,21 @@ async function main(): Promise<void> {
     );
     await settleStyles(); // candidate lookups started by this scenario finish before the next one starts
     const score = scoreScenario(sc, suggestions);
+    const laneKeys = new Set((POOLS[sc.lane] ?? []).map((t) => trackKeyOf(t.artist, t.title)));
+    const audit = auditCrate(
+      sc.lane,
+      (sc.crate ?? []).map((c) => ({
+        artist: c.artist, title: c.title, inLanePool: laneKeys.has(trackKeyOf(c.artist, c.title)),
+        styles: getEntry(trackKeyOf(c.artist, c.title))?.fields.styles,
+      })),
+    );
     results.push({ scenario: sc, suggestions });
     rows.push({
-      id: sc.id, lane: sc.lane, setSize: sc.set.length, incompleteInSet: incomplete, crateReady: crateKnown.length, ...score, pass: criterion3Holds(score),
+      id: sc.id, lane: sc.lane, setSize: sc.set.length, incompleteInSet: incomplete, crateReady: crateKnown.length, ...score, audit, pass: criterion3Holds(score),
       top10: suggestions.slice(0, 10).map((s) => ({ artist: s.track.artist, title: s.track.title, score: s.score, compliant: s.compliant, reasons: s.reasons.map((r) => r.label) })),
       ms: Date.now() - t0,
     });
-    console.log(`[${i + 1}/${subset.length}] ${sc.id}: ${score.compliant}/${score.n} compliant, reasons ${score.reasonsOnAll ? 'all' : 'MISSING'}, lane ${fmt(score.laneHitRate)}  ${criterion3Holds(score) ? 'ok' : 'FAIL'}  crateReady ${crateKnown.length}/${(sc.crate ?? []).length}`);
+    console.log(`[${i + 1}/${subset.length}] ${sc.id}: ${score.compliant}/${score.n} compliant, reasons ${score.reasonsOnAll ? 'all' : 'MISSING'}, lane ${fmt(score.laneHitRate)}  ${criterion3Holds(score) ? 'ok' : 'FAIL'}  crateReady ${crateKnown.length}/${(sc.crate ?? []).length}  tag-confirmed in-lane: ${audit.tagConfirmed}/${(sc.crate ?? []).length}${audit.contradictions.length ? `  CONTRADICTED: ${audit.contradictions.map((c) => `${c.artist} - ${c.title} [${c.styles.join(',')}]`).join('; ')}` : ''}`);
   }
 
   const sum = summarizeRecs(rows);

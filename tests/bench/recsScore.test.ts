@@ -5,7 +5,9 @@ import { LANES } from '@/lib/style/taxonomy';
 import type { Suggestion } from '@/types/track';
 import {
   buildRatingFile,
+  auditCrate,
   isWarmEntry,
+  KNOWN_CRATE_SHORTFALL,
   lowCrateScenarios,
   MIN_CRATE_READY,
   selectWarmTargets,
@@ -45,11 +47,14 @@ describe('scenarios.json', () => {
     expect(new Set(scenarios.map((s) => s.id)).size).toBe(10);
     for (const s of scenarios) {
       const lane = new Set((pools[s.lane] ?? []).map(k));
-      expect(s.crate, s.id).toHaveLength(40);
-      expect(new Set(s.crate!.map(k)).size, s.id).toBe(40);
+      const short = KNOWN_CRATE_SHORTFALL[s.id];
+      expect(new Set(s.crate!.map(k)).size, s.id).toBe(s.crate!.length);
       const inLane = s.crate!.filter((c) => lane.has(k(c))).length;
-      expect(inLane, s.id).toBeGreaterThanOrEqual(24);
-      expect(40 - inLane, s.id).toBeLessThanOrEqual(16);
+      // a lane the index cannot fill with grounded tracks is lowered, never padded with invented ones (documented)
+      if (short) expect(s.crate!.length, s.id).toBeGreaterThanOrEqual(short.minCrate);
+      else expect(s.crate, s.id).toHaveLength(40);
+      expect(inLane, s.id).toBeGreaterThanOrEqual(short ? short.minInLane : 24);
+      expect(s.crate!.length - inLane, s.id).toBeLessThanOrEqual(16);
     }
   });
   it('keeps the unique track count warm-able (<= 250) and set tracks out of the crate', () => {
@@ -162,11 +167,48 @@ describe('pool grounding', () => {
     for (const [lane, list] of Object.entries(pools)) for (const t of list) expect(['bench', '1001tl-index', 'memory'], `${lane} ${t.artist}`).toContain(t.source);
     for (const lane of ['afro-house', 'progressive-house', 'melodic-techno', 'deep-house']) {
       expect(pools[lane].filter((t) => t.source === 'memory').map((t) => `${t.artist} - ${t.title}`), lane).toEqual([]);
-      expect(pools[lane].length, lane).toBeGreaterThanOrEqual(28);
+      expect(pools[lane].length, lane).toBeGreaterThanOrEqual(27);
     }
   });
   it("'bench' entries are really in bench/search/tracks.json", () => {
     for (const list of Object.values(pools)) for (const t of list.filter((x) => x.source === 'bench')) expect(bench.has(`${t.artist}|${t.title}`), t.title).toBe(true);
+  });
+});
+
+describe('disco and pop hygiene, refills carry evidence', () => {
+  const pools: Record<string, Array<{ artist: string; title: string; source: string; note?: string }>> = JSON.parse(readFileSync(join(__dirname, '../../bench/recs/pools.json'), 'utf8'));
+  const has = (lane: string, re: RegExp) => pools[lane].some((t) => re.test(`${t.artist} ${t.title}`));
+  it('keeps the round-3 removals out', () => {
+    expect(has('disco-nu-disco', /Like A Prayer|Sussudio|Don't You Want Me|Sweet Dreams|Dancing On My Own|Padam Padam|Ruby Lee|To Be Invisible|Funk Like|Toop Toop|Sun Ra Was Right/)).toBe(false);
+    expect(has('progressive-house', /Don't You Worry Child|Levels|Born Slippy/)).toBe(false);
+    expect(has('techno', /Darkness Falls|Bassline/)).toBe(false);
+    expect(has('afro-house', /Shout-N-Out|Affirmations|Step Closer/)).toBe(false);
+  });
+  it('keeps Sun Ra Was Right in the deep-house pool only', () => {
+    expect(has('deep-house', /Sun Ra Was Right/)).toBe(true);
+  });
+  it('every refill (an entry with a note) names its neighbour evidence', () => {
+    const noted = Object.values(pools).flat().filter((t) => t.note !== undefined);
+    expect(noted.length).toBeGreaterThan(0);
+    for (const t of noted) expect(t.note, t.title).toMatch(/adjacent .* in 1001TL sets/i);
+  });
+});
+
+describe('auditCrate', () => {
+  const c = (title: string, poolLane: boolean, styles?: string[]) => ({ artist: 'A', title, inLanePool: poolLane, styles });
+  it('counts tag-confirmed in-lane tracks and lists pool-lane tracks whose styles contradict it', () => {
+    const r = auditCrate('techno', [
+      c('t1', true, ['techno', 'house']),
+      c('t2', true, ['deep-house']),
+      c('t3', true, undefined),
+      c('t4', true, []),
+      c('o1', false, ['techno']),
+      c('o2', false, ['house']),
+    ]);
+    expect(r.tagConfirmed).toBe(2); // t1, and o1 (it carries the lane in its tags)
+    expect(r.inLanePool).toBe(4);
+    expect(r.untagged).toBe(2);
+    expect(r.contradictions).toEqual([{ artist: 'A', title: 't2', styles: ['deep-house'] }]);
   });
 });
 

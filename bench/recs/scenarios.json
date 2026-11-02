@@ -674,10 +674,6 @@
     "title": "Dtjoh"
    },
    {
-    "artist": "Girls Of The Internet ft. Anelisa Lamola",
-    "title": "Affirmations"
-   },
-   {
     "artist": "Quim Manuel O Espirito Santo",
     "title": "Eme Lelu"
    },
@@ -686,8 +682,8 @@
     "title": "I Believe"
    },
    {
-    "artist": "Lood ft. Donell Rush",
-    "title": "Shout-N-Out"
+    "artist": "Fatoumata Diawara",
+    "title": "Kokoro"
    },
    {
     "artist": "Hernan Cattaneo & Jody Barr",
@@ -726,8 +722,8 @@
     "title": "No Mercy"
    },
    {
-    "artist": "Cassius",
-    "title": "Toop Toop"
+    "artist": "Daft Punk",
+    "title": "One More Time"
    },
    {
     "artist": "Inner City",
@@ -744,6 +740,10 @@
    {
     "artist": "Dom Dolla",
     "title": "San Frandisco"
+   },
+   {
+    "artist": "Swedish House Mafia",
+    "title": "One"
    }
   ]
  },
@@ -779,14 +779,6 @@
    {
     "artist": "Swedish House Mafia",
     "title": "One"
-   },
-   {
-    "artist": "Swedish House Mafia",
-    "title": "Don't You Worry Child"
-   },
-   {
-    "artist": "Avicii",
-    "title": "Levels"
    },
    {
     "artist": "Bedrock",
@@ -866,10 +858,6 @@
    },
    {
     "artist": "Underworld",
-    "title": "Born Slippy"
-   },
-   {
-    "artist": "Underworld",
     "title": "Two Months Off"
    },
    {
@@ -877,12 +865,20 @@
     "title": "Abu Simbel"
    },
    {
+    "artist": "Nicolas Leonelli & Sebastian Haas",
+    "title": "False Realities"
+   },
+   {
+    "artist": "Tim Engelhardt",
+    "title": "North"
+   },
+   {
     "artist": "Armin van Buuren, Adam Beyer",
     "title": "No Mercy"
    },
    {
-    "artist": "Cassius",
-    "title": "Toop Toop"
+    "artist": "Daft Punk",
+    "title": "One More Time"
    },
    {
     "artist": "Inner City",
@@ -910,7 +906,7 @@
    },
    {
     "artist": "Daft Punk",
-    "title": "One More Time"
+    "title": "Around the World"
    },
    {
     "artist": "Fatboy Slim",
@@ -931,6 +927,10 @@
    {
     "artist": "&ME",
     "title": "The Rapture"
+   },
+   {
+    "artist": "Lilly Palmer",
+    "title": "Hey You"
    }
   ]
  },
@@ -1016,10 +1016,6 @@
     "title": "Runnin'"
    },
    {
-    "artist": "Nick Holder",
-    "title": "Darkness Falls"
-   },
-   {
     "artist": "Marc Houle",
     "title": "Techno Vocals"
    },
@@ -1052,10 +1048,6 @@
     "title": "Bleed The 303"
    },
    {
-    "artist": "Layton Giordani & HILLS & Majestic & Jungle 70 vs. Skrillex & Fred again.. & Flowdan",
-    "title": "Bassline Rumble"
-   },
-   {
     "artist": "Brutalismus 3000",
     "title": "KAIRO"
    },
@@ -1064,8 +1056,16 @@
     "title": "Kick & Bass"
    },
    {
+    "artist": "Jose Bonetto",
+    "title": "Shifted Reality"
+   },
+   {
+    "artist": "Radical Future & Hani Dakin",
+    "title": "Ta Ligado"
+   },
+   {
     "artist": "Daft Punk",
-    "title": "One More Time"
+    "title": "Around the World"
    },
    {
     "artist": "Fatboy Slim",
@@ -1092,8 +1092,8 @@
     "title": "One"
    },
    {
-    "artist": "Daft Punk",
-    "title": "Around the World"
+    "artist": "Moloko",
+    "title": "Sing It Back"
    },
    {
     "artist": "Basement Jaxx",
@@ -1116,12 +1116,12 @@
     "title": "Do You Still Think Of Me?"
    },
    {
-    "artist": "Swedish House Mafia",
-    "title": "Don't You Worry Child"
+    "artist": "Bedrock",
+    "title": "Heaven Scent"
    },
    {
-    "artist": "Moloko",
-    "title": "Sing It Back"
+    "artist": "DâM-FunK",
+    "title": "Burgundy City"
    }
   ]
  },
@@ -1151,10 +1151,6 @@
     "title": "In The Dark(Co-Prod. by Tom Enzy)"
    },
    {
-    "artist": "Cassius",
-    "title": "Toop Toop"
-   },
-   {
     "artist": "Daft Punk",
     "title": "One More Time"
    },
@@ -1165,14 +1161,6 @@
    {
     "artist": "Moloko",
     "title": "Sing It Back"
-   },
-   {
-    "artist": "Annie",
-    "title": "Funk Like"
-   },
-   {
-    "artist": "Kylie Minogue",
-    "title": "Padam Padam"
    },
    {
     "artist": "DâM-FunK",
@@ -1189,14 +1177,6 @@
    {
     "artist": "Prince",
     "title": "I Wanna Be Your Lover"
-   },
-   {
-    "artist": "Johnnie Taylor",
-    "title": "Don't Make Me Late"
-   },
-   {
-    "artist": "Bill Withers",
-    "title": "Ruby Lee"
    },
    {
     "artist": "Funkduster",
@@ -1223,40 +1203,24 @@
     "title": "Dance"
    },
    {
-    "artist": "Madonna",
-    "title": "Like A Prayer"
-   },
-   {
-    "artist": "Phil Collins",
-    "title": "Sussudio"
-   },
-   {
-    "artist": "The Human League",
-    "title": "Don't You Want Me"
-   },
-   {
-    "artist": "Eurythmics",
-    "title": "Sweet Dreams (Are Made of This)"
-   },
-   {
-    "artist": "Gladys Knight & The Pips",
-    "title": "To Be Invisible"
-   },
-   {
-    "artist": "Robyn",
-    "title": "Dancing On My Own"
-   },
-   {
     "artist": "Caribou",
     "title": "Honey"
+   },
+   {
+    "artist": "Praise Cats ft. Andrea Love",
+    "title": "Shined On Me"
+   },
+   {
+    "artist": "Micky More & Andy Tee ft. Fatimah Provillon",
+    "title": "All The People"
    },
    {
     "artist": "Basement Jaxx",
     "title": "Where's Your Head At"
    },
    {
-    "artist": "Matthias Heilbronn & Monique Bingham",
-    "title": "Go Getter"
+    "artist": "Scott Grooves",
+    "title": "Prove Myself Deep"
    },
    {
     "artist": "Anyma & Chris Avantgarde",
@@ -1271,8 +1235,8 @@
     "title": "Do You Still Think Of Me?"
    },
    {
-    "artist": "Swedish House Mafia",
-    "title": "Don't You Worry Child"
+    "artist": "Bedrock",
+    "title": "Heaven Scent"
    },
    {
     "artist": "Lilly Palmer",
@@ -1283,8 +1247,8 @@
     "title": "Insomnia"
    },
    {
-    "artist": "Ron Trent",
-    "title": "Start Strut"
+    "artist": "Matthias Heilbronn & Monique Bingham",
+    "title": "Go Getter"
    },
    {
     "artist": "Anyma & Chris Avantgarde & Argy & Omnya",
@@ -1299,12 +1263,20 @@
     "title": "Ganesha Song"
    },
    {
-    "artist": "Avicii",
-    "title": "Levels"
+    "artist": "Jody Barr",
+    "title": "April Skies"
    },
    {
     "artist": "Charlotte de Witte",
     "title": "How You Move"
+   },
+   {
+    "artist": "Armand van Helden",
+    "title": "You Don't Know Me"
+   },
+   {
+    "artist": "Ron Trent",
+    "title": "Start Strut"
    }
   ]
  },
@@ -1398,10 +1370,6 @@
     "title": "Runnin'"
    },
    {
-    "artist": "Nick Holder",
-    "title": "Darkness Falls"
-   },
-   {
     "artist": "Marc Houle",
     "title": "Techno Vocals"
    },
@@ -1434,12 +1402,16 @@
     "title": "Bleed The 303"
    },
    {
-    "artist": "Layton Giordani & HILLS & Majestic & Jungle 70 vs. Skrillex & Fred again.. & Flowdan",
-    "title": "Bassline Rumble"
-   },
-   {
     "artist": "Brutalismus 3000",
     "title": "KAIRO"
+   },
+   {
+    "artist": "Demon Noise & Lautaro Ibañez",
+    "title": "Kick & Bass"
+   },
+   {
+    "artist": "Jose Bonetto",
+    "title": "Shifted Reality"
    },
    {
     "artist": "Matthias Heilbronn & Monique Bingham",
@@ -1458,12 +1430,12 @@
     "title": "Ganesha Song"
    },
    {
-    "artist": "Avicii",
-    "title": "Levels"
+    "artist": "Jody Barr",
+    "title": "April Skies"
    },
    {
-    "artist": "Moloko",
-    "title": "Sing It Back"
+    "artist": "DâM-FunK",
+    "title": "Burgundy City"
    },
    {
     "artist": "Faithless",
@@ -1486,12 +1458,12 @@
     "title": "Sally"
    },
    {
-    "artist": "Bedrock",
-    "title": "Heaven Scent"
+    "artist": "Jody Barr",
+    "title": "Blue Rain"
    },
    {
-    "artist": "Annie",
-    "title": "Funk Like"
+    "artist": "Nausica",
+    "title": "Funky Operator"
    },
    {
     "artist": "Armand van Helden",
@@ -1625,16 +1597,16 @@
     "title": "Sally"
    },
    {
-    "artist": "Bedrock",
-    "title": "Heaven Scent"
+    "artist": "Jody Barr",
+    "title": "Blue Rain"
    },
    {
     "artist": "Adam Beyer & Mark Reeve",
     "title": "Frames"
    },
    {
-    "artist": "Annie",
-    "title": "Funk Like"
+    "artist": "Nausica",
+    "title": "Funky Operator"
    },
    {
     "artist": "Armand van Helden",
@@ -1653,16 +1625,16 @@
     "title": "Voyage"
    },
    {
-    "artist": "Jody Barr",
-    "title": "April Skies"
+    "artist": "Allen Watts & Paul Miller",
+    "title": "Visualize"
    },
    {
     "artist": "Eli Brown",
     "title": "92 Thing"
    },
    {
-    "artist": "Kylie Minogue",
-    "title": "Padam Padam"
+    "artist": "The Gap Band",
+    "title": "Jam The Motha'"
    },
    {
     "artist": "Armand van Helden",
@@ -1812,16 +1784,16 @@
     "title": "Voyage"
    },
    {
-    "artist": "Jody Barr",
-    "title": "April Skies"
+    "artist": "Allen Watts & Paul Miller",
+    "title": "Visualize"
    },
    {
     "artist": "Eli Brown",
     "title": "92 Thing"
    },
    {
-    "artist": "Kylie Minogue",
-    "title": "Padam Padam"
+    "artist": "The Gap Band",
+    "title": "Jam The Motha'"
    },
    {
     "artist": "Alton Miller ft. KB",
@@ -1840,16 +1812,16 @@
     "title": "Muyè"
    },
    {
-    "artist": "Jody Barr",
-    "title": "Blue Rain"
+    "artist": "Allen Watts & Bryn Whiting",
+    "title": "Vamos"
    },
    {
     "artist": "Eli Brown & Love Regenerator",
     "title": "Moving"
    },
    {
-    "artist": "DâM-FunK",
-    "title": "Burgundy City"
+    "artist": "Prince",
+    "title": "I Wanna Be Your Lover"
    },
    {
     "artist": "Spirit Of Sundaze Ensemble ft. CHERISE",

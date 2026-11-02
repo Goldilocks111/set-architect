@@ -72,9 +72,9 @@ function savedWhat(ratings: Record<string, Entry>): string {
   const r = all.filter((e) => e.rating !== undefined).length;
   const n = all.filter((e) => e.note).length;
   const parts = [];
-  if (r) parts.push(`the ${r} rating${r === 1 ? '' : 's'}`);
-  if (n) parts.push(`${r ? '' : 'the '}${n} saved note${n === 1 ? '' : 's'}`);
-  return parts.join(' and ') || 'your progress';
+  if (r) parts.push(`${r} rating${r === 1 ? '' : 's'}`);
+  if (n) parts.push(`${n} note${n === 1 ? '' : 's'}`);
+  return parts.length ? `your ${parts.join(' and ')}` : 'your progress';
 }
 
 const ring = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F2B33D]';
@@ -235,7 +235,7 @@ export default function RatingSession() {
 
       {pending && (
         <div role="alertdialog" aria-label="Replace ratings" className="flex flex-col gap-2 rounded-lg border border-[#F2B33D]/50 bg-[#1A1D28] p-3 text-[14px]">
-          <p>This is a different rating file. Replace it and delete {savedWhat(state.ratings)} you have saved?</p>
+          <p>This is a different rating file. Replacing it deletes {savedWhat(state.ratings)}. Continue?</p>
           <div className="flex gap-2">
             <button className={btn} onClick={() => setPending(null)}>Keep my ratings</button>
             <button className={`${btn} border-[#F2B33D]/60`} onClick={() => { update({ file: pending, ratings: {}, index: 0 }); setPending(null); }}>Replace and start over</button>

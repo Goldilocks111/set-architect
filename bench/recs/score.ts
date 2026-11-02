@@ -160,3 +160,36 @@ export function isWarmEntry<E extends { fields: unknown }>(
 ): boolean {
   return !!entry && deps.isComplete(entry.fields) && deps.stylesSettled(entry);
 }
+
+/**
+ * Lanes the 1001TL index + bench list cannot fill with grounded in-lane tracks: the crate is lowered to what is
+ * grounded, never padded with invented tracks (the measured run reports the thin crate as PARTIAL when it is < 30 ready).
+ */
+export const KNOWN_CRATE_SHORTFALL: Record<string, { minCrate: number; minInLane: number }> = {
+  'disco-opener': { minCrate: 30, minInLane: 16 },
+};
+
+export interface AuditCrateTrack {
+  artist: string;
+  title: string;
+  /** The track is in the scenario lane's pool (pools.json). */
+  inLanePool: boolean;
+  /** Cached Last.fm-derived lanes, when known. */
+  styles?: string[];
+}
+
+/**
+ * Data-backed lane audit (report only, never a gate): how many crate tracks carry the scenario lane in their cached
+ * styles, and which pool-lane tracks have styles that contradict the pool, so pools can be corrected from data.
+ */
+export function auditCrate(lane: string, crate: AuditCrateTrack[]) {
+  const tagged = crate.filter((c) => c.styles?.length);
+  return {
+    tagConfirmed: crate.filter((c) => c.styles?.includes(lane)).length,
+    inLanePool: crate.filter((c) => c.inLanePool).length,
+    untagged: crate.length - tagged.length,
+    contradictions: crate
+      .filter((c) => c.inLanePool && c.styles?.length && !c.styles.includes(lane))
+      .map(({ artist, title, styles }) => ({ artist, title, styles: styles! })),
+  };
+}
