@@ -360,6 +360,52 @@ describe('loadSuggestDeps demo-adjacency fallback (M3)', () => {
     });
   });
 
+  it('noStarterCrate (the recs bench) never takes demo "sample" neighbours, even in demo mode', async () => {
+    const demoOnlyKey = trackKeyOf('Outside Artist', 'Not In Pool');
+    const realGet = vi.fn(async () => []);
+    const demoGet = vi.fn(async () => [{ trackKey: demoOnlyKey, count: 4, direction: 'after' as const }]);
+    mocks.adjacency.loadAdjacency.mockImplementation(async (file?: string) =>
+      file === '/seed/adjacency.demo.json'
+        ? { getNeighbors: demoGet, pairCount: 1, trackCount: 2 }
+        : { getNeighbors: realGet, pairCount: 9, trackCount: 20 }
+    );
+    mocks.adjacency.readData.mockReturnValue({ names: { [demoOnlyKey]: { artist: 'Outside Artist', title: 'Not In Pool' } } });
+    mocks.resolver.resolveWithStatus.mockImplementation(async (artist: string, title: string) => ({
+      id: 'resolved-outside', artist, title, bpm: 122, camelot: '9A', energy: 5, danceability: 0.7, sources: {},
+    }));
+    mocks.resolver.getSimilarTracks.mockResolvedValue([]);
+
+    const deps = await loadSuggestDeps();
+    const suggestNext = vi.fn((_args: unknown) => []);
+    await assembleSuggestions(
+      { playlist: [last], template: '60min', plannedLength: 15 },
+      { ...deps, backgroundResolve: undefined, noStarterCrate: true, suggestNext }
+    );
+    const args = suggestNext.mock.calls[0][0] as { candidates: Track[]; adjacency: Map<string, number> };
+    expect(realGet).toHaveBeenCalled();
+    expect(demoGet).not.toHaveBeenCalled();
+    expect(args.adjacency.has(demoOnlyKey)).toBe(false);
+    expect(args.candidates.some((c) => c.artist === 'Outside Artist')).toBe(false);
+    expect(mocks.resolver.resolveWithStatus).not.toHaveBeenCalled();
+  });
+
+  it('noStarterCrate drops sample-flagged neighbours from any adjacency handle', async () => {
+    const suggestNext = vi.fn((_args: unknown) => []);
+    await assembleSuggestions(
+      { playlist: [last], template: '60min', plannedLength: 15 },
+      {
+        noStarterCrate: true,
+        suggestNext,
+        loadAdjacency: async () => ({
+          getNeighbors: async () => [{ trackKey: 'demo|only', count: 4, direction: 'after' as const, sample: true }],
+          pairCount: 0,
+          trackCount: 0,
+        }),
+      }
+    );
+    expect((suggestNext.mock.calls[0][0] as { adjacency: Map<string, number> }).adjacency.size).toBe(0);
+  });
+
   it('a pool track found via the demo index gets the adjacency count without a resolve', async () => {
     const poolKey = trackKeyOf(seed[1].artist, seed[1].title);
     mocks.adjacency.loadAdjacency.mockImplementation(async (file?: string) => ({

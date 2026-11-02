@@ -11,7 +11,8 @@ type DisplayName = { artist: string; title: string };
 type Neighbor = Awaited<ReturnType<AdjacencyLookup['getNeighbors']>>[number] & { sample?: boolean };
 
 export type AdjacencyHandle = {
-  getNeighbors(trackKey: string): Promise<Neighbor[]>;
+  /** `realOnly`: scraped neighbours only, never the generated demo fallback (the recs bench). */
+  getNeighbors(trackKey: string, opts?: { realOnly?: boolean }): Promise<Neighbor[]>;
   pairCount: number;
   trackCount: number;
   /** Display artist/title the index recorded for a normalized trackKey. */
@@ -45,7 +46,10 @@ export interface SuggestDeps {
   budgetMs?: number;
   /** Per-call cap for the adjacency and similarity lookups. */
   callTimeoutMs?: number;
-  /** Never pad a thin crate with the demo starter crate (the recs bench: its pool is the scenario crate + neighbours + similar only). */
+  /**
+   * Never pad a thin crate with the demo starter crate, and never take demo 'sample' adjacency neighbours, in any
+   * mode (the recs bench: its pool is the scenario crate + real neighbours + similar only).
+   */
   noStarterCrate?: boolean;
 }
 
@@ -278,7 +282,9 @@ export async function assembleSuggestions(
               const handle = await deps.loadAdjacency!();
               nameOf = handle.nameOf;
               playCountOf = handle.playCountOf;
-              return handle.getNeighbors(lastKey);
+              if (!deps.noStarterCrate) return handle.getNeighbors(lastKey);
+              const found = await handle.getNeighbors(lastKey, { realOnly: true });
+              return found.filter((n) => !n.sample);
             }),
           []
         ),
@@ -487,9 +493,9 @@ export async function loadSuggestDeps(): Promise<SuggestDeps> {
         trackCount: real.trackCount,
         nameOf,
         playCountOf: real.playCountOf,
-        getNeighbors: async (key: string) => {
+        getNeighbors: async (key: string, opts?: { realOnly?: boolean }) => {
           const found = await real.getNeighbors(key);
-          if (found.length) return found;
+          if (found.length || opts?.realOnly) return found;
           return (await demo.getNeighbors(key)).map((n) => ({ ...n, sample: true }));
         },
       };
