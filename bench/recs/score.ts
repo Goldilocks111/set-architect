@@ -13,15 +13,21 @@ export interface Scenario {
   template: ArcTemplate;
   plannedLength: number;
   set: TrackRef[];
+  /** Filled at run time by withCrates (the shared crate minus this set); scenarios.json carries none. */
   crate?: TrackRef[];
 }
 
 export const TOP_N = 10;
 /** Criterion 3: at least this many of the top 10 are compliant. */
 export const MIN_COMPLIANT = 8;
-/** Ready crate tracks a full (40-track) scenario crate needs; the bench never demo-pads (deps.noStarterCrate). */
+/** Ready crate tracks the shared crate needs; the bench never demo-pads (deps.noStarterCrate). */
 export const MIN_CRATE_READY = 30;
 export const SHUFFLE_SEED = 20261102;
+
+/** Hard per-provider request budgets (daily counts shared with the other benches). YouTube is never automatic: 0. */
+export const RECS_BUDGET: Record<string, number> = { spotify: 60, deezer: 300, lastfm: 400, musicbrainz: 200, reccobeats: 200, youtube: 0 };
+/** Adapters every bench resolve leaves out: iTunes IP-blocks us; YouTube search.list spends a shared quota. */
+export const BENCH_WITHOUT = ['itunes', 'youtube'];
 
 export function validateScenarios(list: Scenario[]): string[] {
   const errors: string[] = [];
@@ -65,15 +71,58 @@ export function summarizeRecs(rows: ScenarioScore[]): { n: number; passed: numbe
   };
 }
 
-/** PARTIAL on any provider degrade: a run that lost a provider says nothing about recommendation quality. */
-export function recsStatus(o: { passed: number; n: number; stopped: string[]; refused: string[]; cooldowns: string[]; lowCrate?: string[] }): string {
+/**
+ * PARTIAL on any provider degrade: a run that lost a provider says nothing about recommendation quality.
+ * POOL-LIMITED when some scenario had fewer than TOP_N compliant candidates at all: criterion 3 there measures the
+ * pool, not the engine, so the run cannot PASS.
+ */
+export function recsStatus(o: {
+  passed: number;
+  n: number;
+  stopped: string[];
+  refused: string[];
+  cooldowns: string[];
+  lowCrate?: string[];
+  poolLimited?: string[];
+}): string {
   const parts: string[] = [];
   if (o.lowCrate?.length) parts.push(`crate below its ready threshold, min(${MIN_CRATE_READY}, 75% of the crate) (thin pool; the bench never adds demo tracks): ${o.lowCrate.join(', ')}`);
   if (o.stopped.length) parts.push(`rate-limited: ${o.stopped.join(', ')}`);
   if (o.refused.length) parts.push(`budget exhausted: ${o.refused.join(', ')}`);
   if (o.cooldowns.length) parts.push(`breaker cooldown: ${o.cooldowns.join(', ')}`);
-  if (parts.length) return `PARTIAL (${parts.join('; ')})`;
+  const limited = o.poolLimited?.length ? `pool-limited: ${o.poolLimited.join(', ')}` : '';
+  if (parts.length) return `PARTIAL (${[...parts, ...(limited ? [limited] : [])].join('; ')})`;
+  if (limited) return `POOL-LIMITED (criterion 3 holds on ${o.passed}/${o.n}; ${limited})`;
   return o.passed === o.n ? 'PASS' : 'FAIL';
+}
+
+/** Scenarios whose pool held fewer than TOP_N compliant candidates (after exclusions): the engine could not reach 10. */
+export function poolLimitedScenarios(rows: Array<{ id: string; compliantAvailable: number }>): string[] {
+  return rows.filter((r) => r.compliantAvailable < TOP_N).map((r) => r.id);
+}
+
+/**
+ * The bench crate: every unique track of every lane pool (~225, a realistic DJ library), first spelling wins.
+ * Lane fit has to find the scenario's lane in it; the crate is not curated per scenario.
+ */
+export function sharedCrate(pools: Record<string, TrackRef[]>): TrackRef[] {
+  const seen = new Map<string, TrackRef>();
+  for (const list of Object.values(pools)) for (const { artist, title } of list) {
+    const k = trackKeyOf(artist, title);
+    if (!seen.has(k)) seen.set(k, { artist, title });
+  }
+  return [...seen.values()];
+}
+
+/** A scenario's crate: the shared crate without its own set tracks. */
+export function crateFor(scenario: Pick<Scenario, 'set'>, shared: TrackRef[]): TrackRef[] {
+  const inSet = new Set(scenario.set.map((t) => trackKeyOf(t.artist, t.title)));
+  return shared.filter((t) => !inSet.has(trackKeyOf(t.artist, t.title)));
+}
+
+export function withCrates(scenarios: Scenario[], pools: Record<string, TrackRef[]>): Scenario[] {
+  const shared = sharedCrate(pools);
+  return scenarios.map((s) => ({ ...s, crate: crateFor(s, shared) }));
 }
 
 /** mulberry32: small, deterministic PRNG. */
@@ -99,41 +148,115 @@ export function seededShuffle<T>(xs: readonly T[], seed: number): T[] {
   return out;
 }
 
-export interface RatingTrack {
-  artist: string;
-  title: string;
-  previewUrl?: string;
-  youtubeUrl?: string;
+export interface RatingList {
+  label: 'A' | 'B';
+  /** Artist/title only: previews are found on demand in /rate, so no list stands out by carrying them. */
+  tracks: TrackRef[];
 }
 
+/** What the owner rates. Version 2: two unlabelled lists per scenario, engine and baseline in a seeded random order. */
 export interface RatingFile {
-  version: 1;
-  scenarios: Array<{ id: string; name: string; template: ArcTemplate; set: TrackRef[]; tracks: RatingTrack[] }>;
+  version: 2;
+  fileId: string;
+  scenarios: Array<{ id: string; name: string; template: ArcTemplate; set: TrackRef[]; lists: RatingList[] }>;
 }
 
-/** The blind file: the set and the top-10 tracks only (shuffled), never scores, reasons or compliance. */
+/** Which list is which, per scenario id: written to the results file only, never to the rating file. */
+export type RatingKey = Record<string, { engine: 'A' | 'B'; baseline: 'A' | 'B' }>;
+
+/** Baseline tracks are drawn from the crate within this tempo distance of the last set track. */
+export const BASELINE_BPM_TOLERANCE = 0.06;
+
+/**
+ * The control list: TOP_N seeded random crate tracks within ±6% BPM of the last set track, engine picks left out
+ * while enough others match; short of that, matched engine picks, then the nearest-tempo rest. No BPM: whole crate.
+ */
+export function baselinePicks(o: { crate: Array<TrackRef & { bpm?: number }>; lastBpm?: number; engine: TrackRef[]; seed: number }): TrackRef[] {
+  const key = (t: TrackRef) => trackKeyOf(t.artist, t.title);
+  const engine = new Set(o.engine.map(key));
+  const last = o.lastBpm;
+  const near = (b?: number) => last === undefined || (b !== undefined && Math.abs(b - last) / last <= BASELINE_BPM_TOLERANCE);
+  const matched = o.crate.filter((t) => near(t.bpm));
+  const tiers = [
+    seededShuffle(matched.filter((t) => !engine.has(key(t))), o.seed),
+    seededShuffle(matched.filter((t) => engine.has(key(t))), o.seed + 1),
+    o.crate.filter((t) => !near(t.bpm)).sort((a, b) => Math.abs((a.bpm ?? Infinity) - last!) - Math.abs((b.bpm ?? Infinity) - last!)),
+  ];
+  const seen = new Set<string>();
+  const out: TrackRef[] = [];
+  for (const t of tiers.flat()) {
+    if (out.length >= TOP_N || seen.has(key(t))) continue;
+    seen.add(key(t));
+    out.push({ artist: t.artist, title: t.title });
+  }
+  return out;
+}
+
+/**
+ * The blind file and its key. Per scenario: the engine's top 10 and the baseline, each shuffled, presented as
+ * List A / List B in a seeded random order. The file holds artist/title only; the key goes to the results file.
+ */
 export function buildRatingFile(
-  results: Array<{ scenario: Scenario; suggestions: Suggestion[] }>,
-  seed = SHUFFLE_SEED,
-): RatingFile {
-  return {
-    version: 1,
-    scenarios: results.map(({ scenario, suggestions }, i) => ({
+  results: Array<{ scenario: Scenario; suggestions: Suggestion[]; crate: Array<TrackRef & { bpm?: number }>; lastBpm?: number }>,
+  opts: { seed?: number; fileId: string },
+): { file: RatingFile; key: RatingKey } {
+  const seed = opts.seed ?? SHUFFLE_SEED;
+  const key: RatingKey = {};
+  const scenarios = results.map(({ scenario, suggestions, crate, lastBpm }, i) => {
+    const s = seed + i * 7919;
+    const engine = suggestions.slice(0, TOP_N).map(({ track: t }) => ({ artist: t.artist, title: t.title }));
+    const baseline = baselinePicks({ crate, lastBpm, engine, seed: s + 1 });
+    const engineFirst = rng(s + 2)() < 0.5;
+    key[scenario.id] = engineFirst ? { engine: 'A', baseline: 'B' } : { engine: 'B', baseline: 'A' };
+    const [a, b] = engineFirst ? [engine, baseline] : [baseline, engine];
+    return {
       id: scenario.id,
       name: scenario.name,
       template: scenario.template,
       set: scenario.set.map(({ artist, title }) => ({ artist, title })),
-      tracks: seededShuffle(suggestions.slice(0, TOP_N), seed + i).map(({ track: t }) => {
-        const out: RatingTrack = { artist: t.artist, title: t.title };
-        if (t.previewUrl) out.previewUrl = t.previewUrl;
-        if (t.youtubeUrl) out.youtubeUrl = t.youtubeUrl;
-        return out;
-      }),
-    })),
+      lists: [
+        { label: 'A' as const, tracks: seededShuffle(a, s + 3) },
+        { label: 'B' as const, tracks: seededShuffle(b, s + 4) },
+      ],
+    };
+  });
+  return { file: { version: 2, fileId: opts.fileId, scenarios }, key };
+}
+
+/** Acceptance: the engine list rated >= 7 on >= 8 scenarios AND rated above the baseline on >= 7. */
+export const RATING_PASS = 7;
+export const RATING_MIN_GOOD = 8;
+export const RATING_MIN_BEATS = 7;
+
+/** The /rate export, as far as scoring needs it: per scenario, the rating of List A and of List B. */
+export interface RatingExport {
+  fileId?: string;
+  ratings: Array<{ id: string; A?: number | null; B?: number | null }>;
+}
+
+/** Scores an export through the key (never shown during rating). Unrated counts as neither good nor beating. */
+export function summarizeRatings(exp: RatingExport, key: RatingKey) {
+  const rows = exp.ratings
+    .filter((r) => key[r.id])
+    .map((r) => {
+      const k = key[r.id];
+      const engine = r[k.engine] ?? undefined;
+      const baseline = r[k.baseline] ?? undefined;
+      return { id: r.id, engine, baseline };
+    });
+  const engineGood = rows.filter((r) => (r.engine ?? 0) >= RATING_PASS).length;
+  const engineBeatsBaseline = rows.filter((r) => r.engine !== undefined && r.baseline !== undefined && r.engine > r.baseline).length;
+  return {
+    total: Object.keys(key).length,
+    rated: rows.filter((r) => r.engine !== undefined).length,
+    engineGood,
+    engineBeatsBaseline,
+    pass: engineGood >= RATING_MIN_GOOD && engineBeatsBaseline >= RATING_MIN_BEATS,
+    rows,
   };
 }
 
-/** Ready crate tracks a scenario needs: MIN_CRATE_READY for a full crate, 75% of a short (documented shortfall) crate. */
+/** Ready crate tracks a scenario needs: MIN_CRATE_READY, or 75% of a crate shorter than 40. */
 export const crateReadyThreshold = (crateSize: number): number => Math.min(MIN_CRATE_READY, Math.ceil(0.75 * crateSize));
 
 export function lowCrateScenarios(rows: Array<{ id: string; crateReady: number; crateSize: number }>): string[] {
@@ -156,6 +279,24 @@ export function selectWarmTargets(refs: TrackRef[], isCompleteInCache: (r: Track
   return { todo, complete: refs.length - todo.length };
 }
 
+/** Providers warm mode cannot do without: Deezer and MusicBrainz complete tracks keyless (with AcousticBrainz and preview analysis). */
+export const WARM_ESSENTIAL_PROVIDERS = ['deezer', 'musicbrainz'];
+/** Guard provider names that are also resolver adapters, so a spent one can be skipped via `without`. */
+const SKIPPABLE_ADAPTERS = new Set(['spotify', 'reccobeats']);
+
+/**
+ * Warm mode after each resolve: stop only when Deezer or MusicBrainz is refused or rate-limited. A spent Spotify (or
+ * ReccoBeats) budget just leaves that adapter out from then on (losing spotifyId -> ReccoBeats values); a spent
+ * Last.fm only means styles stop settling.
+ */
+export function warmStep(o: { stopped: string[]; refused: string[] }): { stop: boolean; without: string[] } {
+  const out = new Set([...o.stopped, ...o.refused]);
+  return {
+    stop: WARM_ESSENTIAL_PROVIDERS.some((p) => out.has(p)),
+    without: [...BENCH_WITHOUT, ...[...out].filter((p) => SKIPPABLE_ADAPTERS.has(p) && !BENCH_WITHOUT.includes(p))],
+  };
+}
+
 /** Whether warm mode can count styles; when it cannot, it counts essentials only and says why (lane fit will be blind). */
 export function warmStylesMode(o: { hasKey: boolean; tagsDisabled: boolean }): { countStyles: boolean; reason?: string } {
   if (!o.hasKey) return { countStyles: false, reason: 'LASTFM_API_KEY is not set, so styles can never settle' };
@@ -170,15 +311,6 @@ export function isWarmEntry<E extends { fields: unknown }>(
 ): boolean {
   return !!entry && deps.isComplete(entry.fields) && deps.stylesSettled(entry);
 }
-
-/**
- * Lanes the 1001TL index + bench list cannot fill with grounded in-lane tracks: the crate is lowered to what is
- * grounded, never padded with invented tracks, and its other-lane share is cut to match the full crates (~0.6 per
- * in-lane track) so the scenario is not rated low because of its crate. Readiness scales with it (crateReadyThreshold).
- */
-export const KNOWN_CRATE_SHORTFALL: Record<string, { minCrate: number; minInLane: number; maxOtherLane: number }> = {
-  'disco-opener': { minCrate: 24, minInLane: 15, maxOtherLane: 10 },
-};
 
 export interface AuditCrateTrack {
   artist: string;

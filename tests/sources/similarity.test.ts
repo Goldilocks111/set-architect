@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { lastfmSimilar } from '@/lib/sources/lastfm';
 import { listenbrainzSimilar } from '@/lib/sources/listenbrainz';
+import { configureMusicBrainzLimiter, musicBrainzQueueDelayMs, MUSICBRAINZ_UA } from '@/lib/sources/musicbrainz';
 import { configureLastfmPacing, resetLastfmTags } from '@/lib/sources/lastfmTags';
 import { getSimilarTracks } from '@/lib/resolver';
 import { cooldownUntil, resetBreakers, resetBudgets, takeBudget, APP_PER_MINUTE_BUDGET } from '@/lib/search/breaker';
@@ -19,6 +20,7 @@ beforeEach(() => {
   resetBudgets();
   resetLastfmTags();
   configureLastfmPacing(0);
+  configureMusicBrainzLimiter(0);
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -72,6 +74,14 @@ describe('listenbrainz', () => {
     mockFetch([['musicbrainz.org', () => json({ recordings: [] })]]);
     expect(await listenbrainzSimilar('a', 'b')).toEqual([]);
   });
+  it('its MusicBrainz lookup goes through the shared 1 req/s limiter with the mandatory User-Agent', async () => {
+    configureMusicBrainzLimiter(5000);
+    const f = mockFetch(lb);
+    await listenbrainzSimilar('a', 'b');
+    expect(musicBrainzQueueDelayMs()).toBeGreaterThan(4000); // it took a slot in the shared queue
+    const mbCall = f.mock.calls.find((c) => String(c[0]).includes('musicbrainz.org'))!;
+    expect(new Headers(((mbCall as unknown[])[1] as RequestInit | undefined)?.headers).get('user-agent')).toBe(MUSICBRAINZ_UA);
+  });
 });
 
 describe('getSimilarTracks', () => {
@@ -98,6 +108,40 @@ describe('getSimilarTracks', () => {
     expect(await getSimilarTracks('a', 'b')).toEqual([]);
   });
 
+  it('a ListenBrainz failure is cached for the fallback TTL (no Last.fm key)', async () => {
+    vi.stubEnv('LASTFM_API_KEY', '');
+    const f = mockFetch([['musicbrainz.org', () => json({}, 503)]]);
+    expect(await getSimilarTracks('a', 'b')).toEqual([]);
+    const calls = f.mock.calls.length;
+    expect(await getSimilarTracks('a', 'b')).toEqual([]);
+    expect(f).toHaveBeenCalledTimes(calls);
+    const now = Date.now();
+    expect(getSimilarCached(trackKeyOf('a', 'b'), now + SIMILAR_FALLBACK_TTL_MS - 1000)).toEqual([]);
+    expect(getSimilarCached(trackKeyOf('a', 'b'), now + SIMILAR_FALLBACK_TTL_MS + 1000)).toBeUndefined();
+  });
+  it('empty Last.fm + ListenBrainz failure is cached for the fallback TTL: the next refresh asks nobody', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    const f = mockFetch([
+      ['audioscrobbler', () => json({ similartracks: { track: [] } })],
+      ['musicbrainz.org', () => json({}, 503)],
+    ]);
+    expect(await getSimilarTracks('a', 'b')).toEqual([]);
+    const calls = f.mock.calls.length;
+    expect(await getSimilarTracks('a', 'b')).toEqual([]);
+    expect(f).toHaveBeenCalledTimes(calls);
+    const now = Date.now();
+    expect(getSimilarCached(trackKeyOf('a', 'b'), now + SIMILAR_FALLBACK_TTL_MS + 1000)).toBeUndefined();
+  });
+  it('skips the ListenBrainz fallback (no MusicBrainz slot taken, nothing cached) while the MusicBrainz queue is deep', async () => {
+    vi.stubEnv('LASTFM_API_KEY', '');
+    configureMusicBrainzLimiter(10_000);
+    const f = mockFetch([['musicbrainz.org', () => json({ recordings: [] })]]);
+    await listenbrainzSimilar('warm', 'up'); // takes a slot: the next one would wait ~10 s
+    f.mockClear();
+    expect(await getSimilarTracks('a', 'b')).toEqual([]);
+    expect(f).not.toHaveBeenCalled();
+    expect(getSimilarCached(trackKeyOf('a', 'b'))).toBeUndefined();
+  });
   it('a cache hit makes no call', async () => {
     vi.stubEnv('LASTFM_API_KEY', 'k');
     const f = mockFetch([['audioscrobbler', lfm], ...lb]);

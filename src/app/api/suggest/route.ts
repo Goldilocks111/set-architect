@@ -9,7 +9,6 @@ const MAX_PLAYLIST = 200;
 /** Mirrors CRATE_SEND_MAX on the client: a bigger payload is truncated, not trusted. */
 const MAX_CRATE = 600;
 const MAX_CRATE_TEXT = 200;
-const MAX_STYLES = 10;
 
 /** A crate item is an ordinary client track under tighter text caps; one bad item never rejects the request. */
 function sanitizeCrate(raw: unknown): Track[] {
@@ -19,12 +18,8 @@ function sanitizeCrate(raw: unknown): Track[] {
     const o = item as Record<string, unknown> | null;
     if (!o || typeof o !== 'object') continue;
     if ([o.id, o.artist, o.title].some((v) => typeof v === 'string' && v.length > MAX_CRATE_TEXT)) continue;
-    const t = sanitizeTrack(o);
-    if (!t) continue;
-    const styles = Array.isArray(o.styles)
-      ? o.styles.filter((s): s is string => typeof s === 'string' && s.trim() !== '' && s.length <= MAX_CRATE_TEXT).slice(0, MAX_STYLES)
-      : [];
-    out.push(styles.length ? Object.assign(t, { styles }) : t);
+    const t = sanitizeTrack(o); // keeps a bounded styles list, as for set tracks
+    if (t) out.push(t);
   }
   return out;
 }
@@ -83,10 +78,8 @@ export async function POST(request: Request) {
     }
   }
 
-  const result: { suggestions: Suggestion[]; crateKnown?: CrateKnown[]; digging?: true } = await assembleSuggestions(
-    { playlist, template, plannedLength, crate },
-    await loadSuggestDeps()
-  );
+  const { suggestions, crateKnown } = await assembleSuggestions({ playlist, template, plannedLength, crate }, await loadSuggestDeps());
+  const result: { suggestions: Suggestion[]; crateKnown?: CrateKnown[]; digging?: true } = { suggestions, crateKnown };
   if (digging) result.digging = true;
 
   if (gatedUserId) {

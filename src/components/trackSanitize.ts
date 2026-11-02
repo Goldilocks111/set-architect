@@ -4,6 +4,8 @@ const CAMELOT = /^([1-9]|1[0-2])[AB]$/;
 const ISRC = /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/i;
 const MAX_TEXT = 300;
 const MAX_URL = 2000;
+const MAX_STYLES = 10;
+const MAX_STYLE_TEXT = 100;
 
 /** http(s) URLs only; anything else (data:, javascript:, relative) is dropped. */
 export function safeHttpUrl(v: unknown): string | undefined {
@@ -23,6 +25,13 @@ const text = (v: unknown, max = MAX_TEXT) =>
 function spotifyUrl(v: unknown): string | undefined {
   const url = safeHttpUrl(v);
   return url && url.startsWith('https://open.spotify.com/') ? url : undefined;
+}
+
+/** Style lanes: short non-empty strings, at most MAX_STYLES; anything else is dropped. */
+function styles(v: unknown): string[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out = v.filter((s): s is string => typeof s === 'string' && s.trim() !== '' && s.length <= MAX_STYLE_TEXT).slice(0, MAX_STYLES);
+  return out.length ? out : undefined;
 }
 
 const numIn = (v: unknown, min: number, max: number) =>
@@ -62,6 +71,7 @@ export function sanitizeTrack(v: unknown): Track | null {
     youtubeUrl: safeHttpUrl(o.youtubeUrl),
     year: year !== undefined && Number.isInteger(year) ? year : undefined,
     spotifyId: typeof o.spotifyId === 'string' && /^[A-Za-z0-9]{22}$/.test(o.spotifyId) ? o.spotifyId : undefined,
+    styles: styles(o.styles),
     sources: {},
   };
 

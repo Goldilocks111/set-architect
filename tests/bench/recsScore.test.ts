@@ -2,13 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LANES } from '@/lib/style/taxonomy';
-import type { Suggestion } from '@/types/track';
+import { trackKeyOf, type Suggestion } from '@/types/track';
 import {
   buildRatingFile,
+  baselinePicks,
+  summarizeRatings,
+  warmStep,
   auditCrate,
   isWarmEntry,
   warmStylesMode,
-  KNOWN_CRATE_SHORTFALL,
+  crateFor,
+  poolLimitedScenarios,
+  sharedCrate,
+  withCrates,
   lowCrateScenarios,
   crateReadyThreshold,
   MIN_CRATE_READY,
@@ -45,37 +51,29 @@ describe('scenarios.json', () => {
   });
   const pools: Record<string, Array<{ artist: string; title: string }>> = JSON.parse(readFileSync(join(__dirname, '../../bench/recs/pools.json'), 'utf8'));
   const k = (t: { artist: string; title: string }) => `${t.artist}|${t.title}`;
-  it('gives each scenario a 40-track crate: >= 24 in its lane, <= 16 from other lanes', () => {
-    expect(new Set(scenarios.map((s) => s.id)).size).toBe(10);
-    for (const s of scenarios) {
-      const lane = new Set((pools[s.lane] ?? []).map(k));
-      const short = KNOWN_CRATE_SHORTFALL[s.id];
-      expect(new Set(s.crate!.map(k)).size, s.id).toBe(s.crate!.length);
-      const inLane = s.crate!.filter((c) => lane.has(k(c))).length;
-      // a lane the index cannot fill with grounded tracks is lowered, never padded with invented ones (documented)
-      if (short) expect(s.crate!.length, s.id).toBeGreaterThanOrEqual(short.minCrate);
-      else expect(s.crate, s.id).toHaveLength(40);
-      expect(inLane, s.id).toBeGreaterThanOrEqual(short ? short.minInLane : 24);
-      expect(s.crate!.length - inLane, s.id).toBeLessThanOrEqual(short ? short.maxOtherLane : 16);
-      // in-lane stays a clear majority (other crates run ~0.58 other-lane per in-lane)
-      expect((s.crate!.length - inLane) / inLane, s.id).toBeLessThanOrEqual(0.7);
-    }
+  it('carries no per-scenario crate: every scenario rates against the shared crate (union of all lane pools)', () => {
+    for (const s of scenarios) expect(s.crate, s.id).toBeUndefined();
   });
-  it('keeps the short disco-opener crate balanced: no techno/melodic-techno distractors, <= 10 other-lane', () => {
-    const s = scenarios.find((x) => x.id === 'disco-opener')!;
-    expect(KNOWN_CRATE_SHORTFALL['disco-opener'].maxOtherLane).toBeLessThanOrEqual(10);
-    const other = (lane: string) => s.crate!.filter((c) => pools[lane].some((p) => k(p) === k(c))).length;
-    expect(other('techno')).toBe(0);
-    expect(other('melodic-techno')).toBe(0);
-    // the short crate does not go PARTIAL just because it is short: 75% of it is enough
-    expect(crateReadyThreshold(s.crate!.length)).toBeLessThanOrEqual(Math.ceil(0.75 * s.crate!.length));
+  it('sharedCrate is every unique pool track (~225, a realistic DJ library), first spelling wins', () => {
+    const shared = sharedCrate(pools);
+    const keys = shared.map((t) => trackKeyOf(t.artist, t.title));
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(shared.length).toBe(new Set(Object.values(pools).flat().map((t) => trackKeyOf(t.artist, t.title))).size);
+    expect(shared.length).toBeGreaterThanOrEqual(200);
+    expect(Object.keys(shared[0]).sort()).toEqual(['artist', 'title']);
   });
-  it('keeps the unique track count warm-able (<= 250) and set tracks out of the crate', () => {
-    expect(uniqueScenarioTracks(scenarios).length).toBeLessThanOrEqual(250);
-    for (const s of scenarios) {
-      const crate = new Set(s.crate!.map(k));
-      for (const t of s.set) expect(crate.has(k(t)), `${s.id} ${k(t)}`).toBe(false);
+  it("crateFor leaves the scenario's own set tracks out; every lane is represented", () => {
+    const shared = sharedCrate(pools);
+    for (const s of withCrates(scenarios, pools)) {
+      const crate = new Set(s.crate!.map((t) => trackKeyOf(t.artist, t.title)));
+      for (const t of s.set) expect(crate.has(trackKeyOf(t.artist, t.title)), `${s.id} ${k(t)}`).toBe(false);
+      expect(s.crate!.length, s.id).toBe(shared.length - s.set.filter((t) => shared.some((c) => trackKeyOf(c.artist, c.title) === trackKeyOf(t.artist, t.title))).length);
+      for (const lane of Object.keys(pools)) expect(s.crate!.some((c) => pools[lane].some((p) => trackKeyOf(p.artist, p.title) === trackKeyOf(c.artist, c.title))), `${s.id} ${lane}`).toBe(true);
     }
+    expect(crateFor({ set: [{ artist: 'X', title: 'Y' }] }, [{ artist: 'x', title: 'y (Original Mix)' }, { artist: 'Z', title: 'W' }])).toEqual([{ artist: 'Z', title: 'W' }]);
+  });
+  it('keeps the unique track count warm-able (<= 250)', () => {
+    expect(uniqueScenarioTracks(withCrates(scenarios, pools)).length).toBeLessThanOrEqual(250);
   });
   it('uses in-lane set tracks (the lane change and the incomplete-track probe are exempt)', () => {
     for (const s of scenarios.filter((x) => !['lane-change', 'incomplete-track'].includes(x.id))) {
@@ -118,6 +116,20 @@ describe('summary and status', () => {
     expect(summarizeRecs(rows(10))).toMatchObject({ n: 10, passed: 10 });
     expect(summarizeRecs(rows(6))).toMatchObject({ n: 10, passed: 6 });
   });
+  it('a pool-limited scenario (< 10 compliant candidates available) means the run cannot PASS, and is named', () => {
+    expect(poolLimitedScenarios([{ id: 'a', compliantAvailable: 9 }, { id: 'b', compliantAvailable: 10 }, { id: 'c', compliantAvailable: 0 }])).toEqual(['a', 'c']);
+    const base = { passed: 10, n: 10, stopped: [], refused: [], cooldowns: [] };
+    expect(recsStatus({ ...base, poolLimited: [] })).toBe('PASS');
+    expect(recsStatus({ ...base, poolLimited: ['a', 'c'] })).toMatch(/^POOL-LIMITED.*a, c/);
+    expect(recsStatus({ ...base, passed: 7, poolLimited: ['a'] })).toMatch(/^POOL-LIMITED/);
+    expect(recsStatus({ ...base, refused: ['spotify'], poolLimited: ['a'] })).toMatch(/^PARTIAL.*pool-limited: a/);
+  });
+  it('run.ts records compliantAvailable per row and prints the pool-limited scenarios', () => {
+    const run = readFileSync(join(__dirname, '../../bench/recs/run.ts'), 'utf8');
+    expect(run).toMatch(/compliantAvailable/);
+    expect(run).toMatch(/poolLimitedScenarios\(rows\)/);
+    expect(run).toMatch(/withCrates\(/);
+  });
   it('PASS only at 10/10 with no degrade; PARTIAL on any stop/refusal/cooldown', () => {
     const base = { passed: 10, n: 10, stopped: [], refused: [], cooldowns: [] };
     expect(recsStatus(base)).toBe('PASS');
@@ -140,31 +152,115 @@ describe('seededShuffle', () => {
   });
 });
 
-describe('buildRatingFile (blind)', () => {
-  const results = [
-    { scenario: { ...sc('s1'), crate: [{ artist: 'C', title: 'D' }] }, suggestions: ten((i) => ({ styles: ['techno'], compliant: i % 2 === 0 })) },
-    { scenario: sc('s2'), suggestions: ten() },
-  ];
-  it('keeps only set + artist/title/previewUrl/youtubeUrl: no scores, reasons or compliant flags', () => {
-    const file = buildRatingFile(results, 7);
+describe('buildRatingFile (blind, engine vs baseline)', () => {
+  const crate = Array.from({ length: 40 }, (_, i) => ({ artist: `Crate ${i}`, title: `C${i}`, bpm: 120 + (i % 20) }));
+  const results = Array.from({ length: 10 }, (_, i) => ({
+    scenario: { ...sc(`s${i}`), crate: crate.map(({ artist, title }) => ({ artist, title })) },
+    suggestions: ten((j) => ({ styles: ['techno'], compliant: j % 2 === 0 })),
+    crate,
+    lastBpm: 124,
+  }));
+  it('two unlabelled lists of 10 per scenario; tracks carry artist/title only; nothing identifies the engine', () => {
+    const { file } = buildRatingFile(results, { seed: 7, fileId: 'f1' });
     const text = JSON.stringify(file);
-    for (const banned of ['score', 'reason', 'compliant', 'Perfect match', 'styles', 'crate', 'plannedLength']) expect(text).not.toContain(banned);
-    expect(file.scenarios).toHaveLength(2);
-    expect(Object.keys(file.scenarios[0].tracks[0]).sort()).toEqual(['artist', 'previewUrl', 'title', 'youtubeUrl']);
-    expect(file.scenarios[0].tracks).toHaveLength(10);
+    for (const banned of ['score', 'reason', 'compliant', 'Perfect match', 'styles', 'crate', 'plannedLength', 'engine', 'baseline', 'previewUrl', 'youtubeUrl', 'bpm'])
+      expect(text, banned).not.toContain(banned);
+    expect(file).toMatchObject({ version: 2, fileId: 'f1' });
+    expect(file.scenarios).toHaveLength(10);
+    for (const s of file.scenarios) {
+      expect(s.lists.map((l) => l.label)).toEqual(['A', 'B']);
+      for (const l of s.lists) {
+        expect(l.tracks).toHaveLength(10);
+        for (const t of l.tracks) expect(Object.keys(t).sort()).toEqual(['artist', 'title']);
+      }
+    }
     expect(file.scenarios[0].set).toEqual([{ artist: 'A', title: 'B' }]);
   });
-  it('shuffles with a fixed seed: same seed same order, and not the engine rank order', () => {
-    const order = (f: ReturnType<typeof buildRatingFile>) => f.scenarios[0].tracks.map((t) => t.title);
-    expect(order(buildRatingFile(results, 7))).toEqual(order(buildRatingFile(results, 7)));
-    expect(order(buildRatingFile(results, 7))).not.toEqual(results[0].suggestions.map((s) => s.track.title));
+  it('the key (results file only) says which list is the engine; the engine list holds the top 10, shuffled', () => {
+    const { file, key } = buildRatingFile(results, { seed: 7, fileId: 'f1' });
+    for (const s of file.scenarios) {
+      const label = key[s.id].engine;
+      expect(['A', 'B']).toContain(label);
+      expect(key[s.id].baseline).toBe(label === 'A' ? 'B' : 'A');
+      const engine = s.lists.find((l) => l.label === label)!;
+      expect(engine.tracks.map((t) => t.title).sort()).toEqual(ten().map((x) => x.track.title).sort());
+      expect(engine.tracks.map((t) => t.title)).not.toEqual(ten().map((x) => x.track.title));
+    }
+  });
+  it('deterministic per seed; the A/B order is randomized per scenario', () => {
+    const a = buildRatingFile(results, { seed: 7, fileId: 'f1' });
+    expect(buildRatingFile(results, { seed: 7, fileId: 'f1' })).toEqual(a);
+    const labels = Object.values(a.key).map((k) => k.engine);
+    expect(new Set(labels)).toEqual(new Set(['A', 'B']));
+    expect(buildRatingFile(results, { seed: 8, fileId: 'f1' }).file).not.toEqual(a.file);
+  });
+});
+
+describe('baselinePicks', () => {
+  const crate = Array.from({ length: 60 }, (_, i) => ({ artist: `Crate ${i}`, title: `C${i}`, bpm: 100 + i }));
+  const engine = crate.filter((c) => c.bpm >= 120 && c.bpm <= 123).map(({ artist, title }) => ({ artist, title }));
+  it('10 seeded random crate tracks within ±6% BPM of the last set track, excluding engine picks', () => {
+    const picks = baselinePicks({ crate, lastBpm: 125, engine, seed: 3 });
+    expect(picks).toHaveLength(10);
+    expect(baselinePicks({ crate, lastBpm: 125, engine, seed: 3 })).toEqual(picks);
+    expect(baselinePicks({ crate, lastBpm: 125, engine, seed: 4 })).not.toEqual(picks);
+    const engineKeys = new Set(engine.map((t) => t.title));
+    for (const p of picks) {
+      const bpm = crate.find((c) => c.title === p.title)!.bpm;
+      expect(Math.abs(bpm - 125) / 125).toBeLessThanOrEqual(0.06);
+      expect(engineKeys.has(p.title)).toBe(false);
+    }
+  });
+  it('uses engine picks only when the tempo-matched crate runs short, then the nearest-tempo rest', () => {
+    const small = crate.slice(18, 27); // bpm 118..126: 9 tracks, all within 6% of 122
+    const eng = [{ artist: 'Crate 20', title: 'C20' }];
+    const picks = baselinePicks({ crate: [...small, ...crate.slice(0, 3)], lastBpm: 122, engine: eng, seed: 1 });
+    expect(picks).toHaveLength(10);
+    expect(picks.map((p) => p.title)).toContain('C20'); // only 8 non-engine matches, so the engine pick is reused
+    expect(picks.filter((p) => ['C0', 'C1', 'C2'].includes(p.title))).toHaveLength(1);
+    expect(picks.map((p) => p.title)).toContain('C2'); // nearest tempo (102) of the out-of-range rest
+  });
+  it('without a last-track BPM it draws from the whole crate', () => {
+    expect(baselinePicks({ crate, lastBpm: undefined, engine: [], seed: 1 })).toHaveLength(10);
+  });
+});
+
+describe('summarizeRatings (acceptance; never shown during rating)', () => {
+  const key = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`s${i}`, i % 2 ? { engine: 'A' as const, baseline: 'B' as const } : { engine: 'B' as const, baseline: 'A' as const }]));
+  const exp = (f: (i: number) => { engine?: number; baseline?: number }) => ({
+    fileId: 'f1',
+    ratings: Array.from({ length: 10 }, (_, i) => {
+      const r = f(i);
+      const k = key[`s${i}`];
+      return { id: `s${i}`, [k.engine]: r.engine ?? null, [k.baseline]: r.baseline ?? null };
+    }),
+  });
+  it('passes at engine >= 7 on >= 8 scenarios AND engine > baseline on >= 7', () => {
+    const r = summarizeRatings(exp((i) => ({ engine: i < 8 ? 8 : 5, baseline: i < 7 ? 6 : 9 })), key);
+    expect(r).toMatchObject({ total: 10, engineGood: 8, engineBeatsBaseline: 7, pass: true });
+  });
+  it('fails when the engine does not beat the baseline often enough, even with high ratings', () => {
+    const r = summarizeRatings(exp((i) => ({ engine: 9, baseline: i < 6 ? 8 : 9 })), key);
+    expect(r).toMatchObject({ engineGood: 10, engineBeatsBaseline: 6, pass: false });
+  });
+  it('fails at 7 good; unrated counts as neither good nor beating', () => {
+    expect(summarizeRatings(exp((i) => ({ engine: i < 7 ? 8 : 6, baseline: 1 })), key)).toMatchObject({ engineGood: 7, pass: false });
+    expect(summarizeRatings(exp((i) => (i < 9 ? { engine: 9, baseline: 1 } : {})), key)).toMatchObject({ engineGood: 9, engineBeatsBaseline: 9, rated: 9, pass: true });
+    expect(summarizeRatings(exp(() => ({ engine: 9 })), key)).toMatchObject({ engineBeatsBaseline: 0, pass: false });
+  });
+  it('maps A/B through the key: swapping the key swaps the verdict', () => {
+    const e = exp((i) => ({ engine: 9, baseline: 2 + (i % 2) }));
+    const swapped = Object.fromEntries(Object.entries(key).map(([id, k]) => [id, { engine: k.baseline, baseline: k.engine }]));
+    expect(summarizeRatings(e, key).pass).toBe(true);
+    expect(summarizeRatings(e, swapped).pass).toBe(false);
   });
 });
 
 describe('crate readiness', () => {
-  it('flags scenarios with fewer than 30 ready crate tracks (40-track crates)', () => {
+  it('flags scenarios with fewer than 30 ready crate tracks (the shared ~225 crate)', () => {
     expect(MIN_CRATE_READY).toBe(30);
     expect(crateReadyThreshold(40)).toBe(30);
+    expect(crateReadyThreshold(222)).toBe(30);
     expect(lowCrateScenarios([{ id: 'a', crateReady: 30, crateSize: 40 }, { id: 'b', crateReady: 29, crateSize: 40 }, { id: 'c', crateReady: 0, crateSize: 40 }])).toEqual(['b', 'c']);
   });
   it('scales the threshold for a short crate: min(30, ceil(0.75 x crate length))', () => {
@@ -269,10 +365,11 @@ describe('isWarmEntry', () => {
 
 describe('warm mode selection', () => {
   it('dedupes set + crate tracks across scenarios by track key', () => {
-    const u = uniqueScenarioTracks(scenarios);
+    const pools = JSON.parse(readFileSync(join(__dirname, '../../bench/recs/pools.json'), 'utf8'));
+    const u = uniqueScenarioTracks(withCrates(scenarios, pools));
     const keys = u.map((t) => `${t.artist}|${t.title}`);
     expect(new Set(keys).size).toBe(keys.length);
-    expect(u.length).toBeLessThan(scenarios.reduce((n, s) => n + s.set.length + (s.crate?.length ?? 0), 0));
+    expect(u.length).toBeLessThan(withCrates(scenarios, pools).reduce((n, s) => n + s.set.length + (s.crate?.length ?? 0), 0));
     for (const s of scenarios) for (const t of s.set) expect(keys).toContain(`${t.artist}|${t.title}`);
   });
   it('skips tracks the cache already holds complete, so a warm run is resumable', () => {
@@ -281,5 +378,28 @@ describe('warm mode selection', () => {
     const { todo, complete } = selectWarmTargets(refs, (r) => done.has(`${r.artist.toLowerCase()}|${r.title}`));
     expect(todo.map((t) => t.title)).toEqual(['one', 'three']);
     expect(complete).toBe(1);
+  });
+});
+
+describe('warmStep (I6: keep warming after the Spotify budget is spent)', () => {
+  it('nothing degraded: continue with the bench exclusions only', () => {
+    expect(warmStep({ stopped: [], refused: [] })).toEqual({ stop: false, without: ['itunes', 'youtube'] });
+  });
+  it('Spotify refused (budget) or rate-limited: continue on Deezer + MusicBrainz, Spotify skipped via without', () => {
+    expect(warmStep({ stopped: [], refused: ['spotify'] })).toEqual({ stop: false, without: ['itunes', 'youtube', 'spotify'] });
+    expect(warmStep({ stopped: ['spotify'], refused: [] })).toEqual({ stop: false, without: ['itunes', 'youtube', 'spotify'] });
+  });
+  it('Last.fm or ReccoBeats out: still continue (ReccoBeats skipped; styles simply do not settle)', () => {
+    expect(warmStep({ stopped: ['lastfm'], refused: ['reccobeats'] })).toEqual({ stop: false, without: ['itunes', 'youtube', 'reccobeats'] });
+  });
+  it('stops only when Deezer or MusicBrainz is refused or rate-limited', () => {
+    expect(warmStep({ stopped: [], refused: ['deezer'] }).stop).toBe(true);
+    expect(warmStep({ stopped: ['musicbrainz'], refused: ['spotify'] }).stop).toBe(true);
+    expect(warmStep({ stopped: ['deezer-cdn'], refused: [] }).stop).toBe(false);
+  });
+  it('run.ts uses it in the warm loop instead of stopping at the first refusal', () => {
+    const run = readFileSync(join(__dirname, '../../bench/recs/run.ts'), 'utf8');
+    expect(run).toMatch(/warmStep\(/);
+    expect(run).not.toMatch(/if \(guard\.stopped\.size \|\| Object\.keys\(guard\.refused\)\.length\) break/);
   });
 });

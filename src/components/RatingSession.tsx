@@ -2,39 +2,45 @@
 
 import { useEffect, useRef, useState } from 'react';
 import PreviewPlayer from './PreviewPlayer';
-import { previewSource } from './trackFormat';
+import { fetchResolved, previewSource } from './trackFormat';
 import { safeHttpUrl } from './trackSanitize';
 import type { Track } from '@/types/track';
 
-export const RATING_STORAGE_KEY = 'setarch:rating:v1';
-export const PASS_RATING = 7;
-export const PASS_SCENARIOS = 8;
+export const RATING_STORAGE_KEY = 'setarch:rating:v2';
 
-interface RTrack { artist: string; title: string; previewUrl?: string; youtubeUrl?: string }
-interface RScenario { id: string; name: string; template?: string; set: Array<{ artist: string; title: string }>; tracks: RTrack[] }
-export interface RatingFile { version: 1; scenarios: RScenario[] }
-interface Entry { rating?: number; note?: string }
+type Label = 'A' | 'B';
+const LABELS: Label[] = ['A', 'B'];
+interface RTrack { artist: string; title: string }
+interface RList { label: Label; tracks: RTrack[] }
+interface RScenario { id: string; name: string; template?: string; set: RTrack[]; lists: RList[] }
+export interface RatingFile { version: 2; fileId: string; scenarios: RScenario[] }
+interface Entry { A?: number; B?: number; note?: string }
 interface Saved { file: RatingFile; ratings: Record<string, Entry>; index: number }
 
 const isStr = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
-const isRef = (v: any): v is { artist: string; title: string } => v && isStr(v.artist) && isStr(v.title);
+const isRef = (v: any): v is RTrack => v && isStr(v.artist) && isStr(v.title);
+const ref = ({ artist, title }: RTrack): RTrack => ({ artist, title });
 
-/** Accepts only the shape bench:recs writes; anything else is rejected rather than half-rendered. */
+/**
+ * Accepts only the shape bench:recs writes (version 2: List A and List B per scenario); anything else is rejected
+ * rather than half-rendered. Tracks keep artist/title only: nothing else may tell the lists apart.
+ */
 export function parseRatingFile(text: string): RatingFile | null {
   try {
     const j = JSON.parse(text);
-    if (!j || !Array.isArray(j.scenarios) || j.scenarios.length === 0) return null;
+    if (!j || j.version !== 2 || !isStr(j.fileId) || !Array.isArray(j.scenarios) || j.scenarios.length === 0) return null;
     const scenarios: RScenario[] = [];
     for (const s of j.scenarios) {
-      if (!s || !isStr(s.id) || !isStr(s.name) || !Array.isArray(s.set) || !Array.isArray(s.tracks)) return null;
-      if (!s.set.every(isRef) || !s.tracks.every(isRef)) return null;
-      scenarios.push({
-        id: s.id, name: s.name, template: typeof s.template === 'string' ? s.template : undefined,
-        set: s.set.map(({ artist, title }: RTrack) => ({ artist, title })),
-        tracks: s.tracks.map((t: RTrack) => ({ artist: t.artist, title: t.title, previewUrl: safeHttpUrl(t.previewUrl), youtubeUrl: safeHttpUrl(t.youtubeUrl) })),
-      });
+      if (!s || !isStr(s.id) || !isStr(s.name) || !Array.isArray(s.set) || !s.set.every(isRef) || !Array.isArray(s.lists)) return null;
+      const lists: RList[] = [];
+      for (const label of LABELS) {
+        const l = s.lists.find((x: any) => x?.label === label);
+        if (!l || !Array.isArray(l.tracks) || !l.tracks.every(isRef)) return null;
+        lists.push({ label, tracks: l.tracks.map(ref) });
+      }
+      scenarios.push({ id: s.id, name: s.name, template: typeof s.template === 'string' ? s.template : undefined, set: s.set.map(ref), lists });
     }
-    return { version: 1, scenarios };
+    return { version: 2, fileId: j.fileId, scenarios };
   } catch {
     return null;
   }
@@ -60,16 +66,15 @@ function save(s: Saved): void {
   }
 }
 
-/** The whole session verdict: >= 8 scenarios rated >= 7 (of however many the file holds). */
-export function summarize(file: RatingFile, ratings: Record<string, Entry>) {
-  const rated = file.scenarios.filter((s) => ratings[s.id]?.rating !== undefined).length;
-  const good = file.scenarios.filter((s) => (ratings[s.id]?.rating ?? 0) >= PASS_RATING).length;
-  return { rated, good, total: file.scenarios.length, pass: good >= PASS_SCENARIOS };
+/** Progress only: the verdict (engine vs baseline) is scored afterwards by bench:recs:ratings, never shown here. */
+export function progress(file: RatingFile, ratings: Record<string, Entry>) {
+  const rated = file.scenarios.reduce((n, s) => n + LABELS.filter((l) => ratings[s.id]?.[l] !== undefined).length, 0);
+  return { rated, total: file.scenarios.length * LABELS.length };
 }
 
 function savedWhat(ratings: Record<string, Entry>): string {
   const all = Object.values(ratings);
-  const r = all.filter((e) => e.rating !== undefined).length;
+  const r = all.reduce((n, e) => n + LABELS.filter((l) => e[l] !== undefined).length, 0);
   const n = all.filter((e) => e.note).length;
   const parts = [];
   if (r) parts.push(`${r} rating${r === 1 ? '' : 's'}`);
@@ -81,19 +86,38 @@ const ring = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visib
 const linkCls = `text-[12px] text-[#8A8FA3] underline-offset-2 hover:text-[#E8E4DA] hover:underline ${ring}`;
 const btn = `rounded-md border border-[#E8E4DA]/25 px-3 py-1.5 text-[13px] text-[#E8E4DA] hover:border-[#E8E4DA]/60 disabled:opacity-40 ${ring}`;
 
+type Preview = { state: 'idle' } | { state: 'loading' } | { state: 'none' } | { state: 'found'; url: string; youtubeUrl?: string };
+
+/** No preview ships in the file (it would tell the lists apart, and expires anyway): the owner asks per track. */
 function TrackRow({ t }: { t: RTrack }) {
+  const [preview, setPreview] = useState<Preview>({ state: 'idle' });
   const label = `${t.artist} - ${t.title}`;
-  const yt = t.youtubeUrl ?? `https://www.youtube.com/results?search_query=${encodeURIComponent(label)}`;
+  const found = preview.state === 'found' ? preview : undefined;
+  const yt = found?.youtubeUrl ?? `https://www.youtube.com/results?search_query=${encodeURIComponent(label)}`;
+  const find = async () => {
+    setPreview({ state: 'loading' });
+    const r = await fetchResolved(t);
+    const url = safeHttpUrl(r?.previewUrl);
+    setPreview(url ? { state: 'found', url, youtubeUrl: safeHttpUrl(r?.youtubeUrl) } : { state: 'none' });
+  };
   return (
     <li className="flex flex-col gap-1.5 rounded-lg border border-[#E8E4DA]/10 bg-[#1A1D28] p-3">
       <div className="min-w-0">
         <p className="truncate font-[family-name:var(--font-display)] text-[15px] font-semibold text-[#E8E4DA]">{t.title}</p>
         <p className="truncate text-[13px] text-[#8A8FA3]">{t.artist}</p>
       </div>
-      {t.previewUrl && <PreviewPlayer previewUrl={t.previewUrl} source={previewSource({ previewUrl: t.previewUrl, sources: {} } as Track)} label={label} />}
-      <a href={yt} target="_blank" rel="noopener noreferrer" className={`self-start ${linkCls}`}>
-        {t.youtubeUrl ? 'Open on YouTube' : 'Search on YouTube'}
-      </a>
+      {found && <PreviewPlayer previewUrl={found.url} source={previewSource({ previewUrl: found.url, sources: {} } as Track)} label={label} />}
+      <div className="flex flex-wrap items-center gap-3">
+        {!found && (
+          <button type="button" className={linkCls} disabled={preview.state === 'loading'} onClick={find} aria-label={`Find a preview: ${label}`}>
+            {preview.state === 'loading' ? 'Finding…' : 'Find a preview'}
+          </button>
+        )}
+        {preview.state === 'none' && <span className="text-[12px] text-[#8A8FA3]">No preview found</span>}
+        <a href={yt} target="_blank" rel="noopener noreferrer" className={linkCls}>
+          {found?.youtubeUrl ? 'Open on YouTube' : 'Search on YouTube'}
+        </a>
+      </div>
     </li>
   );
 }
@@ -123,7 +147,7 @@ export default function RatingSession() {
       const file = parseRatingFile(String(reader.result));
       if (!file) return setError('That is not a rating file from bench:recs.');
       setError('');
-      const hasRatings = !!state && Object.values(state.ratings).some((e) => e.rating !== undefined || e.note);
+      const hasRatings = !!state && Object.values(state.ratings).some((e) => e.A !== undefined || e.B !== undefined || e.note);
       if (state && JSON.stringify(state.file) === JSON.stringify(file)) return; // same file: nothing to replace, keep the progress
       if (hasRatings) return setPending(file); // a different file would wipe saved ratings: ask first
       update({ file, ratings: {}, index: 0 });
@@ -134,10 +158,14 @@ export default function RatingSession() {
 
   const exportRatings = () => {
     if (!state) return;
+    // A/B only: which list is the engine is in the bench results file, and bench:recs:ratings joins the two.
     const out = {
       exportedAt: new Date().toISOString(),
-      summary: summarize(state.file, state.ratings),
-      ratings: state.file.scenarios.map((s) => ({ id: s.id, name: s.name, rating: state.ratings[s.id]?.rating ?? null, note: state.ratings[s.id]?.note ?? '' })),
+      fileId: state.file.fileId,
+      ratings: state.file.scenarios.map((s) => {
+        const e = state.ratings[s.id] ?? {};
+        return { id: s.id, name: s.name, A: e.A ?? null, B: e.B ?? null, note: e.note ?? '' };
+      }),
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' }));
     const a = document.createElement('a');
@@ -161,7 +189,7 @@ export default function RatingSession() {
     return (
       <main className={shell}>
         <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold">Blind rating</h1>
-        <p className="text-[13px] text-[#8A8FA3]">Rate how relevant each scenario&apos;s ten tracks are as next picks, 1 to 10. No scores are shown.</p>
+        <p className="text-[13px] text-[#8A8FA3]">Each scenario shows two lists of ten next-track candidates. Rate how relevant each list is as next picks, 1 to 10. No scores are shown.</p>
         {picker}
         {error && <p role="alert" className="text-[13px] text-[#F2B33D]">{error}</p>}
       </main>
@@ -171,7 +199,7 @@ export default function RatingSession() {
   const { file, ratings, index } = state;
   const sc = file.scenarios[index];
   const entry = ratings[sc.id] ?? {};
-  const sum = summarize(file, ratings);
+  const sum = progress(file, ratings);
   const setEntry = (e: Entry) => update({ ...state, ratings: { ...ratings, [sc.id]: { ...entry, ...e } } });
   const go = (i: number) => update({ ...state, index: i });
 
@@ -179,7 +207,7 @@ export default function RatingSession() {
     <main className={shell}>
       <header className="flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold">Blind rating</h1>
-        <p className="text-[13px] text-[#8A8FA3] tabular-nums">Scenario {index + 1} of {sum.total} · {sum.rated} rated</p>
+        <p className="text-[13px] text-[#8A8FA3] tabular-nums">Scenario {index + 1} of {file.scenarios.length}</p>
       </header>
 
       <section aria-label="Scenario" className="flex flex-col gap-2">
@@ -190,26 +218,30 @@ export default function RatingSession() {
         </ol>
       </section>
 
-      <section aria-label="Suggestions" className="flex flex-col gap-2">
-        <p className="text-[12px] tracking-wide text-[#8A8FA3] uppercase">{sc.tracks.length} next-track candidates (shuffled)</p>
-        <ul className="grid gap-2 sm:grid-cols-2">
-          {sc.tracks.map((t, i) => <TrackRow key={i} t={t} />)}
-        </ul>
-      </section>
+      {sc.lists.map((l) => (
+        <section key={l.label} aria-label={`List ${l.label}`} className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="font-[family-name:var(--font-display)] text-[15px] font-semibold">List {l.label} <span className="text-[12px] font-normal text-[#8A8FA3]">{l.tracks.length} next-track candidates</span></h3>
+            <label className="flex items-center gap-2 text-[14px]">
+              Relevance (1-10)
+              <select
+                aria-label={`List ${l.label} relevance`}
+                value={entry[l.label] ?? ''}
+                onChange={(e) => setEntry({ [l.label]: e.target.value === '' ? undefined : Number(e.target.value) })}
+                className={`rounded-md border border-[#E8E4DA]/25 bg-[#1A1D28] px-2 py-1 text-[#E8E4DA] ${ring}`}
+              >
+                <option value="">Not rated</option>
+                {Array.from({ length: 10 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}
+              </select>
+            </label>
+          </div>
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {l.tracks.map((t, i) => <TrackRow key={`${sc.id}-${l.label}-${i}`} t={t} />)}
+          </ul>
+        </section>
+      ))}
 
-      <section aria-label="Your rating" className="flex flex-col gap-2">
-        <label className="flex items-center gap-3 text-[14px]">
-          Relevance (1-10)
-          <select
-            aria-label="Relevance rating"
-            value={entry.rating ?? ''}
-            onChange={(e) => setEntry({ rating: e.target.value === '' ? undefined : Number(e.target.value) })}
-            className={`rounded-md border border-[#E8E4DA]/25 bg-[#1A1D28] px-2 py-1 text-[#E8E4DA] ${ring}`}
-          >
-            <option value="">Not rated</option>
-            {Array.from({ length: 10 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}
-          </select>
-        </label>
+      <section aria-label="Your note" className="flex flex-col gap-2">
         <textarea
           aria-label="Note"
           placeholder="Optional note"
@@ -222,14 +254,13 @@ export default function RatingSession() {
 
       <nav className="flex flex-wrap items-center gap-2">
         <button className={btn} disabled={index === 0} onClick={() => go(index - 1)}>Previous</button>
-        <button className={btn} disabled={index === sum.total - 1} onClick={() => go(index + 1)}>Next</button>
+        <button className={btn} disabled={index === file.scenarios.length - 1} onClick={() => go(index + 1)}>Next</button>
         <button className={`${btn} ml-auto`} onClick={exportRatings}>Export ratings</button>
       </nav>
 
-      <section aria-label="Summary" className="rounded-lg border border-[#E8E4DA]/10 bg-[#1A1D28] p-3 text-[14px]">
-        <p className="tabular-nums">{sum.good} of {sum.total} scenarios rated {PASS_RATING} or higher (need {PASS_SCENARIOS}).</p>
-        <p role="status" className={sum.pass ? 'font-semibold text-[#F2B33D]' : 'text-[#8A8FA3]'}>
-          {sum.pass ? 'PASS' : sum.rated === sum.total ? 'Not passing' : `${sum.total - sum.rated} still to rate`}
+      <section aria-label="Progress" className="rounded-lg border border-[#E8E4DA]/10 bg-[#1A1D28] p-3 text-[14px]">
+        <p role="status" className="tabular-nums text-[#8A8FA3]">
+          {sum.rated === sum.total ? `All ${sum.total} lists rated. Export your ratings.` : `${sum.rated} of ${sum.total} lists rated`}
         </p>
       </section>
 
