@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { isComplete } from '@/lib/completeness';
+import { isComplete, RETRYABLE_REASONS } from '@/lib/completeness';
 import type { OverrideFields } from '@/lib/overrideValidation';
 import type { Track } from '@/types/track';
 import ArcTemplatePicker from './ArcTemplatePicker';
@@ -16,7 +16,7 @@ import SetList from './SetList';
 import SpotifyConnect from './SpotifyConnect';
 import SuggestionBox from './SuggestionBox';
 import { loadLocal, saveLocal } from './persistence';
-import { initialPlaylistState, plannedLengthFor, playlistReducer, type PlaylistState } from './playlistReducer';
+import { initialPlaylistState, plannedLengthFor, playlistReducer, type PlaylistAction, type PlaylistState } from './playlistReducer';
 import { fetchResolved, needsMetadata } from './trackFormat';
 
 const MINUTES_PER_TRACK = 4;
@@ -25,6 +25,11 @@ export const RESOLVE_CAP_MS = 60_000;
 const MAX_IN_FLIGHT = 2;
 /** Safety net so a hung request cannot hold a queue slot forever; the server answers within ~47 s. */
 const HARD_ABORT_MS = 120_000;
+/** A 'timeout' with no server retryAt (the client's own 60 s clock, or a request aborted before the server saw it). */
+export const CLIENT_TIMEOUT_RETRY_MS = 5 * 60_000;
+/** The server's own retry starts at retryAt and answers within its 45 s budget; re-asking after that is a cache hit. */
+export const RETRY_SETTLE_MS = 50_000;
+export const RETRY_JITTER_MS = 10_000;
 
 interface Props {
   demo: boolean;
@@ -32,7 +37,13 @@ interface Props {
 }
 
 export default function Builder({ demo, getSongBpmConfigured }: Props) {
-  const [state, dispatch] = useReducer(playlistReducer, initialPlaylistState);
+  const [state, rawDispatch] = useReducer(playlistReducer, initialPlaylistState);
+  // Mirrors the reducer synchronously, so the queue, retry timers and add() see the set as of the last action.
+  const stateRef = useRef(initialPlaylistState);
+  const dispatch = useCallback((action: PlaylistAction) => {
+    stateRef.current = playlistReducer(stateRef.current, action);
+    rawDispatch(action);
+  }, []);
   const [hydrated, setHydrated] = useState(false);
   const { tracks, template } = state;
   const plannedLength = plannedLengthFor(template);
@@ -43,6 +54,12 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
   const controllers = useRef(new Set<AbortController>());
   const queue = useRef<Track[]>([]);
   const active = useRef(0);
+  /** ids queued or in flight: never asked twice at once. */
+  const pending = useRef(new Set<string>());
+  /** At most one client re-ask timer per track; `key` is `${id}@${retryAt}` or `${id}@client`. */
+  const retryTimers = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; key: string }>());
+  /** Keys whose re-ask already fired: a verdict repeating the same retryAt is not re-armed (no loop). */
+  const firedRetries = useRef(new Set<string>());
 
   // The 60 s clock starts when a track is first asked for (enqueue or direct add), not when its request starts.
   const clocks = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; fired: boolean }>());
@@ -58,7 +75,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
       }, RESOLVE_CAP_MS),
     };
     clocks.current.set(id, clock);
-  }, []);
+  }, [dispatch]);
 
   const startResolve = useCallback(
     async (track: Track) => {
@@ -73,6 +90,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
       const resolved = await fetchResolved(track, ctrl.signal);
       clearTimeout(hard);
       controllers.current.delete(ctrl);
+      pending.current.delete(track.id);
       const clock = clocks.current.get(track.id);
       clearTimeout(clock?.timer);
       clocks.current.delete(track.id);
@@ -80,14 +98,22 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
       if (resolved) dispatch({ type: 'resolved', id: track.id, track: resolved });
       else dispatch({ type: 'resolveFailed', id: track.id, reason: clock?.fired || ctrl.signal.aborted ? 'timeout' : 'providers-unavailable' });
     },
-    [armClock]
+    [armClock, dispatch]
   );
 
-  /** Background re-requests run sequentially-ish: at most MAX_IN_FLIGHT at once. */
+  /** Every resolve request goes through here: at most MAX_IN_FLIGHT at once. */
   const pump = useCallback(
     function pump() {
       while (active.current < MAX_IN_FLIGHT && queue.current.length) {
         const next = queue.current.shift()!;
+        if (!stateRef.current.tracks.some((t) => t.id === next.id)) {
+          // removed from the set while queued: don't spend a request (or provider quota) on it
+          pending.current.delete(next.id);
+          clearTimeout(clocks.current.get(next.id)?.timer);
+          clocks.current.delete(next.id);
+          dispatch({ type: 'resolveFailed', id: next.id, reason: 'timeout' }); // drops it from `resolving`
+          continue;
+        }
         active.current++;
         const gen = generation.current;
         void startResolve(next).finally(() => {
@@ -97,20 +123,21 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
         });
       }
     },
-    [startResolve]
+    [startResolve, dispatch]
   );
 
   const requeue = useCallback(
     (list: Track[]) => {
-      const pending = list.filter((t) => !isComplete(t));
-      for (const t of pending) {
+      const fresh = list.filter((t) => !isComplete(t) && !pending.current.has(t.id));
+      for (const t of fresh) {
+        pending.current.add(t.id);
         dispatch({ type: 'resolveStart', id: t.id });
         armClock(t.id);
       }
-      queue.current.push(...pending);
+      queue.current.push(...fresh);
       pump();
     },
-    [pump, armClock]
+    [pump, armClock, dispatch]
   );
 
   useEffect(() => {
@@ -123,6 +150,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
     }
     setHydrated(true);
     const live = controllers.current;
+    const inFlightIds = pending.current;
     return () => {
       if (generation.current === gen) generation.current++;
       live.forEach((c) => c.abort());
@@ -131,20 +159,61 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
       clocks.current.clear();
       queue.current = [];
       active.current = 0;
+      inFlightIds.clear();
     };
-  }, [requeue]);
+  }, [requeue, dispatch]);
+
+  // Retryable verdicts are re-asked once their retry is due, so the open tab picks up what the server's re-resolve
+  // queue found ("retrying automatically" stays true). One timer per track; cleared on remove, completion or unmount.
+  useEffect(() => {
+    const timers = retryTimers.current;
+    const due = new Map<string, { key: string; delay: number }>();
+    for (const t of tracks) {
+      const u = t.unresolved;
+      if (!u || isComplete(t) || !RETRYABLE_REASONS.includes(u.reason) || pending.current.has(t.id)) continue;
+      const jitter = Math.random() * RETRY_JITTER_MS;
+      if (u.retryAt !== undefined) due.set(t.id, { key: `${t.id}@${u.retryAt}`, delay: Math.max(0, u.retryAt - Date.now()) + RETRY_SETTLE_MS + jitter });
+      else if (u.reason === 'timeout') due.set(t.id, { key: `${t.id}@client`, delay: CLIENT_TIMEOUT_RETRY_MS + jitter });
+    }
+    for (const [id, armed] of timers) {
+      if (due.get(id)?.key === armed.key) continue;
+      clearTimeout(armed.timer);
+      timers.delete(id);
+    }
+    for (const [id, { key, delay }] of due) {
+      if (timers.has(id) || firedRetries.current.has(key)) continue;
+      const timer = setTimeout(() => {
+        timers.delete(id);
+        firedRetries.current.add(key);
+        const current = stateRef.current.tracks.find((t) => t.id === id);
+        if (current) requeue([current]);
+      }, delay);
+      timers.set(id, { timer, key });
+    }
+  }, [tracks, state.resolving, requeue]);
+
+  useEffect(() => {
+    const timers = retryTimers.current;
+    return () => {
+      timers.forEach((t) => clearTimeout(t.timer));
+      timers.clear();
+    };
+  }, []);
 
   useEffect(() => {
     if (hydrated) saveLocal(state);
   }, [state, hydrated]);
 
   const add = useCallback(
-    async (track: Track) => {
+    (track: Track) => {
+      const before = stateRef.current;
       dispatch({ type: 'add', track });
-      // Search hits often lack BPM/key/energy/danceability; fill them in once the resolver answers.
-      if (needsMetadata(track)) await startResolve(track);
+      if (stateRef.current === before) return; // already in the set: nothing to resolve
+      // Search hits often lack BPM/key/energy/danceability; fill them in once the resolver answers. Through the
+      // queue, so a Spotify "Add all" of 50 tracks never has more than MAX_IN_FLIGHT requests out at once.
+      if (needsMetadata(track)) requeue([track]);
     },
-    [startResolve]
+    [dispatch, requeue]
   );
 
   const override = useCallback(async (track: Track, fields: OverrideFields): Promise<string | null> => {
@@ -160,7 +229,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
     }
     dispatch({ type: 'override', id: track.id, fields });
     return null;
-  }, []);
+  }, [dispatch]);
 
   /**
    * Mixed In Key values land as manual. Danceability is never in a MIK file: a row with energy is completed by the
@@ -176,7 +245,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
       const ids = new Set(updates.map((u) => u.id));
       requeue(next.tracks.filter((t) => ids.has(t.id)));
     },
-    [state, requeue]
+    [state, requeue, dispatch]
   );
 
   const loadSet = useCallback(
@@ -184,7 +253,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
       dispatch({ type: 'load', state: p });
       requeue(playlistReducer(initialPlaylistState, { type: 'load', state: p }).tracks);
     },
-    [requeue]
+    [requeue, dispatch]
   );
   const minutes = tracks.length * MINUTES_PER_TRACK;
 
