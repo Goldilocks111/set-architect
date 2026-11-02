@@ -4,7 +4,7 @@ import { dataDir, dataRoot } from '../../src/lib/dataDir';
 import { activeCooldowns, degradedProviders, readCooldowns } from '../data/cooldowns';
 import { createFetchGuard } from '../data/guardFetch';
 import { RequestGate, dayKey, loadDailyCounts, saveDailyCounts } from '../search/guard';
-import { BENCH_WITHOUT, RECS_BUDGET, auditCrate, buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, isWarmEntry, selectWarmTargets, warmStylesMode, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
+import { TOP_N, BENCH_WITHOUT, RECS_BUDGET, poolLimitedScenarios, withCrates, auditCrate, buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, isWarmEntry, selectWarmTargets, warmStylesMode, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
 import type { Suggestion, Track } from '../../src/types/track';
 
 try {
@@ -26,7 +26,8 @@ const gates = new Map<string, RequestGate>();
 const fmt = (x: number) => `${(x * 100).toFixed(0)}%`;
 
 async function main(): Promise<void> {
-  const scenarios: Scenario[] = JSON.parse(readFileSync(join(here, 'scenarios.json'), 'utf8'));
+  // Every scenario rates against the shared crate (all lane pools, minus its own set): a realistic DJ library.
+  const scenarios: Scenario[] = withCrates(JSON.parse(readFileSync(join(here, 'scenarios.json'), 'utf8')), POOLS);
   const errors = validateScenarios(scenarios);
   if (errors.length) {
     console.error(`scenarios.json invalid:\n${errors.join('\n')}`);
@@ -113,6 +114,7 @@ async function main(): Promise<void> {
   const deps = await loadSuggestDeps();
   // Results must not depend on scenario order: no background crate fills, no scheduled retries; styles settle between scenarios.
   deps.backgroundResolve = undefined;
+  deps.queueStyles = undefined; // styles come from --warm, not from lookups one scenario starts for the next
   // The rated pool is the scenario crate + neighbours + similar only: a thin crate is reported PARTIAL, never demo-padded.
   deps.noStarterCrate = true;
   const { setReresolveDeps } = await import('../../src/lib/reresolve');
@@ -120,14 +122,14 @@ async function main(): Promise<void> {
 
   const toCrate = (r: { artist: string; title: string }, i: number): Track => ({ id: `crate-${i}`, artist: r.artist, title: r.title, sources: {} });
   const results: Array<{ scenario: Scenario; suggestions: Suggestion[] }> = [];
-  const rows: Array<ScenarioScore & Record<string, unknown> & { id: string; crateReady: number; crateSize: number }> = [];
+  const rows: Array<ScenarioScore & Record<string, unknown> & { id: string; crateReady: number; crateSize: number; compliantAvailable: number }> = [];
   for (const [i, sc] of subset.entries()) {
     const t0 = Date.now();
     const playlist: Track[] = [];
     for (const ref of sc.set) playlist.push(await resolveWithStatus(ref.artist, ref.title, { without: BENCH_WITHOUT, retryWithout: BENCH_WITHOUT }));
     await settleStyles(); // the set's own styles lookups land before the engine reads the cache
     const incomplete = playlist.filter((t) => t.unresolved).length;
-    const { suggestions, crateKnown } = await assembleSuggestions(
+    const { suggestions, crateKnown, compliantAvailable } = await assembleSuggestions(
       { playlist, template: sc.template, plannedLength: sc.plannedLength, crate: (sc.crate ?? []).map(toCrate) },
       deps,
     );
@@ -143,11 +145,11 @@ async function main(): Promise<void> {
     );
     results.push({ scenario: sc, suggestions });
     rows.push({
-      id: sc.id, lane: sc.lane, setSize: sc.set.length, incompleteInSet: incomplete, crateReady: crateKnown.length, crateSize: (sc.crate ?? []).length, ...score, audit, pass: criterion3Holds(score),
+      id: sc.id, lane: sc.lane, setSize: sc.set.length, incompleteInSet: incomplete, crateReady: crateKnown.length, crateSize: (sc.crate ?? []).length, compliantAvailable, poolLimited: compliantAvailable < TOP_N, ...score, audit, pass: criterion3Holds(score),
       top10: suggestions.slice(0, 10).map((s) => ({ artist: s.track.artist, title: s.track.title, score: s.score, compliant: s.compliant, reasons: s.reasons.map((r) => r.label) })),
       ms: Date.now() - t0,
     });
-    console.log(`[${i + 1}/${subset.length}] ${sc.id}: ${score.compliant}/${score.n} compliant, reasons ${score.reasonsOnAll ? 'all' : 'MISSING'}, lane ${fmt(score.laneHitRate)}  ${criterion3Holds(score) ? 'ok' : 'FAIL'}  crateReady ${crateKnown.length}/${(sc.crate ?? []).length}  tag-confirmed in-lane: ${audit.tagConfirmed}/${(sc.crate ?? []).length}${audit.contradictions.length ? `  CONTRADICTED: ${audit.contradictions.map((c) => `${c.artist} - ${c.title} [${c.styles.join(',')}]`).join('; ')}` : ''}`);
+    console.log(`[${i + 1}/${subset.length}] ${sc.id}: ${score.compliant}/${score.n} compliant, reasons ${score.reasonsOnAll ? 'all' : 'MISSING'}, lane ${fmt(score.laneHitRate)}  ${criterion3Holds(score) ? 'ok' : 'FAIL'}  compliant available ${compliantAvailable}${compliantAvailable < TOP_N ? ' (POOL-LIMITED)' : ''}  crateReady ${crateKnown.length}/${(sc.crate ?? []).length}  tag-confirmed in-lane: ${audit.tagConfirmed}/${(sc.crate ?? []).length}${audit.contradictions.length ? `  CONTRADICTED: ${audit.contradictions.map((c) => `${c.artist} - ${c.title} [${c.styles.join(',')}]`).join('; ')}` : ''}`);
   }
 
   const sum = summarizeRecs(rows);
@@ -155,8 +157,10 @@ async function main(): Promise<void> {
   const refused = Object.keys(guard.refused);
   const cooldowns = degradedProviders(cooldownSeed, readCooldowns(realRoot));
   const lowCrate = lowCrateScenarios(rows);
-  let status = recsStatus({ passed: sum.passed, n: sum.n, stopped, refused, cooldowns, lowCrate });
+  const poolLimited = poolLimitedScenarios(rows);
+  let status = recsStatus({ passed: sum.passed, n: sum.n, stopped, refused, cooldowns, lowCrate, poolLimited });
   if (lowCrate.length) console.log(`Thin crate (run npm run bench:recs -- --warm first): ${lowCrate.join(', ')}`);
+  if (poolLimited.length) console.log(`Pool-limited (fewer than ${TOP_N} compliant candidates existed; not an engine verdict): ${poolLimited.join(', ')}`);
   if (LIMIT !== undefined && !status.startsWith('PARTIAL')) status = status === 'PASS' ? 'SMOKE' : 'SMOKE (FAIL)';
   console.log(`\nSTATUS: ${status}  criterion 3 holds on ${sum.passed}/${sum.n}; mean lane-hit ${fmt(sum.meanLaneHitRate)}`);
   console.log(`Requests: ${[...gates].map(([k, g]) => `${k} ${g.count}/${BUDGET[k]}`).join('  ')}`);
@@ -165,7 +169,7 @@ async function main(): Promise<void> {
 
   const out = join(here, 'results', `${day}.json`);
   mkdirSync(dirname(out), { recursive: true });
-  writeFileSync(out, JSON.stringify({ day, status, stopped: Object.fromEntries(guard.stopped), refused: guard.refused, summary: sum, rows }, null, 2));
+  writeFileSync(out, JSON.stringify({ day, status, stopped: Object.fromEntries(guard.stopped), refused: guard.refused, summary: sum, poolLimited, rows }, null, 2));
   const ratingOut = join(here, 'results', `${day}-rating.json`);
   writeFileSync(ratingOut, JSON.stringify(buildRatingFile(results), null, 2));
   console.log(`\nWrote ${out}\nWrote ${ratingOut} (blind: hand this to the owner, open /rate in dev)`);

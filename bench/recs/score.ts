@@ -13,13 +13,14 @@ export interface Scenario {
   template: ArcTemplate;
   plannedLength: number;
   set: TrackRef[];
+  /** Filled at run time by withCrates (the shared crate minus this set); scenarios.json carries none. */
   crate?: TrackRef[];
 }
 
 export const TOP_N = 10;
 /** Criterion 3: at least this many of the top 10 are compliant. */
 export const MIN_COMPLIANT = 8;
-/** Ready crate tracks a full (40-track) scenario crate needs; the bench never demo-pads (deps.noStarterCrate). */
+/** Ready crate tracks the shared crate needs; the bench never demo-pads (deps.noStarterCrate). */
 export const MIN_CRATE_READY = 30;
 export const SHUFFLE_SEED = 20261102;
 
@@ -70,15 +71,58 @@ export function summarizeRecs(rows: ScenarioScore[]): { n: number; passed: numbe
   };
 }
 
-/** PARTIAL on any provider degrade: a run that lost a provider says nothing about recommendation quality. */
-export function recsStatus(o: { passed: number; n: number; stopped: string[]; refused: string[]; cooldowns: string[]; lowCrate?: string[] }): string {
+/**
+ * PARTIAL on any provider degrade: a run that lost a provider says nothing about recommendation quality.
+ * POOL-LIMITED when some scenario had fewer than TOP_N compliant candidates at all: criterion 3 there measures the
+ * pool, not the engine, so the run cannot PASS.
+ */
+export function recsStatus(o: {
+  passed: number;
+  n: number;
+  stopped: string[];
+  refused: string[];
+  cooldowns: string[];
+  lowCrate?: string[];
+  poolLimited?: string[];
+}): string {
   const parts: string[] = [];
   if (o.lowCrate?.length) parts.push(`crate below its ready threshold, min(${MIN_CRATE_READY}, 75% of the crate) (thin pool; the bench never adds demo tracks): ${o.lowCrate.join(', ')}`);
   if (o.stopped.length) parts.push(`rate-limited: ${o.stopped.join(', ')}`);
   if (o.refused.length) parts.push(`budget exhausted: ${o.refused.join(', ')}`);
   if (o.cooldowns.length) parts.push(`breaker cooldown: ${o.cooldowns.join(', ')}`);
-  if (parts.length) return `PARTIAL (${parts.join('; ')})`;
+  const limited = o.poolLimited?.length ? `pool-limited: ${o.poolLimited.join(', ')}` : '';
+  if (parts.length) return `PARTIAL (${[...parts, ...(limited ? [limited] : [])].join('; ')})`;
+  if (limited) return `POOL-LIMITED (criterion 3 holds on ${o.passed}/${o.n}; ${limited})`;
   return o.passed === o.n ? 'PASS' : 'FAIL';
+}
+
+/** Scenarios whose pool held fewer than TOP_N compliant candidates (after exclusions): the engine could not reach 10. */
+export function poolLimitedScenarios(rows: Array<{ id: string; compliantAvailable: number }>): string[] {
+  return rows.filter((r) => r.compliantAvailable < TOP_N).map((r) => r.id);
+}
+
+/**
+ * The bench crate: every unique track of every lane pool (~225, a realistic DJ library), first spelling wins.
+ * Lane fit has to find the scenario's lane in it; the crate is not curated per scenario.
+ */
+export function sharedCrate(pools: Record<string, TrackRef[]>): TrackRef[] {
+  const seen = new Map<string, TrackRef>();
+  for (const list of Object.values(pools)) for (const { artist, title } of list) {
+    const k = trackKeyOf(artist, title);
+    if (!seen.has(k)) seen.set(k, { artist, title });
+  }
+  return [...seen.values()];
+}
+
+/** A scenario's crate: the shared crate without its own set tracks. */
+export function crateFor(scenario: Pick<Scenario, 'set'>, shared: TrackRef[]): TrackRef[] {
+  const inSet = new Set(scenario.set.map((t) => trackKeyOf(t.artist, t.title)));
+  return shared.filter((t) => !inSet.has(trackKeyOf(t.artist, t.title)));
+}
+
+export function withCrates(scenarios: Scenario[], pools: Record<string, TrackRef[]>): Scenario[] {
+  const shared = sharedCrate(pools);
+  return scenarios.map((s) => ({ ...s, crate: crateFor(s, shared) }));
 }
 
 /** mulberry32: small, deterministic PRNG. */
@@ -138,7 +182,7 @@ export function buildRatingFile(
   };
 }
 
-/** Ready crate tracks a scenario needs: MIN_CRATE_READY for a full crate, 75% of a short (documented shortfall) crate. */
+/** Ready crate tracks a scenario needs: MIN_CRATE_READY, or 75% of a crate shorter than 40. */
 export const crateReadyThreshold = (crateSize: number): number => Math.min(MIN_CRATE_READY, Math.ceil(0.75 * crateSize));
 
 export function lowCrateScenarios(rows: Array<{ id: string; crateReady: number; crateSize: number }>): string[] {
@@ -175,15 +219,6 @@ export function isWarmEntry<E extends { fields: unknown }>(
 ): boolean {
   return !!entry && deps.isComplete(entry.fields) && deps.stylesSettled(entry);
 }
-
-/**
- * Lanes the 1001TL index + bench list cannot fill with grounded in-lane tracks: the crate is lowered to what is
- * grounded, never padded with invented tracks, and its other-lane share is cut to match the full crates (~0.6 per
- * in-lane track) so the scenario is not rated low because of its crate. Readiness scales with it (crateReadyThreshold).
- */
-export const KNOWN_CRATE_SHORTFALL: Record<string, { minCrate: number; minInLane: number; maxOtherLane: number }> = {
-  'disco-opener': { minCrate: 24, minInLane: 15, maxOtherLane: 10 },
-};
 
 export interface AuditCrateTrack {
   artist: string;

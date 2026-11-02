@@ -43,3 +43,23 @@ describe('starter (demo) crate opt-out', () => {
     expect(suggestions.filter((s) => isDemo(s.track))).toEqual([]);
   });
 });
+
+describe('compliantAvailable (I4: is the pool, not the engine, the limit?)', () => {
+  it('asks the engine for every candidate and counts the compliant ones; still returns the top 10', async () => {
+    const all = own(15).map((track, i) => ({ track, score: 1 - i / 100, reasons: [{ kind: 'key' as const, label: 'k', score: 1 }], compliant: i < 12 }));
+    let limit: number | undefined;
+    const res = await assembleSuggestions(
+      { playlist: [], template: '60min', plannedLength: 12, crate: own(15) },
+      { noStarterCrate: true, suggestNext: (o) => ((limit = o.limit), all.slice(0, o.limit ?? 10)) },
+    );
+    expect(limit).toBe(Infinity);
+    expect(res.compliantAvailable).toBe(12);
+    expect(res.suggestions).toHaveLength(10);
+  });
+  it('matches the real engine on a real pool', async () => {
+    const [last, ...crate] = own(30);
+    const res = await assembleSuggestions({ playlist: [last], template: '60min', plannedLength: 12, crate }, { noStarterCrate: true });
+    const full = engineSuggestNext({ playlist: [last], candidates: crate, template: '60min', plannedLength: 12, adjacency: new Map(), similarity: new Map(), limit: Infinity });
+    expect(res.compliantAvailable).toBe(full.filter((s) => s.compliant === true).length);
+  });
+});

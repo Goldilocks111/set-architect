@@ -78,10 +78,8 @@ export async function POST(request: Request) {
     }
   }
 
-  const result: { suggestions: Suggestion[]; crateKnown?: CrateKnown[]; digging?: true } = await assembleSuggestions(
-    { playlist, template, plannedLength, crate },
-    await loadSuggestDeps()
-  );
+  const { suggestions, crateKnown } = await assembleSuggestions({ playlist, template, plannedLength, crate }, await loadSuggestDeps());
+  const result: { suggestions: Suggestion[]; crateKnown?: CrateKnown[]; digging?: true } = { suggestions, crateKnown };
   if (digging) result.digging = true;
 
   if (gatedUserId) {

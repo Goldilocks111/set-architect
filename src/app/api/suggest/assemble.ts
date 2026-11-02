@@ -207,7 +207,7 @@ export function displayFromKey(k: string): DisplayName {
 export async function assembleSuggestions(
   input: SuggestInput,
   deps: SuggestDeps
-): Promise<{ suggestions: Suggestion[]; crateKnown: CrateKnown[] }> {
+): Promise<{ suggestions: Suggestion[]; crateKnown: CrateKnown[]; compliantAvailable: number }> {
   // Crate items are enriched from the metadata cache only (manual > provider, no provider calls); incomplete ones
   // stay out of scoring until the cache has them. One snapshot covers the crate and the set.
   const crateReady: Track[] = [];
@@ -403,14 +403,18 @@ export async function assembleSuggestions(
   }
 
   const suggest = deps.suggestNext ?? engineSuggestNext;
-  const suggestions = suggest({
+  // Every candidate is ranked: the compliant count says whether the pool (not the engine) limits criterion 3.
+  const ranked = suggest({
     playlist,
     candidates,
     template: input.template,
     plannedLength: input.plannedLength,
     adjacency,
     similarity,
-  }).slice(0, 10);
+    limit: Infinity,
+  });
+  const compliantAvailable = ranked.filter((s) => s.compliant === true).length;
+  const suggestions = ranked.slice(0, 10);
 
   // The engine words co-occurrence as "real sets"; counts that came from the generated demo adjacency must not claim that.
   if (sampleKeys.size) {
@@ -436,7 +440,7 @@ export async function assembleSuggestions(
     if (bonused) suggestions.sort(byComplianceThenScore);
   }
 
-  return { suggestions, crateKnown };
+  return { suggestions, crateKnown, compliantAvailable };
 }
 
 /** Loads the resolver/adjacency modules when they are present; each is independently optional. */

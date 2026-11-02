@@ -2,13 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LANES } from '@/lib/style/taxonomy';
-import type { Suggestion } from '@/types/track';
+import { trackKeyOf, type Suggestion } from '@/types/track';
 import {
   buildRatingFile,
   auditCrate,
   isWarmEntry,
   warmStylesMode,
-  KNOWN_CRATE_SHORTFALL,
+  crateFor,
+  poolLimitedScenarios,
+  sharedCrate,
+  withCrates,
   lowCrateScenarios,
   crateReadyThreshold,
   MIN_CRATE_READY,
@@ -45,37 +48,29 @@ describe('scenarios.json', () => {
   });
   const pools: Record<string, Array<{ artist: string; title: string }>> = JSON.parse(readFileSync(join(__dirname, '../../bench/recs/pools.json'), 'utf8'));
   const k = (t: { artist: string; title: string }) => `${t.artist}|${t.title}`;
-  it('gives each scenario a 40-track crate: >= 24 in its lane, <= 16 from other lanes', () => {
-    expect(new Set(scenarios.map((s) => s.id)).size).toBe(10);
-    for (const s of scenarios) {
-      const lane = new Set((pools[s.lane] ?? []).map(k));
-      const short = KNOWN_CRATE_SHORTFALL[s.id];
-      expect(new Set(s.crate!.map(k)).size, s.id).toBe(s.crate!.length);
-      const inLane = s.crate!.filter((c) => lane.has(k(c))).length;
-      // a lane the index cannot fill with grounded tracks is lowered, never padded with invented ones (documented)
-      if (short) expect(s.crate!.length, s.id).toBeGreaterThanOrEqual(short.minCrate);
-      else expect(s.crate, s.id).toHaveLength(40);
-      expect(inLane, s.id).toBeGreaterThanOrEqual(short ? short.minInLane : 24);
-      expect(s.crate!.length - inLane, s.id).toBeLessThanOrEqual(short ? short.maxOtherLane : 16);
-      // in-lane stays a clear majority (other crates run ~0.58 other-lane per in-lane)
-      expect((s.crate!.length - inLane) / inLane, s.id).toBeLessThanOrEqual(0.7);
-    }
+  it('carries no per-scenario crate: every scenario rates against the shared crate (union of all lane pools)', () => {
+    for (const s of scenarios) expect(s.crate, s.id).toBeUndefined();
   });
-  it('keeps the short disco-opener crate balanced: no techno/melodic-techno distractors, <= 10 other-lane', () => {
-    const s = scenarios.find((x) => x.id === 'disco-opener')!;
-    expect(KNOWN_CRATE_SHORTFALL['disco-opener'].maxOtherLane).toBeLessThanOrEqual(10);
-    const other = (lane: string) => s.crate!.filter((c) => pools[lane].some((p) => k(p) === k(c))).length;
-    expect(other('techno')).toBe(0);
-    expect(other('melodic-techno')).toBe(0);
-    // the short crate does not go PARTIAL just because it is short: 75% of it is enough
-    expect(crateReadyThreshold(s.crate!.length)).toBeLessThanOrEqual(Math.ceil(0.75 * s.crate!.length));
+  it('sharedCrate is every unique pool track (~225, a realistic DJ library), first spelling wins', () => {
+    const shared = sharedCrate(pools);
+    const keys = shared.map((t) => trackKeyOf(t.artist, t.title));
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(shared.length).toBe(new Set(Object.values(pools).flat().map((t) => trackKeyOf(t.artist, t.title))).size);
+    expect(shared.length).toBeGreaterThanOrEqual(200);
+    expect(Object.keys(shared[0]).sort()).toEqual(['artist', 'title']);
   });
-  it('keeps the unique track count warm-able (<= 250) and set tracks out of the crate', () => {
-    expect(uniqueScenarioTracks(scenarios).length).toBeLessThanOrEqual(250);
-    for (const s of scenarios) {
-      const crate = new Set(s.crate!.map(k));
-      for (const t of s.set) expect(crate.has(k(t)), `${s.id} ${k(t)}`).toBe(false);
+  it("crateFor leaves the scenario's own set tracks out; every lane is represented", () => {
+    const shared = sharedCrate(pools);
+    for (const s of withCrates(scenarios, pools)) {
+      const crate = new Set(s.crate!.map((t) => trackKeyOf(t.artist, t.title)));
+      for (const t of s.set) expect(crate.has(trackKeyOf(t.artist, t.title)), `${s.id} ${k(t)}`).toBe(false);
+      expect(s.crate!.length, s.id).toBe(shared.length - s.set.filter((t) => shared.some((c) => trackKeyOf(c.artist, c.title) === trackKeyOf(t.artist, t.title))).length);
+      for (const lane of Object.keys(pools)) expect(s.crate!.some((c) => pools[lane].some((p) => trackKeyOf(p.artist, p.title) === trackKeyOf(c.artist, c.title))), `${s.id} ${lane}`).toBe(true);
     }
+    expect(crateFor({ set: [{ artist: 'X', title: 'Y' }] }, [{ artist: 'x', title: 'y (Original Mix)' }, { artist: 'Z', title: 'W' }])).toEqual([{ artist: 'Z', title: 'W' }]);
+  });
+  it('keeps the unique track count warm-able (<= 250)', () => {
+    expect(uniqueScenarioTracks(withCrates(scenarios, pools)).length).toBeLessThanOrEqual(250);
   });
   it('uses in-lane set tracks (the lane change and the incomplete-track probe are exempt)', () => {
     for (const s of scenarios.filter((x) => !['lane-change', 'incomplete-track'].includes(x.id))) {
@@ -117,6 +112,20 @@ describe('summary and status', () => {
   it('counts passing scenarios', () => {
     expect(summarizeRecs(rows(10))).toMatchObject({ n: 10, passed: 10 });
     expect(summarizeRecs(rows(6))).toMatchObject({ n: 10, passed: 6 });
+  });
+  it('a pool-limited scenario (< 10 compliant candidates available) means the run cannot PASS, and is named', () => {
+    expect(poolLimitedScenarios([{ id: 'a', compliantAvailable: 9 }, { id: 'b', compliantAvailable: 10 }, { id: 'c', compliantAvailable: 0 }])).toEqual(['a', 'c']);
+    const base = { passed: 10, n: 10, stopped: [], refused: [], cooldowns: [] };
+    expect(recsStatus({ ...base, poolLimited: [] })).toBe('PASS');
+    expect(recsStatus({ ...base, poolLimited: ['a', 'c'] })).toMatch(/^POOL-LIMITED.*a, c/);
+    expect(recsStatus({ ...base, passed: 7, poolLimited: ['a'] })).toMatch(/^POOL-LIMITED/);
+    expect(recsStatus({ ...base, refused: ['spotify'], poolLimited: ['a'] })).toMatch(/^PARTIAL.*pool-limited: a/);
+  });
+  it('run.ts records compliantAvailable per row and prints the pool-limited scenarios', () => {
+    const run = readFileSync(join(__dirname, '../../bench/recs/run.ts'), 'utf8');
+    expect(run).toMatch(/compliantAvailable/);
+    expect(run).toMatch(/poolLimitedScenarios\(rows\)/);
+    expect(run).toMatch(/withCrates\(/);
   });
   it('PASS only at 10/10 with no degrade; PARTIAL on any stop/refusal/cooldown', () => {
     const base = { passed: 10, n: 10, stopped: [], refused: [], cooldowns: [] };
@@ -162,9 +171,10 @@ describe('buildRatingFile (blind)', () => {
 });
 
 describe('crate readiness', () => {
-  it('flags scenarios with fewer than 30 ready crate tracks (40-track crates)', () => {
+  it('flags scenarios with fewer than 30 ready crate tracks (the shared ~225 crate)', () => {
     expect(MIN_CRATE_READY).toBe(30);
     expect(crateReadyThreshold(40)).toBe(30);
+    expect(crateReadyThreshold(222)).toBe(30);
     expect(lowCrateScenarios([{ id: 'a', crateReady: 30, crateSize: 40 }, { id: 'b', crateReady: 29, crateSize: 40 }, { id: 'c', crateReady: 0, crateSize: 40 }])).toEqual(['b', 'c']);
   });
   it('scales the threshold for a short crate: min(30, ceil(0.75 x crate length))', () => {
@@ -269,10 +279,11 @@ describe('isWarmEntry', () => {
 
 describe('warm mode selection', () => {
   it('dedupes set + crate tracks across scenarios by track key', () => {
-    const u = uniqueScenarioTracks(scenarios);
+    const pools = JSON.parse(readFileSync(join(__dirname, '../../bench/recs/pools.json'), 'utf8'));
+    const u = uniqueScenarioTracks(withCrates(scenarios, pools));
     const keys = u.map((t) => `${t.artist}|${t.title}`);
     expect(new Set(keys).size).toBe(keys.length);
-    expect(u.length).toBeLessThan(scenarios.reduce((n, s) => n + s.set.length + (s.crate?.length ?? 0), 0));
+    expect(u.length).toBeLessThan(withCrates(scenarios, pools).reduce((n, s) => n + s.set.length + (s.crate?.length ?? 0), 0));
     for (const s of scenarios) for (const t of s.set) expect(keys).toContain(`${t.artist}|${t.title}`);
   });
   it('skips tracks the cache already holds complete, so a warm run is resumable', () => {
