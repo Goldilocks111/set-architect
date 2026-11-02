@@ -344,7 +344,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
           </section>
 
           <aside className="min-w-0 rounded-xl border border-[#2A2F3F] bg-[#1A1D28] px-4 pt-4 pb-2 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
-            {hydrated && <SuggestionBox tracks={tracks} template={template} plannedLength={plannedLength} onAdd={add} crate={crate} onCrateKnown={crateKnown} />}
+            {hydrated && <SuggestionBox tracks={tracks} template={template} plannedLength={plannedLength} onAdd={add} busy={(state.resolving?.length ?? 0) > 0} crate={crate} onCrateKnown={crateKnown} />}
           </aside>
         </div>
       </main>
