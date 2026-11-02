@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { activeCooldowns, mergeCooldownsBack, openedDuringRun, readCooldowns, seedCooldowns } from '../../bench/data/cooldowns';
+import { activeCooldowns, degradedProviders, mergeCooldownsBack, openedDuringRun, readCooldowns, seedCooldowns } from '../../bench/data/cooldowns';
 
 const dirs: string[] = [];
 const tmp = () => {
@@ -61,5 +61,26 @@ describe('cooldown queries', () => {
     const after = { itunes: 5000, spotify: 100, deezer: 3000, musicbrainz: 400 };
     expect(openedDuringRun(seed, after, 1000)).toEqual(['deezer']);
     expect(openedDuringRun(seed, { ...after, itunes: 6000 }, 1000)).toEqual(['itunes', 'deezer']);
+  });
+});
+
+describe('degradedProviders', () => {
+  it('flags a provider already cooling down at start (seeded-active musicbrainz)', () => {
+    expect(degradedProviders({ musicbrainz: 5000 }, { musicbrainz: 5000 }, 1000)).toEqual(['musicbrainz']);
+  });
+  it('ignores providers the bench disables (iTunes, SoundStat)', () => {
+    expect(degradedProviders({ itunes: 5000, soundstat: 5000 }, { itunes: 9000, soundstat: 9000 }, 1000)).toEqual([]);
+  });
+  it('flags a cooldown active at the end that was not active at start', () => {
+    expect(degradedProviders({}, { deezer: 3000 }, 1000)).toEqual(['deezer']);
+  });
+  it('flags a re-open hidden under a longer existing cooldown only while still active', () => {
+    expect(degradedProviders({ reccobeats: 2000 }, { reccobeats: 2000 }, 1000)).toEqual(['reccobeats']);
+  });
+  it('ignores expired cooldowns', () => {
+    expect(degradedProviders({ musicbrainz: 500 }, { musicbrainz: 500 }, 1000)).toEqual([]);
+  });
+  it('lists each provider once', () => {
+    expect(degradedProviders({ spotify: 5000 }, { spotify: 6000 }, 1000)).toEqual(['spotify']);
   });
 });

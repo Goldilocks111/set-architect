@@ -49,3 +49,16 @@ export function mergeCooldownsBack(tempRoot: string, realRoot: string): Cooldown
   writeAtomic(realRoot, merged);
   return merged;
 }
+
+/** Adapters the bench switches off itself: their cooldowns say nothing about the run's quality. */
+export const BENCH_DISABLED = ['itunes', 'soundstat'];
+
+/**
+ * Providers the run used that were cooling down at the start, at the end, or opened during it. A provider already
+ * in cooldown is skipped all run (its tracks end "incomplete with a reason"), so it must make the status PARTIAL.
+ */
+export function degradedProviders(seed: Cooldowns, after: Cooldowns, now = Date.now()): string[] {
+  const names = [...new Set([...Object.keys(seed), ...Object.keys(after)])].filter((n) => !BENCH_DISABLED.includes(n));
+  const hit = new Set([...activeCooldowns(seed, names, now), ...activeCooldowns(after, names, now), ...openedDuringRun(seed, after, now)]);
+  return names.filter((n) => hit.has(n));
+}

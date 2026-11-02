@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import os from 'node:os';
 import { dirname, join } from 'node:path';
 import { dataDir, dataRoot } from '../../src/lib/dataDir';
-import { activeCooldowns, mergeCooldownsBack, openedDuringRun, readCooldowns, seedCooldowns, type Cooldowns } from './cooldowns';
+import { activeCooldowns, degradedProviders, mergeCooldownsBack, readCooldowns, seedCooldowns, type Cooldowns } from './cooldowns';
 import { RequestGate, dayKey, loadDailyCounts, saveDailyCounts } from '../search/guard';
 import { createFetchGuard } from './guardFetch';
 import { ESSENTIALS, bpmAgrees, keyAgreement, maeEnergy, percentile, pipelinePass, pipelineStatus, summarizePipeline, type PipelineRow, providersOnly, referencePairs, sourceBreakdown, yieldTable, type DataRow, type Essential } from './score';
@@ -120,14 +120,14 @@ async function main(): Promise<void> {
       const sum = summarizePipeline(prow);
       const stoppedP = [...stopped.keys()];
       const refusedP = Object.keys(refused);
-      const opened = openedDuringRun(cooldownSeed, readCooldowns(tempRoot));
+      const opened = degradedProviders(cooldownSeed, readCooldowns(tempRoot));
       const statusP = pipelineStatus({ passed: sum.passed, n: sum.n, stopped: stoppedP, refused: refusedP, cooldowns: opened, limited: LIMIT !== undefined });
       console.log(`\nPIPELINE STATUS: ${statusP}  pass ${sum.passed}/${sum.n}`);
       console.log(`complete: all ${fmt(sum.complete.all)}  classic ${fmt(sum.complete.classic)}  recent ${fmt(sum.complete.recent)}  (target >= 90%, not a gate)`);
       console.log('reasons: ' + (Object.entries(sum.reasons).map(([k, v]) => `${k} ${v}`).join('  ') || 'none'));
       console.log(`elapsed: p50 ${sum.p50}ms  p95 ${sum.p95}ms`);
       console.log(`Requests: ${[...gates].map(([k, g]) => `${k} ${g.count}/${BUDGET[k]}`).join('  ')}`);
-      if (opened.length) console.log(`Breaker opened during run: ${opened.join(', ')}`);
+      if (opened.length) console.log(`Breaker cooling down (start or during run): ${opened.join(', ')}`);
       if (stoppedP.length) console.log(`Stopped: ${[...stopped].map(([k, v]) => `${k} (${v})`).join('; ')}`);
       const pOut = join(here, 'results', `${day}-pipeline${LIMIT !== undefined ? `-limit${LIMIT}` : ''}.json`);
       mkdirSync(dirname(pOut), { recursive: true });

@@ -180,7 +180,7 @@ export function pipelineStatus(o: { passed: number; n: number; stopped: string[]
   const parts: string[] = [];
   if (o.stopped.length) parts.push(`rate-limited: ${o.stopped.join(', ')}`);
   if (o.refused.length) parts.push(`budget exhausted: ${o.refused.join(', ')}`);
-  if (o.cooldowns.length) parts.push(`breaker opened: ${o.cooldowns.join(', ')}`);
+  if (o.cooldowns.length) parts.push(`breaker cooldown: ${o.cooldowns.join(', ')}`);
   if (parts.length) return `PARTIAL (${parts.join('; ')})`;
   const allPass = o.passed === o.n;
   if (o.limited) return allPass ? 'SMOKE' : 'SMOKE (FAIL)';
