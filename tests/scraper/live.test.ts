@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { FetchError, type Fetcher } from '../../scripts/scraper/fetchPage';
@@ -265,5 +265,42 @@ describe('206 soft block', () => {
     expect(await live.ensureNeighborsFor('Bicep', 'Glue', { deepen: true })).toEqual({ digging: true });
     await live.whenIdle();
     expect(calls[0]).toBe('search:Bicep Glue');
+  });
+});
+
+describe('durable halt marker (driver gave up after repeated hard blocks)', () => {
+  it('refuses to queue or fetch while haltedUntil is in the future, and resumes once it is cleared', async () => {
+    writeFileSync(statePath, JSON.stringify({ searched: {}, backoff: {}, haltedUntil: clock + 7 * 86_400_000, haltReason: 'repeated-hard-blocks' }));
+    const live = make();
+    expect(await live.ensureNeighborsFor('Bicep', 'Glue')).toEqual({ digging: false });
+    await live.whenIdle();
+    expect(calls).toEqual([]);
+    writeFileSync(statePath, JSON.stringify({ searched: {}, backoff: {} }));
+    expect(await live.ensureNeighborsFor('Bicep', 'Glue')).toEqual({ digging: true });
+  });
+  it('ingestor state writes keep the halt marker (no field is dropped on read-modify-write)', async () => {
+    const live = make();
+    await live.ensureNeighborsFor('Bicep', 'Glue');
+    // the driver halts while a job is running: the job's own state update must not erase it
+    writeFileSync(statePath, JSON.stringify({ ...(existsSync(statePath) ? state() : { searched: {}, backoff: {} }), haltedUntil: clock + 1e9, haltReason: 'repeated-hard-blocks' }));
+    await live.whenIdle();
+    expect(state().haltedUntil).toBe(clock + 1e9);
+    expect(state().haltReason).toBe('repeated-hard-blocks');
+  });
+  it('liveEnabled() is false while the live-state file carries an active halt', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('SETARCHITECT_LIVE', '');
+    vi.stubEnv('SETARCHITECT_DATA_DIR', dir);
+    try {
+      const { liveEnabled } = await import('../../src/lib/adjacency/live');
+      const file = path.join(dir, 'index', 'live-state.json');
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, JSON.stringify({ searched: {}, backoff: {}, haltedUntil: Date.now() + 86_400_000, haltReason: 'repeated-hard-blocks' }));
+      expect(liveEnabled()).toBe(false);
+      writeFileSync(file, JSON.stringify({ searched: {}, backoff: {}, haltedUntil: Date.now() - 1 }));
+      expect(liveEnabled()).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

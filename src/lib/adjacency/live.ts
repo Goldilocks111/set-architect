@@ -23,6 +23,8 @@ interface LiveState {
   backoff: Record<string, number>; // trackKey -> backed off until (ms)
   keyVersion?: number; // trackKeyOf normalization of the keys above (absent = 1)
   pausedUntil?: number; // whole queue stopped until (ms)
+  haltedUntil?: number; // set by the ingest driver after repeated hard blocks; only a manual delete clears it early
+  haltReason?: string;
 }
 
 export type LiveStore = AdjacencyStore & {
@@ -92,7 +94,8 @@ export function createIngestor(deps: IngestorDeps) {
     try {
       if (existsSync(deps.statePath)) {
         const s = JSON.parse(readFileSync(deps.statePath, 'utf8')) as Partial<LiveState>;
-        const state: LiveState = { searched: s.searched ?? {}, backoff: s.backoff ?? {}, pausedUntil: s.pausedUntil, keyVersion: s.keyVersion };
+        // spread first: every write is a read-modify-write, so fields this module doesn't touch (the halt) survive it
+        const state: LiveState = { ...s, searched: s.searched ?? {}, backoff: s.backoff ?? {} };
         if ((s.keyVersion ?? 1) < TRACK_KEY_VERSION) {
           // keys written with an older trackKeyOf: drop the ones that may be stale (cheap to rebuild)
           state.searched = dropStaleKeys(state.searched);
@@ -154,6 +157,11 @@ export function createIngestor(deps: IngestorDeps) {
 
   async function pump(): Promise<void> {
     while (queue.length) {
+      if ((readState().haltedUntil ?? 0) > now()) {
+        for (const j of queue.splice(0)) pending.delete(j.key);
+        log('live: ingest is halted (repeated hard blocks); queue dropped');
+        break;
+      }
       const job = queue.shift()!;
       pending.set(job.key, 'running');
       try {
@@ -203,7 +211,7 @@ export function createIngestor(deps: IngestorDeps) {
       if (!opts.deepen && (await deps.store.getNeighbors(key)).length > 0) return { digging: false };
       const t = now();
       const s = readState();
-      if ((s.pausedUntil ?? 0) > t) return { digging: false };
+      if ((s.pausedUntil ?? 0) > t || (s.haltedUntil ?? 0) > t) return { digging: false };
       if ((s.backoff[key] ?? 0) > t) return { digging: false };
       if (t - (s.searched[key] ?? -Infinity) < SEARCHED_TTL_MS) return { digging: false };
       queue.push({ artist, title, key });
@@ -227,10 +235,20 @@ type Ingestor = ReturnType<typeof createIngestor>;
 
 const GLOBAL_KEY = Symbol.for('setarchitect.liveIngestor');
 
-/** Live fetching is off under tests and when SETARCHITECT_LIVE=0. */
+/** True while a durable halt marker (written by the ingest driver after repeated hard blocks) is active. */
+export function haltActive(statePath: string, at = Date.now()): boolean {
+  try {
+    const s = JSON.parse(readFileSync(statePath, 'utf8')) as Partial<LiveState>;
+    return typeof s.haltedUntil === 'number' && s.haltedUntil > at;
+  } catch {
+    return false; // missing or corrupt state: no halt
+  }
+}
+
+/** Live fetching is off under tests, when SETARCHITECT_LIVE=0, while the driver runs, and while a halt is set. */
 export function liveEnabled(): boolean {
   if (process.env.SETARCHITECT_LIVE === '0' || process.env.NODE_ENV === 'test') return false;
-  return !driverRunning();
+  return !driverRunning() && !haltActive(dataDir('index', 'live-state.json'));
 }
 
 const DRIVER_CHECK_TTL_MS = 10_000;
