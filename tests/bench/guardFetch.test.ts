@@ -22,6 +22,14 @@ const mk = (budgets: Record<string, number>, respond: (url: string) => Response,
 const ok = () => new Response('{}', { status: 200 });
 
 describe('createFetchGuard', () => {
+  it('budgets and stops Last.fm (ws.audioscrobbler.com)', async () => {
+    const { g, real } = mk({ lastfm: 1 }, ok);
+    await g.fetch('https://ws.audioscrobbler.com/2.0/?method=track.getsimilar');
+    await expect(g.fetch('https://ws.audioscrobbler.com/2.0/?method=track.getsimilar')).rejects.toBeInstanceOf(BenchRefused);
+    expect(real).toHaveBeenCalledTimes(1);
+    expect(g.refused.lastfm).toBe(1);
+  });
+
   it('refuses calls past the budget without touching the network', async () => {
     const { g, real } = mk({ spotify: 2 }, ok);
     await g.fetch('https://api.spotify.com/v1/search');

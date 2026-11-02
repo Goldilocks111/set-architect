@@ -51,3 +51,4 @@ data/index/
 bench/search/results/
 bench/data/results/
 .claude/scheduled_tasks.lock
+bench/recs/results/

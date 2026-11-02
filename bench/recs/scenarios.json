@@ -1,0 +1,1868 @@
+[
+ {
+  "id": "deep-house-warmup",
+  "name": "Deep house warm-up",
+  "lane": "deep-house",
+  "template": "60min",
+  "plannedLength": 12,
+  "set": [
+   {
+    "artist": "Jamie xx",
+    "title": "Gosh"
+   },
+   {
+    "artist": "Black Coffee, David Guetta",
+    "title": "Drive"
+   },
+   {
+    "artist": "Route 94",
+    "title": "My Love"
+   },
+   {
+    "artist": "Claptone, MIRAMAR",
+    "title": "Beautiful Times"
+   }
+  ],
+  "crate": [
+   {
+    "artist": "Junior Jack, Mark Knight",
+    "title": "Feelings"
+   },
+   {
+    "artist": "Justice, Gesaffelstein",
+    "title": "Pusher"
+   },
+   {
+    "artist": "FISHER, LAUREL",
+    "title": "Staring At The Sun"
+   },
+   {
+    "artist": "Innellea",
+    "title": "RECKLESS 69"
+   },
+   {
+    "artist": "Riva Starr, Adam Port",
+    "title": "Whole Room Dancing"
+   },
+   {
+    "artist": "Dom Dolla, Solomun",
+    "title": "DANGER DANGER"
+   },
+   {
+    "artist": "R3HAB, ARTBAT",
+    "title": "Dramma"
+   },
+   {
+    "artist": "Adriatique",
+    "title": "Palm Of Your Hands"
+   },
+   {
+    "artist": "Dombresky, Disco Dom",
+    "title": "There is Life"
+   },
+   {
+    "artist": "Öwnboss",
+    "title": "Pop This"
+   },
+   {
+    "artist": "Anyma, Stylo",
+    "title": "No Good"
+   },
+   {
+    "artist": "Chris Lake, Chris Lorenzo",
+    "title": "Long Jacket"
+   },
+   {
+    "artist": "Lilly Palmer",
+    "title": "Hey You"
+   },
+   {
+    "artist": "Solomun, Inéz",
+    "title": "Raider on the Storm"
+   },
+   {
+    "artist": "Lee Foss, GS5",
+    "title": "Separation"
+   },
+   {
+    "artist": "Ferreck Dawn",
+    "title": "Lost At The End"
+   },
+   {
+    "artist": "Jamie Jones, Camden Cox",
+    "title": "State Of Mind"
+   },
+   {
+    "artist": "Armin van Buuren, Adam Beyer",
+    "title": "No Mercy"
+   },
+   {
+    "artist": "Adam Ten",
+    "title": "I Never Knew"
+   },
+   {
+    "artist": "Deborah De Luca, Marie Vaunt",
+    "title": "Lalala"
+   },
+   {
+    "artist": "Claude VonStroke",
+    "title": "Two Line Groove"
+   },
+   {
+    "artist": "Gorgon City, Taet",
+    "title": "Second Nature"
+   },
+   {
+    "artist": "Argy, Massano",
+    "title": "WAIT"
+   },
+   {
+    "artist": "CamelPhat, Arodes",
+    "title": "Cycles"
+   },
+   {
+    "artist": "Charlotte de Witte",
+    "title": "A Prayer For The Dancefloor"
+   },
+   {
+    "artist": "Daft Punk",
+    "title": "One More Time"
+   },
+   {
+    "artist": "Justice",
+    "title": "D.A.N.C.E."
+   },
+   {
+    "artist": "Avicii",
+    "title": "Levels"
+   },
+   {
+    "artist": "Eric Prydz",
+    "title": "Call on Me"
+   },
+   {
+    "artist": "Gorgon City",
+    "title": "Ready for Your Love"
+   },
+   {
+    "artist": "The Chemical Brothers",
+    "title": "Block Rockin' Beats"
+   },
+   {
+    "artist": "Robin S",
+    "title": "Show Me Love"
+   },
+   {
+    "artist": "Armand van Helden",
+    "title": "You Don't Know Me"
+   },
+   {
+    "artist": "Modjo",
+    "title": "Lady (Hear Me Tonight)"
+   },
+   {
+    "artist": "Röyksopp",
+    "title": "Eple"
+   },
+   {
+    "artist": "Martin Garrix",
+    "title": "Animals"
+   },
+   {
+    "artist": "Joel Corry",
+    "title": "Head & Heart"
+   },
+   {
+    "artist": "Kygo",
+    "title": "Firestone"
+   },
+   {
+    "artist": "Benny Benassi",
+    "title": "Satisfaction"
+   },
+   {
+    "artist": "Mylo",
+    "title": "Drop the Pressure"
+   }
+  ]
+ },
+ {
+  "id": "melodic-techno-build",
+  "name": "Melodic techno build",
+  "lane": "melodic-techno",
+  "template": "120min",
+  "plannedLength": 16,
+  "set": [
+   {
+    "artist": "Adriatique",
+    "title": "Palm Of Your Hands"
+   },
+   {
+    "artist": "Kölsch",
+    "title": "Speicher 140"
+   },
+   {
+    "artist": "Innellea",
+    "title": "RECKLESS 69"
+   },
+   {
+    "artist": "Anyma, Stylo",
+    "title": "No Good"
+   }
+  ],
+  "crate": [
+   {
+    "artist": "Riva Starr, Adam Port",
+    "title": "Whole Room Dancing"
+   },
+   {
+    "artist": "Dom Dolla, Solomun",
+    "title": "DANGER DANGER"
+   },
+   {
+    "artist": "R3HAB, ARTBAT",
+    "title": "Dramma"
+   },
+   {
+    "artist": "Solardo",
+    "title": "Deeper Love"
+   },
+   {
+    "artist": "Dombresky, Disco Dom",
+    "title": "There is Life"
+   },
+   {
+    "artist": "Öwnboss",
+    "title": "Pop This"
+   },
+   {
+    "artist": "Massano, Humans Musik",
+    "title": "Underground"
+   },
+   {
+    "artist": "Lilly Palmer",
+    "title": "Hey You"
+   },
+   {
+    "artist": "Solomun, Inéz",
+    "title": "Raider on the Storm"
+   },
+   {
+    "artist": "Lee Foss, GS5",
+    "title": "Separation"
+   },
+   {
+    "artist": "Ferreck Dawn",
+    "title": "Lost At The End"
+   },
+   {
+    "artist": "Jamie Jones, Camden Cox",
+    "title": "State Of Mind"
+   },
+   {
+    "artist": "Armin van Buuren, Adam Beyer",
+    "title": "No Mercy"
+   },
+   {
+    "artist": "Adam Ten",
+    "title": "I Never Knew"
+   },
+   {
+    "artist": "Deborah De Luca, Marie Vaunt",
+    "title": "Lalala"
+   },
+   {
+    "artist": "Claude VonStroke",
+    "title": "Two Line Groove"
+   },
+   {
+    "artist": "Gorgon City, Taet",
+    "title": "Second Nature"
+   },
+   {
+    "artist": "Argy, Massano",
+    "title": "WAIT"
+   },
+   {
+    "artist": "CamelPhat, Arodes",
+    "title": "Cycles"
+   },
+   {
+    "artist": "Charlotte de Witte",
+    "title": "A Prayer For The Dancefloor"
+   },
+   {
+    "artist": "Daft Punk",
+    "title": "One More Time"
+   },
+   {
+    "artist": "Justice",
+    "title": "D.A.N.C.E."
+   },
+   {
+    "artist": "Avicii",
+    "title": "Levels"
+   },
+   {
+    "artist": "Eric Prydz",
+    "title": "Call on Me"
+   },
+   {
+    "artist": "Black Coffee, David Guetta",
+    "title": "Drive"
+   },
+   {
+    "artist": "Route 94",
+    "title": "My Love"
+   },
+   {
+    "artist": "Fatboy Slim",
+    "title": "Praise You"
+   },
+   {
+    "artist": "Faithless",
+    "title": "Insomnia"
+   },
+   {
+    "artist": "Inner City",
+    "title": "Good Life"
+   },
+   {
+    "artist": "Moloko",
+    "title": "Sing It Back"
+   },
+   {
+    "artist": "Stardust",
+    "title": "Music Sounds Better with You"
+   },
+   {
+    "artist": "Swedish House Mafia",
+    "title": "One"
+   },
+   {
+    "artist": "deadmau5",
+    "title": "Ghosts 'n' Stuff"
+   },
+   {
+    "artist": "Jax Jones",
+    "title": "You Don't Know Me"
+   },
+   {
+    "artist": "Cassius",
+    "title": "Toop Toop"
+   },
+   {
+    "artist": "Basement Jaxx",
+    "title": "Where's Your Head At"
+   },
+   {
+    "artist": "Rüfüs Du Sol",
+    "title": "Innerbloom"
+   },
+   {
+    "artist": "Eiffel 65",
+    "title": "Blue (Da Ba Dee)"
+   },
+   {
+    "artist": "Fisher",
+    "title": "Ya Kidding"
+   },
+   {
+    "artist": "Technotronic",
+    "title": "Pump Up the Jam"
+   }
+  ]
+ },
+ {
+  "id": "tech-house-peak",
+  "name": "Tech house peak",
+  "lane": "tech-house",
+  "template": "60min",
+  "plannedLength": 12,
+  "set": [
+   {
+    "artist": "Chris Lake, Chris Lorenzo",
+    "title": "Long Jacket"
+   },
+   {
+    "artist": "Mau P",
+    "title": "neck"
+   },
+   {
+    "artist": "Cloonee",
+    "title": "I Rhyme Quick"
+   },
+   {
+    "artist": "Solardo",
+    "title": "Feel My Desire"
+   },
+   {
+    "artist": "Dom Dolla",
+    "title": "San Frandisco"
+   }
+  ],
+  "crate": [
+   {
+    "artist": "Adriatique",
+    "title": "Palm Of Your Hands"
+   },
+   {
+    "artist": "Claptone, MIRAMAR",
+    "title": "Beautiful Times"
+   },
+   {
+    "artist": "Boris Brejcha, Chemutai Sage",
+    "title": "Don't Stress Your Mind"
+   },
+   {
+    "artist": "Mesto",
+    "title": "Freak"
+   },
+   {
+    "artist": "Massano, Humans Musik",
+    "title": "Underground"
+   },
+   {
+    "artist": "Lilly Palmer",
+    "title": "Hey You"
+   },
+   {
+    "artist": "Solomun, Inéz",
+    "title": "Raider on the Storm"
+   },
+   {
+    "artist": "Lee Foss, GS5",
+    "title": "Separation"
+   },
+   {
+    "artist": "Ferreck Dawn",
+    "title": "Lost At The End"
+   },
+   {
+    "artist": "Jamie Jones, Camden Cox",
+    "title": "State Of Mind"
+   },
+   {
+    "artist": "Armin van Buuren, Adam Beyer",
+    "title": "No Mercy"
+   },
+   {
+    "artist": "Adam Ten",
+    "title": "I Never Knew"
+   },
+   {
+    "artist": "Sander Van Doorn, BLR",
+    "title": "Touching Myself"
+   },
+   {
+    "artist": "Gorgon City, Taet",
+    "title": "Second Nature"
+   },
+   {
+    "artist": "Argy, Massano",
+    "title": "WAIT"
+   },
+   {
+    "artist": "CamelPhat, Arodes",
+    "title": "Cycles"
+   },
+   {
+    "artist": "CamelPhat, Elderbrook",
+    "title": "Cola"
+   },
+   {
+    "artist": "Daft Punk",
+    "title": "Around the World"
+   },
+   {
+    "artist": "Swedish House Mafia",
+    "title": "Don't You Worry Child"
+   },
+   {
+    "artist": "Eric Prydz",
+    "title": "Pjanoo"
+   },
+   {
+    "artist": "Black Coffee, David Guetta",
+    "title": "Drive"
+   },
+   {
+    "artist": "Route 94",
+    "title": "My Love"
+   },
+   {
+    "artist": "Fatboy Slim",
+    "title": "Praise You"
+   },
+   {
+    "artist": "Faithless",
+    "title": "Insomnia"
+   },
+   {
+    "artist": "Inner City",
+    "title": "Good Life"
+   },
+   {
+    "artist": "Moloko",
+    "title": "Sing It Back"
+   },
+   {
+    "artist": "Stardust",
+    "title": "Music Sounds Better with You"
+   },
+   {
+    "artist": "Swedish House Mafia",
+    "title": "One"
+   },
+   {
+    "artist": "deadmau5",
+    "title": "Ghosts 'n' Stuff"
+   },
+   {
+    "artist": "Jax Jones",
+    "title": "You Don't Know Me"
+   },
+   {
+    "artist": "Cassius",
+    "title": "Toop Toop"
+   },
+   {
+    "artist": "Basement Jaxx",
+    "title": "Where's Your Head At"
+   },
+   {
+    "artist": "Rüfüs Du Sol",
+    "title": "Innerbloom"
+   },
+   {
+    "artist": "Eiffel 65",
+    "title": "Blue (Da Ba Dee)"
+   },
+   {
+    "artist": "Fisher",
+    "title": "Ya Kidding"
+   },
+   {
+    "artist": "Technotronic",
+    "title": "Pump Up the Jam"
+   },
+   {
+    "artist": "CeCe Peniston",
+    "title": "Finally"
+   },
+   {
+    "artist": "The Chemical Brothers",
+    "title": "Hey Boy Hey Girl"
+   },
+   {
+    "artist": "Disclosure",
+    "title": "White Noise"
+   },
+   {
+    "artist": "Three Drives On A Vinyl",
+    "title": "Greece 2000"
+   }
+  ]
+ },
+ {
+  "id": "afro-house-midset",
+  "name": "Afro house mid-set",
+  "lane": "afro-house",
+  "template": "120min",
+  "plannedLength": 16,
+  "set": [
+   {
+    "artist": "Black Coffee, David Guetta",
+    "title": "Drive"
+   },
+   {
+    "artist": "Riva Starr, Adam Port",
+    "title": "Whole Room Dancing"
+   },
+   {
+    "artist": "Franky Rizardo",
+    "title": "Marido Dansa"
+   },
+   {
+    "artist": "Adam Port, Stryv, Keinemusik, Orso, Malachiparker",
+    "title": "Move"
+   }
+  ],
+  "crate": [
+   {
+    "artist": "Chris Lake, Chris Lorenzo",
+    "title": "Long Jacket"
+   },
+   {
+    "artist": "Lilly Palmer",
+    "title": "Hey You"
+   },
+   {
+    "artist": "Solomun, Inéz",
+    "title": "Raider on the Storm"
+   },
+   {
+    "artist": "Lee Foss, GS5",
+    "title": "Separation"
+   },
+   {
+    "artist": "Ferreck Dawn",
+    "title": "Lost At The End"
+   },
+   {
+    "artist": "Jamie Jones, Camden Cox",
+    "title": "State Of Mind"
+   },
+   {
+    "artist": "Armin van Buuren, Adam Beyer",
+    "title": "No Mercy"
+   },
+   {
+    "artist": "Adam Ten",
+    "title": "I Never Knew"
+   },
+   {
+    "artist": "Deborah De Luca, Marie Vaunt",
+    "title": "Lalala"
+   },
+   {
+    "artist": "Claude VonStroke",
+    "title": "Two Line Groove"
+   },
+   {
+    "artist": "Gorgon City, Taet",
+    "title": "Second Nature"
+   },
+   {
+    "artist": "Argy, Massano",
+    "title": "WAIT"
+   },
+   {
+    "artist": "CamelPhat, Arodes",
+    "title": "Cycles"
+   },
+   {
+    "artist": "Charlotte de Witte",
+    "title": "A Prayer For The Dancefloor"
+   },
+   {
+    "artist": "Daft Punk",
+    "title": "One More Time"
+   },
+   {
+    "artist": "Justice",
+    "title": "D.A.N.C.E."
+   },
+   {
+    "artist": "Avicii",
+    "title": "Levels"
+   },
+   {
+    "artist": "Eric Prydz",
+    "title": "Call on Me"
+   },
+   {
+    "artist": "Jamie xx",
+    "title": "Gosh"
+   },
+   {
+    "artist": "Gorgon City",
+    "title": "Ready for Your Love"
+   },
+   {
+    "artist": "The Chemical Brothers",
+    "title": "Block Rockin' Beats"
+   },
+   {
+    "artist": "Robin S",
+    "title": "Show Me Love"
+   },
+   {
+    "artist": "Armand van Helden",
+    "title": "You Don't Know Me"
+   },
+   {
+    "artist": "Modjo",
+    "title": "Lady (Hear Me Tonight)"
+   },
+   {
+    "artist": "Röyksopp",
+    "title": "Eple"
+   },
+   {
+    "artist": "Martin Garrix",
+    "title": "Animals"
+   },
+   {
+    "artist": "Joel Corry",
+    "title": "Head & Heart"
+   },
+   {
+    "artist": "Kygo",
+    "title": "Firestone"
+   },
+   {
+    "artist": "Benny Benassi",
+    "title": "Satisfaction"
+   },
+   {
+    "artist": "Mylo",
+    "title": "Drop the Pressure"
+   },
+   {
+    "artist": "Calvin Harris",
+    "title": "Feel So Close"
+   },
+   {
+    "artist": "Darude",
+    "title": "Sandstorm"
+   },
+   {
+    "artist": "Rhythim Is Rhythim",
+    "title": "Strings of Life"
+   },
+   {
+    "artist": "Delerium",
+    "title": "Silence"
+   },
+   {
+    "artist": "Armand van Helden",
+    "title": "Koochy"
+   },
+   {
+    "artist": "Duke Dumont",
+    "title": "Ocean Drive"
+   },
+   {
+    "artist": "The Chemical Brothers",
+    "title": "Galvanize"
+   },
+   {
+    "artist": "Zombie Nation",
+    "title": "Kernkraft 400"
+   },
+   {
+    "artist": "Junior Jack, Mark Knight",
+    "title": "Feelings"
+   },
+   {
+    "artist": "Justice, Gesaffelstein",
+    "title": "Pusher"
+   }
+  ]
+ },
+ {
+  "id": "progressive-journey",
+  "name": "Progressive journey",
+  "lane": "progressive-house",
+  "template": "120min",
+  "plannedLength": 16,
+  "set": [
+   {
+    "artist": "Eric Prydz",
+    "title": "Pjanoo"
+   },
+   {
+    "artist": "deadmau5",
+    "title": "Ghosts 'n' Stuff"
+   },
+   {
+    "artist": "Rüfüs Du Sol",
+    "title": "Innerbloom"
+   },
+   {
+    "artist": "Eric Prydz",
+    "title": "Call on Me"
+   }
+  ],
+  "crate": [
+   {
+    "artist": "Amelie Lens, Angèle",
+    "title": "Run"
+   },
+   {
+    "artist": "Skrillex, Solomun",
+    "title": "Rumpta"
+   },
+   {
+    "artist": "Roland Clark, Moree MK",
+    "title": "Girls Dance"
+   },
+   {
+    "artist": "Pan-Pot, Gray Cosmo",
+    "title": "Time To Be Free"
+   },
+   {
+    "artist": "AC Slater",
+    "title": "Swingin'"
+   },
+   {
+    "artist": "Cloonee",
+    "title": "I Rhyme Quick"
+   },
+   {
+    "artist": "Sander Van Doorn, BLR",
+    "title": "Touching Myself"
+   },
+   {
+    "artist": "Solardo",
+    "title": "Feel My Desire"
+   },
+   {
+    "artist": "Mark Knight, Wh0",
+    "title": "Clap Your Hands"
+   },
+   {
+    "artist": "GORDO, Reinier Zonneveld",
+    "title": "Loco Loco"
+   },
+   {
+    "artist": "Mau P",
+    "title": "neck"
+   },
+   {
+    "artist": "CamelPhat, Elderbrook",
+    "title": "Cola"
+   },
+   {
+    "artist": "Daft Punk",
+    "title": "Around the World"
+   },
+   {
+    "artist": "Swedish House Mafia",
+    "title": "Don't You Worry Child"
+   },
+   {
+    "artist": "Dom Dolla",
+    "title": "San Frandisco"
+   },
+   {
+    "artist": "Jamie xx",
+    "title": "Gosh"
+   },
+   {
+    "artist": "Gorgon City",
+    "title": "Ready for Your Love"
+   },
+   {
+    "artist": "The Chemical Brothers",
+    "title": "Block Rockin' Beats"
+   },
+   {
+    "artist": "Robin S",
+    "title": "Show Me Love"
+   },
+   {
+    "artist": "Armand van Helden",
+    "title": "You Don't Know Me"
+   },
+   {
+    "artist": "Modjo",
+    "title": "Lady (Hear Me Tonight)"
+   },
+   {
+    "artist": "Röyksopp",
+    "title": "Eple"
+   },
+   {
+    "artist": "Martin Garrix",
+    "title": "Animals"
+   },
+   {
+    "artist": "Jax Jones",
+    "title": "You Don't Know Me"
+   },
+   {
+    "artist": "Cassius",
+    "title": "Toop Toop"
+   },
+   {
+    "artist": "Basement Jaxx",
+    "title": "Where's Your Head At"
+   },
+   {
+    "artist": "Calvin Harris",
+    "title": "Feel So Close"
+   },
+   {
+    "artist": "Darude",
+    "title": "Sandstorm"
+   },
+   {
+    "artist": "Rhythim Is Rhythim",
+    "title": "Strings of Life"
+   },
+   {
+    "artist": "Delerium",
+    "title": "Silence"
+   },
+   {
+    "artist": "Armand van Helden",
+    "title": "Koochy"
+   },
+   {
+    "artist": "Duke Dumont",
+    "title": "Ocean Drive"
+   },
+   {
+    "artist": "The Chemical Brothers",
+    "title": "Galvanize"
+   },
+   {
+    "artist": "Zombie Nation",
+    "title": "Kernkraft 400"
+   },
+   {
+    "artist": "Junior Jack, Mark Knight",
+    "title": "Feelings"
+   },
+   {
+    "artist": "Justice, Gesaffelstein",
+    "title": "Pusher"
+   },
+   {
+    "artist": "FISHER, LAUREL",
+    "title": "Staring At The Sun"
+   },
+   {
+    "artist": "Innellea",
+    "title": "RECKLESS 69"
+   },
+   {
+    "artist": "Riva Starr, Adam Port",
+    "title": "Whole Room Dancing"
+   },
+   {
+    "artist": "Dom Dolla, Solomun",
+    "title": "DANGER DANGER"
+   }
+  ]
+ },
+ {
+  "id": "techno-peak-time",
+  "name": "Techno peak-time",
+  "lane": "techno",
+  "template": "60min",
+  "plannedLength": 12,
+  "set": [
+   {
+    "artist": "Charlotte de Witte",
+    "title": "A Prayer For The Dancefloor"
+   },
+   {
+    "artist": "Amelie Lens, Angèle",
+    "title": "Run"
+   },
+   {
+    "artist": "Eli Brown",
+    "title": "It's Like That"
+   },
+   {
+    "artist": "Pan-Pot, Gray Cosmo",
+    "title": "Time To Be Free"
+   },
+   {
+    "artist": "Armin van Buuren, Adam Beyer",
+    "title": "No Mercy"
+   }
+  ],
+  "crate": [
+   {
+    "artist": "Deborah De Luca, Marie Vaunt",
+    "title": "Lalala"
+   },
+   {
+    "artist": "Claude VonStroke",
+    "title": "Two Line Groove"
+   },
+   {
+    "artist": "Gorgon City, Taet",
+    "title": "Second Nature"
+   },
+   {
+    "artist": "Argy, Massano",
+    "title": "WAIT"
+   },
+   {
+    "artist": "CamelPhat, Arodes",
+    "title": "Cycles"
+   },
+   {
+    "artist": "CamelPhat, Elderbrook",
+    "title": "Cola"
+   },
+   {
+    "artist": "Daft Punk",
+    "title": "Around the World"
+   },
+   {
+    "artist": "Swedish House Mafia",
+    "title": "Don't You Worry Child"
+   },
+   {
+    "artist": "Eric Prydz",
+    "title": "Pjanoo"
+   },
+   {
+    "artist": "Dom Dolla",
+    "title": "San Frandisco"
+   },
+   {
+    "artist": "Jamie xx",
+    "title": "Gosh"
+   },
+   {
+    "artist": "Gorgon City",
+    "title": "Ready for Your Love"
+   },
+   {
+    "artist": "The Chemical Brothers",
+    "title": "Block Rockin' Beats"
+   },
+   {
+    "artist": "Robin S",
+    "title": "Show Me Love"
+   },
+   {
+    "artist": "Armand van Helden",
+    "title": "You Don't Know Me"
+   },
+   {
+    "artist": "Modjo",
+    "title": "Lady (Hear Me Tonight)"
+   },
+   {
+    "artist": "Röyksopp",
+    "title": "Eple"
+   },
+   {
+    "artist": "Martin Garrix",
+    "title": "Animals"
+   },
+   {
+    "artist": "Joel Corry",
+    "title": "Head & Heart"
+   },
+   {
+    "artist": "Kygo",
+    "title": "Firestone"
+   },
+   {
+    "artist": "Benny Benassi",
+    "title": "Satisfaction"
+   },
+   {
+    "artist": "Mylo",
+    "title": "Drop the Pressure"
+   },
+   {
+    "artist": "Calvin Harris",
+    "title": "Feel So Close"
+   },
+   {
+    "artist": "Darude",
+    "title": "Sandstorm"
+   },
+   {
+    "artist": "Rhythim Is Rhythim",
+    "title": "Strings of Life"
+   },
+   {
+    "artist": "Delerium",
+    "title": "Silence"
+   },
+   {
+    "artist": "Armand van Helden",
+    "title": "Koochy"
+   },
+   {
+    "artist": "Duke Dumont",
+    "title": "Ocean Drive"
+   },
+   {
+    "artist": "The Chemical Brothers",
+    "title": "Galvanize"
+   },
+   {
+    "artist": "Zombie Nation",
+    "title": "Kernkraft 400"
+   },
+   {
+    "artist": "Junior Jack, Mark Knight",
+    "title": "Feelings"
+   },
+   {
+    "artist": "Justice, Gesaffelstein",
+    "title": "Pusher"
+   },
+   {
+    "artist": "FISHER, LAUREL",
+    "title": "Staring At The Sun"
+   },
+   {
+    "artist": "Innellea",
+    "title": "RECKLESS 69"
+   },
+   {
+    "artist": "Riva Starr, Adam Port",
+    "title": "Whole Room Dancing"
+   },
+   {
+    "artist": "Dom Dolla, Solomun",
+    "title": "DANGER DANGER"
+   },
+   {
+    "artist": "R3HAB, ARTBAT",
+    "title": "Dramma"
+   },
+   {
+    "artist": "Adriatique",
+    "title": "Palm Of Your Hands"
+   },
+   {
+    "artist": "Claptone, MIRAMAR",
+    "title": "Beautiful Times"
+   },
+   {
+    "artist": "Boris Brejcha, Chemutai Sage",
+    "title": "Don't Stress Your Mind"
+   }
+  ]
+ },
+ {
+  "id": "disco-opener",
+  "name": "Disco / nu-disco opener",
+  "lane": "disco-nu-disco",
+  "template": "60min",
+  "plannedLength": 12,
+  "set": [
+   {
+    "artist": "Modjo",
+    "title": "Lady (Hear Me Tonight)"
+   },
+   {
+    "artist": "Stardust",
+    "title": "Music Sounds Better with You"
+   },
+   {
+    "artist": "Cassius",
+    "title": "Toop Toop"
+   }
+  ],
+  "crate": [
+   {
+    "artist": "Solardo",
+    "title": "Feel My Desire"
+   },
+   {
+    "artist": "Mark Knight, Wh0",
+    "title": "Clap Your Hands"
+   },
+   {
+    "artist": "GORDO, Reinier Zonneveld",
+    "title": "Loco Loco"
+   },
+   {
+    "artist": "Mau P",
+    "title": "neck"
+   },
+   {
+    "artist": "CamelPhat, Elderbrook",
+    "title": "Cola"
+   },
+   {
+    "artist": "Daft Punk",
+    "title": "Around the World"
+   },
+   {
+    "artist": "Swedish House Mafia",
+    "title": "Don't You Worry Child"
+   },
+   {
+    "artist": "Eric Prydz",
+    "title": "Pjanoo"
+   },
+   {
+    "artist": "Dom Dolla",
+    "title": "San Frandisco"
+   },
+   {
+    "artist": "Jamie xx",
+    "title": "Gosh"
+   },
+   {
+    "artist": "Gorgon City",
+    "title": "Ready for Your Love"
+   },
+   {
+    "artist": "The Chemical Brothers",
+    "title": "Block Rockin' Beats"
+   },
+   {
+    "artist": "Robin S",
+    "title": "Show Me Love"
+   },
+   {
+    "artist": "Armand van Helden",
+    "title": "You Don't Know Me"
+   },
+   {
+    "artist": "Röyksopp",
+    "title": "Eple"
+   },
+   {
+    "artist": "Martin Garrix",
+    "title": "Animals"
+   },
+   {
+    "artist": "Joel Corry",
+    "title": "Head & Heart"
+   },
+   {
+    "artist": "Kygo",
+    "title": "Firestone"
+   },
+   {
+    "artist": "Basement Jaxx",
+    "title": "Where's Your Head At"
+   },
+   {
+    "artist": "Rüfüs Du Sol",
+    "title": "Innerbloom"
+   },
+   {
+    "artist": "Eiffel 65",
+    "title": "Blue (Da Ba Dee)"
+   },
+   {
+    "artist": "Fisher",
+    "title": "Ya Kidding"
+   },
+   {
+    "artist": "Technotronic",
+    "title": "Pump Up the Jam"
+   },
+   {
+    "artist": "CeCe Peniston",
+    "title": "Finally"
+   },
+   {
+    "artist": "The Chemical Brothers",
+    "title": "Hey Boy Hey Girl"
+   },
+   {
+    "artist": "Disclosure",
+    "title": "White Noise"
+   },
+   {
+    "artist": "Three Drives On A Vinyl",
+    "title": "Greece 2000"
+   },
+   {
+    "artist": "Mr. Oizo",
+    "title": "Flat Beat"
+   },
+   {
+    "artist": "Öwnboss, Voltech",
+    "title": "Rockin'"
+   },
+   {
+    "artist": "Boys Noize, Brutalismus 3000",
+    "title": "Nächstenliebe"
+   },
+   {
+    "artist": "HUGEL, Snoop Dogg",
+    "title": "H.O.U.S.E"
+   },
+   {
+    "artist": "KETTAMA, Prospa",
+    "title": "Think Of You"
+   },
+   {
+    "artist": "Miss Monique, Henri Bergmann",
+    "title": "17"
+   },
+   {
+    "artist": "Oliver Heldens, Will Clarke",
+    "title": "Lost In Music"
+   },
+   {
+    "artist": "Franky Rizardo",
+    "title": "Marido Dansa"
+   },
+   {
+    "artist": "Solardo",
+    "title": "Deeper Love"
+   },
+   {
+    "artist": "Dombresky, Disco Dom",
+    "title": "There is Life"
+   },
+   {
+    "artist": "Öwnboss",
+    "title": "Pop This"
+   },
+   {
+    "artist": "Anyma, Stylo",
+    "title": "No Good"
+   },
+   {
+    "artist": "Chris Lake, Chris Lorenzo",
+    "title": "Long Jacket"
+   }
+  ]
+ },
+ {
+  "id": "lane-change",
+  "name": "Lane change: melodic techno into techno",
+  "lane": "techno",
+  "template": "120min",
+  "plannedLength": 16,
+  "set": [
+   {
+    "artist": "Adriatique",
+    "title": "Palm Of Your Hands"
+   },
+   {
+    "artist": "Kölsch",
+    "title": "Speicher 140"
+   },
+   {
+    "artist": "Eli Brown",
+    "title": "It's Like That"
+   },
+   {
+    "artist": "Amelie Lens, Angèle",
+    "title": "Run"
+   },
+   {
+    "artist": "Charlotte de Witte",
+    "title": "A Prayer For The Dancefloor"
+   }
+  ],
+  "crate": [
+   {
+    "artist": "Swedish House Mafia",
+    "title": "Don't You Worry Child"
+   },
+   {
+    "artist": "Eric Prydz",
+    "title": "Pjanoo"
+   },
+   {
+    "artist": "Dom Dolla",
+    "title": "San Frandisco"
+   },
+   {
+    "artist": "Jamie xx",
+    "title": "Gosh"
+   },
+   {
+    "artist": "Gorgon City",
+    "title": "Ready for Your Love"
+   },
+   {
+    "artist": "The Chemical Brothers",
+    "title": "Block Rockin' Beats"
+   },
+   {
+    "artist": "Robin S",
+    "title": "Show Me Love"
+   },
+   {
+    "artist": "Armand van Helden",
+    "title": "You Don't Know Me"
+   },
+   {
+    "artist": "Modjo",
+    "title": "Lady (Hear Me Tonight)"
+   },
+   {
+    "artist": "Röyksopp",
+    "title": "Eple"
+   },
+   {
+    "artist": "Martin Garrix",
+    "title": "Animals"
+   },
+   {
+    "artist": "Joel Corry",
+    "title": "Head & Heart"
+   },
+   {
+    "artist": "Kygo",
+    "title": "Firestone"
+   },
+   {
+    "artist": "Benny Benassi",
+    "title": "Satisfaction"
+   },
+   {
+    "artist": "Mylo",
+    "title": "Drop the Pressure"
+   },
+   {
+    "artist": "Calvin Harris",
+    "title": "Feel So Close"
+   },
+   {
+    "artist": "Darude",
+    "title": "Sandstorm"
+   },
+   {
+    "artist": "Rhythim Is Rhythim",
+    "title": "Strings of Life"
+   },
+   {
+    "artist": "Delerium",
+    "title": "Silence"
+   },
+   {
+    "artist": "Armand van Helden",
+    "title": "Koochy"
+   },
+   {
+    "artist": "Duke Dumont",
+    "title": "Ocean Drive"
+   },
+   {
+    "artist": "The Chemical Brothers",
+    "title": "Galvanize"
+   },
+   {
+    "artist": "Zombie Nation",
+    "title": "Kernkraft 400"
+   },
+   {
+    "artist": "Junior Jack, Mark Knight",
+    "title": "Feelings"
+   },
+   {
+    "artist": "Justice, Gesaffelstein",
+    "title": "Pusher"
+   },
+   {
+    "artist": "FISHER, LAUREL",
+    "title": "Staring At The Sun"
+   },
+   {
+    "artist": "Innellea",
+    "title": "RECKLESS 69"
+   },
+   {
+    "artist": "Riva Starr, Adam Port",
+    "title": "Whole Room Dancing"
+   },
+   {
+    "artist": "Dom Dolla, Solomun",
+    "title": "DANGER DANGER"
+   },
+   {
+    "artist": "R3HAB, ARTBAT",
+    "title": "Dramma"
+   },
+   {
+    "artist": "Solardo",
+    "title": "Deeper Love"
+   },
+   {
+    "artist": "Dombresky, Disco Dom",
+    "title": "There is Life"
+   },
+   {
+    "artist": "Öwnboss",
+    "title": "Pop This"
+   },
+   {
+    "artist": "Anyma, Stylo",
+    "title": "No Good"
+   },
+   {
+    "artist": "Chris Lake, Chris Lorenzo",
+    "title": "Long Jacket"
+   },
+   {
+    "artist": "Solomun, Inéz",
+    "title": "Raider on the Storm"
+   },
+   {
+    "artist": "Skrillex, Solomun",
+    "title": "Rumpta"
+   },
+   {
+    "artist": "Roland Clark, Moree MK",
+    "title": "Girls Dance"
+   },
+   {
+    "artist": "Pan-Pot, Gray Cosmo",
+    "title": "Time To Be Free"
+   },
+   {
+    "artist": "AC Slater",
+    "title": "Swingin'"
+   }
+  ]
+ },
+ {
+  "id": "cold-start",
+  "name": "Cold start: one track",
+  "lane": "tech-house",
+  "template": "60min",
+  "plannedLength": 12,
+  "set": [
+   {
+    "artist": "Fisher",
+    "title": "Ya Kidding"
+   }
+  ],
+  "crate": [
+   {
+    "artist": "Eric Prydz",
+    "title": "Pjanoo"
+   },
+   {
+    "artist": "Dom Dolla",
+    "title": "San Frandisco"
+   },
+   {
+    "artist": "Jamie xx",
+    "title": "Gosh"
+   },
+   {
+    "artist": "Gorgon City",
+    "title": "Ready for Your Love"
+   },
+   {
+    "artist": "The Chemical Brothers",
+    "title": "Block Rockin' Beats"
+   },
+   {
+    "artist": "Robin S",
+    "title": "Show Me Love"
+   },
+   {
+    "artist": "Armand van Helden",
+    "title": "You Don't Know Me"
+   },
+   {
+    "artist": "Modjo",
+    "title": "Lady (Hear Me Tonight)"
+   },
+   {
+    "artist": "Röyksopp",
+    "title": "Eple"
+   },
+   {
+    "artist": "Martin Garrix",
+    "title": "Animals"
+   },
+   {
+    "artist": "Joel Corry",
+    "title": "Head & Heart"
+   },
+   {
+    "artist": "Kygo",
+    "title": "Firestone"
+   },
+   {
+    "artist": "Benny Benassi",
+    "title": "Satisfaction"
+   },
+   {
+    "artist": "Mylo",
+    "title": "Drop the Pressure"
+   },
+   {
+    "artist": "Calvin Harris",
+    "title": "Feel So Close"
+   },
+   {
+    "artist": "Darude",
+    "title": "Sandstorm"
+   },
+   {
+    "artist": "Technotronic",
+    "title": "Pump Up the Jam"
+   },
+   {
+    "artist": "CeCe Peniston",
+    "title": "Finally"
+   },
+   {
+    "artist": "The Chemical Brothers",
+    "title": "Hey Boy Hey Girl"
+   },
+   {
+    "artist": "Disclosure",
+    "title": "White Noise"
+   },
+   {
+    "artist": "Three Drives On A Vinyl",
+    "title": "Greece 2000"
+   },
+   {
+    "artist": "Mr. Oizo",
+    "title": "Flat Beat"
+   },
+   {
+    "artist": "Öwnboss, Voltech",
+    "title": "Rockin'"
+   },
+   {
+    "artist": "Boys Noize, Brutalismus 3000",
+    "title": "Nächstenliebe"
+   },
+   {
+    "artist": "HUGEL, Snoop Dogg",
+    "title": "H.O.U.S.E"
+   },
+   {
+    "artist": "KETTAMA, Prospa",
+    "title": "Think Of You"
+   },
+   {
+    "artist": "Miss Monique, Henri Bergmann",
+    "title": "17"
+   },
+   {
+    "artist": "Oliver Heldens, Will Clarke",
+    "title": "Lost In Music"
+   },
+   {
+    "artist": "Franky Rizardo",
+    "title": "Marido Dansa"
+   },
+   {
+    "artist": "Solardo",
+    "title": "Deeper Love"
+   },
+   {
+    "artist": "Dombresky, Disco Dom",
+    "title": "There is Life"
+   },
+   {
+    "artist": "Öwnboss",
+    "title": "Pop This"
+   },
+   {
+    "artist": "Anyma, Stylo",
+    "title": "No Good"
+   },
+   {
+    "artist": "Chris Lake, Chris Lorenzo",
+    "title": "Long Jacket"
+   },
+   {
+    "artist": "Lilly Palmer",
+    "title": "Hey You"
+   },
+   {
+    "artist": "Solomun, Inéz",
+    "title": "Raider on the Storm"
+   },
+   {
+    "artist": "Lee Foss, GS5",
+    "title": "Separation"
+   },
+   {
+    "artist": "Ferreck Dawn",
+    "title": "Lost At The End"
+   },
+   {
+    "artist": "Jamie Jones, Camden Cox",
+    "title": "State Of Mind"
+   },
+   {
+    "artist": "Armin van Buuren, Adam Beyer",
+    "title": "No Mercy"
+   }
+  ]
+ },
+ {
+  "id": "incomplete-track",
+  "name": "Set with one incomplete track",
+  "lane": "house",
+  "template": "60min",
+  "plannedLength": 12,
+  "set": [
+   {
+    "artist": "Solardo",
+    "title": "Deeper Love"
+   },
+   {
+    "artist": "Qxzvl Wprk",
+    "title": "Nnfgtq Zzvx"
+   },
+   {
+    "artist": "Mesto",
+    "title": "Freak"
+   },
+   {
+    "artist": "Dombresky, Disco Dom",
+    "title": "There is Life"
+   }
+  ],
+  "crate": [
+   {
+    "artist": "Robin S",
+    "title": "Show Me Love"
+   },
+   {
+    "artist": "Armand van Helden",
+    "title": "You Don't Know Me"
+   },
+   {
+    "artist": "Modjo",
+    "title": "Lady (Hear Me Tonight)"
+   },
+   {
+    "artist": "Röyksopp",
+    "title": "Eple"
+   },
+   {
+    "artist": "Martin Garrix",
+    "title": "Animals"
+   },
+   {
+    "artist": "Joel Corry",
+    "title": "Head & Heart"
+   },
+   {
+    "artist": "Kygo",
+    "title": "Firestone"
+   },
+   {
+    "artist": "Benny Benassi",
+    "title": "Satisfaction"
+   },
+   {
+    "artist": "Mylo",
+    "title": "Drop the Pressure"
+   },
+   {
+    "artist": "Calvin Harris",
+    "title": "Feel So Close"
+   },
+   {
+    "artist": "Darude",
+    "title": "Sandstorm"
+   },
+   {
+    "artist": "Rhythim Is Rhythim",
+    "title": "Strings of Life"
+   },
+   {
+    "artist": "Delerium",
+    "title": "Silence"
+   },
+   {
+    "artist": "Armand van Helden",
+    "title": "Koochy"
+   },
+   {
+    "artist": "Duke Dumont",
+    "title": "Ocean Drive"
+   },
+   {
+    "artist": "The Chemical Brothers",
+    "title": "Galvanize"
+   },
+   {
+    "artist": "Zombie Nation",
+    "title": "Kernkraft 400"
+   },
+   {
+    "artist": "Junior Jack, Mark Knight",
+    "title": "Feelings"
+   },
+   {
+    "artist": "Justice, Gesaffelstein",
+    "title": "Pusher"
+   },
+   {
+    "artist": "FISHER, LAUREL",
+    "title": "Staring At The Sun"
+   },
+   {
+    "artist": "Innellea",
+    "title": "RECKLESS 69"
+   },
+   {
+    "artist": "Riva Starr, Adam Port",
+    "title": "Whole Room Dancing"
+   },
+   {
+    "artist": "Dom Dolla, Solomun",
+    "title": "DANGER DANGER"
+   },
+   {
+    "artist": "R3HAB, ARTBAT",
+    "title": "Dramma"
+   },
+   {
+    "artist": "Adriatique",
+    "title": "Palm Of Your Hands"
+   },
+   {
+    "artist": "Boris Brejcha, Chemutai Sage",
+    "title": "Don't Stress Your Mind"
+   },
+   {
+    "artist": "Anyma, Stylo",
+    "title": "No Good"
+   },
+   {
+    "artist": "Chris Lake, Chris Lorenzo",
+    "title": "Long Jacket"
+   },
+   {
+    "artist": "Lilly Palmer",
+    "title": "Hey You"
+   },
+   {
+    "artist": "Solomun, Inéz",
+    "title": "Raider on the Storm"
+   },
+   {
+    "artist": "Lee Foss, GS5",
+    "title": "Separation"
+   },
+   {
+    "artist": "Ferreck Dawn",
+    "title": "Lost At The End"
+   },
+   {
+    "artist": "Jamie Jones, Camden Cox",
+    "title": "State Of Mind"
+   },
+   {
+    "artist": "Armin van Buuren, Adam Beyer",
+    "title": "No Mercy"
+   },
+   {
+    "artist": "Adam Ten",
+    "title": "I Never Knew"
+   },
+   {
+    "artist": "Deborah De Luca, Marie Vaunt",
+    "title": "Lalala"
+   },
+   {
+    "artist": "Claude VonStroke",
+    "title": "Two Line Groove"
+   },
+   {
+    "artist": "Gorgon City, Taet",
+    "title": "Second Nature"
+   },
+   {
+    "artist": "Argy, Massano",
+    "title": "WAIT"
+   },
+   {
+    "artist": "CamelPhat, Arodes",
+    "title": "Cycles"
+   }
+  ]
+ }
+]
