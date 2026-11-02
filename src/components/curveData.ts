@@ -39,9 +39,9 @@ export function setTiming(tracks: Track[], arc: Arc, playFraction = DEFAULT_PLAY
 
 const fmtMin = (min: number) => formatMinutes(min * 60_000);
 
-/** "38:20 of 1:00:00 · 9 of ~16 tracks"; the played time reads "~38:20" when any length is estimated. */
+/** "38:20 of 60 min · 9 of ~16 tracks" (plan in minutes, as the arc picker labels it); "~38:20" when any length is estimated. */
 export function timingHeaderText(t: SetTiming, count: number, plannedCount: number): string {
-  return `${t.estimated ? '~' : ''}${fmtMin(t.playedMin)} of ${fmtMin(t.plannedMin)} · ${count} of ~${plannedCount} tracks`;
+  return `${t.estimated ? '~' : ''}${fmtMin(t.playedMin)} of ${Math.round(t.plannedMin)} min · ${count} of ~${plannedCount} tracks`;
 }
 
 /** "+4:10 over" when the set plays past the planned length (to the second), else null. */

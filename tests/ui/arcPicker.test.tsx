@@ -118,7 +118,7 @@ describe('Builder with a minute arc', () => {
       render(<Builder demo getSongBpmConfigured={false} />);
     });
     // no durations: each estimated 5:00, 75% played -> 2 x 3:45 = 7:30, marked estimated
-    expect(screen.getByText('~7:30 of 2:00:00 · 2 of ~32 tracks')).toBeInTheDocument();
+    expect(screen.getByText('~7:30 of 120 min · 2 of ~32 tracks')).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: '120 min' })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByLabelText('Arc shape')).toHaveValue('journey');
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/suggest', expect.anything()));
@@ -128,7 +128,7 @@ describe('Builder with a minute arc', () => {
     await act(async () => {
       fireEvent.change(screen.getByLabelText('Played per track'), { target: { value: '0.5' } });
     });
-    expect(screen.getByText('~5:00 of 2:00:00 · 2 of ~48 tracks')).toBeInTheDocument();
+    expect(screen.getByText('~5:00 of 120 min · 2 of ~48 tracks')).toBeInTheDocument();
     await waitFor(() => expect(body()).toMatchObject({ playFraction: 0.5 }));
     await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({ arc: { minutes: 120, shape: 'journey' }, playFraction: 0.5 }));
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).not.toHaveProperty('template');

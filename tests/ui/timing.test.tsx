@@ -72,24 +72,24 @@ describe('header text', () => {
     const tracks = [tr('a', { durationMs: 240_000 }), tr('b', { durationMs: 200_000 })];
     const t = setTiming(tracks, { minutes: 30, shape: 'build' }, 1);
     expect(timingHeaderText(t, tracks.length, plannedTrackCount({ minutes: 30, shape: 'build' }, 1))).toBe(
-      '7:20 of 30:00 · 2 of ~6 tracks'
+      '7:20 of 30 min · 2 of ~6 tracks'
     );
     expect(overrunText(t)).toBeNull();
   });
 
   it('marks the played time "~" when any duration is estimated', () => {
     const t = setTiming(mixed, ARC_60, 0.75);
-    expect(timingHeaderText(t, 3, 16)).toBe('~9:15 of 1:00:00 · 3 of ~16 tracks');
+    expect(timingHeaderText(t, 3, 16)).toBe('~9:15 of 60 min · 3 of ~16 tracks');
   });
 
   it('empty set', () => {
-    expect(timingHeaderText(setTiming([], ARC_60), 0, 16)).toBe('0:00 of 1:00:00 · 0 of ~16 tracks');
+    expect(timingHeaderText(setTiming([], ARC_60), 0, 16)).toBe('0:00 of 60 min · 0 of ~16 tracks');
   });
 
   it('overrun reads "+m:ss over"', () => {
     const tracks = [...Array.from({ length: 7 }, (_, i) => tr(String(i), { durationMs: 240_000 })), tr('x', { durationMs: 370_000 })];
     const t = setTiming(tracks, { minutes: 30, shape: 'build' }, 1);
-    expect(timingHeaderText(t, 8, 6)).toBe('34:10 of 30:00 · 8 of ~6 tracks');
+    expect(timingHeaderText(t, 8, 6)).toBe('34:10 of 30 min · 8 of ~6 tracks');
     expect(overrunText(t)).toBe('+4:10 over');
   });
 });
@@ -120,14 +120,14 @@ describe('<Builder /> timing header', () => {
 
   it('shows played of planned and the track count', async () => {
     await renderBuilder({ arc: ARC_60, playFraction: 0.75, tracks: mixed });
-    expect(screen.getByText('~9:15 of 1:00:00 · 3 of ~16 tracks')).toBeInTheDocument();
+    expect(screen.getByText('~9:15 of 60 min · 3 of ~16 tracks')).toBeInTheDocument();
     expect(screen.queryByText(/over$/)).toBeNull();
   });
 
   it('flags an overrun', async () => {
     const tracks = [...Array.from({ length: 7 }, (_, i) => tr(String(i), { durationMs: 240_000 })), tr('x', { durationMs: 370_000 })];
     await renderBuilder({ arc: { minutes: 30, shape: 'build' }, playFraction: 1, tracks });
-    expect(screen.getByText('34:10 of 30:00 · 8 of ~6 tracks')).toBeInTheDocument();
+    expect(screen.getByText('34:10 of 30 min · 8 of ~6 tracks')).toBeInTheDocument();
     expect(screen.getByText('+4:10 over')).toBeInTheDocument();
   });
 });
