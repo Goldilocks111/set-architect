@@ -1,11 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { isComplete, RETRYABLE_REASONS } from '@/lib/completeness';
+import { isComplete, RETRYABLE_REASONS, withDanceabilityPrior } from '@/lib/completeness';
 import type { OverrideFields } from '@/lib/overrideValidation';
 import type { Track } from '@/types/track';
 import ArcTemplatePicker from './ArcTemplatePicker';
 import BillingActions from './BillingActions';
+import CratePanel from './CratePanel';
+import { addToCrate, clearCrate, loadCrate, mergeCrateKnown, removeFromCrate, type CrateKnownItem, type CrateTrack } from './crate';
 import DemoBanner from './DemoBanner';
 import EnergyCurve from './EnergyCurve';
 import MikImport from './MikImport';
@@ -45,6 +47,8 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
     rawDispatch(action);
   }, []);
   const [hydrated, setHydrated] = useState(false);
+  const [crate, setCrate] = useState<CrateTrack[]>([]);
+  const [crateOpen, setCrateOpen] = useState(false);
   const { tracks, template } = state;
   const plannedLength = plannedLengthFor(template);
   const inSet = useMemo(() => new Set(tracks.flatMap(recordingKeys)), [tracks]);
@@ -142,6 +146,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
 
   useEffect(() => {
     const gen = ++generation.current;
+    setCrate(loadCrate());
     const stored = loadLocal();
     if (stored) {
       dispatch({ type: 'load', state: stored });
@@ -203,6 +208,26 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
   useEffect(() => {
     if (hydrated) saveLocal(state);
   }, [state, hydrated]);
+
+  // Everything that is in the set is also in the crate (with whatever the resolver has filled in by now).
+  useEffect(() => {
+    if (hydrated && tracks.length) setCrate(addToCrate(tracks, 'set'));
+  }, [tracks, hydrated]);
+
+  const crateKnown = useCallback((known: CrateKnownItem[]) => setCrate((cur) => mergeCrateKnown(known, cur)), []);
+
+  const addCrate = useCallback((list: Track[], from: CrateTrack['from']) => setCrate(addToCrate(list, from)), []);
+
+  const mikImported = useCallback(
+    (rows: Array<{ artist: string; title: string; fields: OverrideFields }>) => {
+      // Danceability is never in a MIK file: a row with energy gets the same prior the cache gives it.
+      addCrate(
+        rows.map((r, i) => withDanceabilityPrior({ id: `mik-${Date.now()}-${i}`, artist: r.artist, title: r.title, ...r.fields, sources: {} } as Track)),
+        'mik'
+      );
+    },
+    [addCrate]
+  );
 
   const add = useCallback(
     (track: Track) => {
@@ -269,12 +294,19 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <MikImport tracks={tracks} onApply={applyMik} />
-          <SpotifyConnect tracks={tracks} onAdd={add} />{/* spotify-connect */}
+          <MikImport tracks={tracks} onApply={applyMik} onImported={mikImported} />
+          <SpotifyConnect tracks={tracks} onAdd={add} onAddToCrate={(list) => addCrate(list, 'spotify')} />{/* spotify-connect */}
           {!demo && <BillingActions />}
           {!demo && (
             <SavedSets tracks={tracks} template={template} onLoad={loadSet} />
           )}
+          <button
+            type="button"
+            onClick={() => setCrateOpen(true)}
+            className="rounded-md border border-[#2A2F3F] px-3 py-1 text-[13px] text-[#E8E4DA] tabular-nums hover:border-[#8A8FA3] focus-visible:outline-2 focus-visible:outline-[#F2B33D]"
+          >
+            Crate: {crate.length} {crate.length === 1 ? 'track' : 'tracks'}
+          </button>
           <ArcTemplatePicker value={template} onChange={(t) => dispatch({ type: 'setTemplate', template: t })} />
           <button
             type="button"
@@ -312,10 +344,19 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
           </section>
 
           <aside className="min-w-0 rounded-xl border border-[#2A2F3F] bg-[#1A1D28] px-4 pt-4 pb-2 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
-            {hydrated && <SuggestionBox tracks={tracks} template={template} plannedLength={plannedLength} onAdd={add} />}
+            {hydrated && <SuggestionBox tracks={tracks} template={template} plannedLength={plannedLength} onAdd={add} crate={crate} onCrateKnown={crateKnown} />}
           </aside>
         </div>
       </main>
+
+      {crateOpen && (
+        <CratePanel
+          crate={crate}
+          onRemove={(id) => setCrate(removeFromCrate(id))}
+          onClear={() => setCrate(clearCrate())}
+          onClose={() => setCrateOpen(false)}
+        />
+      )}
 
       <footer className="mx-auto flex w-full max-w-[1280px] flex-wrap gap-x-6 gap-y-1 border-t border-[#2A2F3F] px-4 py-4 text-[12px] text-[#8A8FA3] sm:px-6">
         <span>Previews provided courtesy of iTunes. Video links open YouTube.</span>

@@ -19,6 +19,7 @@ interface PlaylistTrack {
 interface Props {
   inSet: Set<string>;
   onAdd: (track: Track) => void;
+  onAddToCrate?: (tracks: Track[]) => void;
   onClose: () => void;
   onDisconnected: () => void;
 }
@@ -37,11 +38,12 @@ export const toTrack = (t: PlaylistTrack): Track => ({
 });
 
 /** Picker panel: choose one of the user's playlists, then add tracks individually or all at once. */
-export default function SpotifyImport({ inSet, onAdd, onClose, onDisconnected }: Props) {
+export default function SpotifyImport({ inSet, onAdd, onAddToCrate, onClose, onDisconnected }: Props) {
   const [playlists, setPlaylists] = useState<Playlist[] | null>(null);
   const [picked, setPicked] = useState<Playlist | null>(null);
   const [tracks, setTracks] = useState<PlaylistTrack[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [crated, setCrated] = useState<number | null>(null);
 
   const load = async <T,>(url: string): Promise<T | null> => {
     setError(null);
@@ -77,6 +79,7 @@ export default function SpotifyImport({ inSet, onAdd, onClose, onDisconnected }:
   const pick = async (p: Playlist) => {
     setPicked(p);
     setTracks(null);
+    setCrated(null);
     const b = await load<{ tracks: PlaylistTrack[] }>(`/api/spotify/playlists/${encodeURIComponent(p.id)}/tracks`);
     setTracks(b?.tracks ?? []);
   };
@@ -177,14 +180,35 @@ export default function SpotifyImport({ inSet, onAdd, onClose, onDisconnected }:
         </div>
 
         {picked && tracks && tracks.length > 0 && (
-          <button
-            type="button"
-            disabled={addable.length === 0}
-            onClick={() => addable.forEach((t) => onAdd(toTrack(t)))}
-            className={`${btn} bg-[#1DB954] font-medium text-[#12141C] disabled:opacity-50`}
-          >
-            {addable.length === 0 ? 'All tracks added' : `Add all (${addable.length})`}
-          </button>
+          <div className="flex flex-col gap-2">
+            {crated !== null && (
+              <p role="status" className="text-[12px] text-[#8A8FA3]">
+                {crated} track{crated === 1 ? '' : 's'} added to your crate. They get analysed a few at a time as you build.
+              </p>
+            )}
+            <div className="flex gap-2">
+              {onAddToCrate && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onAddToCrate(tracks.map(toTrack));
+                    setCrated(tracks.length);
+                  }}
+                  className={`${btn} flex-1 border border-[#1DB954] text-[#1DB954] hover:bg-[#1DB954]/10`}
+                >
+                  Add all to crate ({tracks.length})
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={addable.length === 0}
+                onClick={() => addable.forEach((t) => onAdd(toTrack(t)))}
+                className={`${btn} flex-1 bg-[#1DB954] font-medium text-[#12141C] disabled:opacity-50`}
+              >
+                {addable.length === 0 ? 'All tracks added' : `Add all (${addable.length})`}
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>

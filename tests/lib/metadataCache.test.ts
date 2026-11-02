@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { dataDir } from '@/lib/dataDir';
-import { getEntry, putManual, putManualMany, putResolved } from '@/lib/metadataCache';
+import { getEntries, getEntry, putManual, putManualMany, putResolved } from '@/lib/metadataCache';
 import type { Track } from '@/types/track';
 
 const t = (over: Partial<Track> = {}): Track => ({
@@ -71,5 +71,44 @@ describe('metadataCache', () => {
     fs.writeFileSync(dataDir('index', 'metadata.json'), '{not json');
     expect(getEntry('a|b')).toBeUndefined();
     expect(putResolved('a|b', t()).attempts).toBe(1);
+  });
+});
+
+describe('snapshot lookups (getEntries)', () => {
+  const seedFile = (n: number) => {
+    const cache = Object.fromEntries(Array.from({ length: n }, (_, i) => [`a|${i}`, { fields: { bpm: 100 + i }, sources: {}, resolvedAt: 1, attempts: 1 }]));
+    fs.writeFileSync(dataDir('index', 'metadata.json'), JSON.stringify(cache));
+  };
+
+  it('parses the cache file once for any number of lookups', () => {
+    seedFile(50);
+    const spy = vi.spyOn(fs, 'readFileSync');
+    const keys = Array.from({ length: 50 }, (_, i) => `a|${i}`);
+    const got = getEntries([...keys, 'nope|x']);
+    for (const k of keys) getEntry(k);
+    const reads = spy.mock.calls.filter(([f]) => String(f).includes('metadata.json')).length;
+    spy.mockRestore();
+    expect(got.size).toBe(50);
+    expect(got.get('a|7')?.fields.bpm).toBe(107);
+    expect(got.has('nope|x')).toBe(false);
+    expect(reads).toBe(1);
+  });
+
+  it('sees a changed file (size/mtime) and its own writes', () => {
+    seedFile(3);
+    expect(getEntry('a|1')?.fields.bpm).toBe(101);
+    seedFile(4);
+    expect(getEntry('a|3')?.fields.bpm).toBe(103);
+    putManual('a|1', { bpm: 150 });
+    expect(getEntries(['a|1']).get('a|1')?.fields.bpm).toBe(150);
+  });
+
+  it('is empty for a missing file', () => {
+    expect(getEntries(['a|1']).size).toBe(0);
+  });
+
+  it('does not read keys inherited from Object.prototype', () => {
+    seedFile(1);
+    expect(getEntries(['constructor', '__proto__']).size).toBe(0);
   });
 });

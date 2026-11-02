@@ -28,7 +28,29 @@ function read(): Record<string, CacheEntry> {
   }
 }
 
+/**
+ * Read-only snapshot for lookups, re-read only when the file's mtime or size changed (or after our own write).
+ * Writers keep using read() so they never mutate what lookups share.
+ */
+let snap: { path: string; mtimeMs: number; size: number; data: Record<string, CacheEntry> } | undefined;
+
+function snapshot(): Record<string, CacheEntry> {
+  const f = file();
+  let st: fs.Stats;
+  try {
+    st = fs.statSync(f);
+  } catch {
+    snap = undefined;
+    return {};
+  }
+  if (snap && snap.path === f && snap.mtimeMs === st.mtimeMs && snap.size === st.size) return snap.data;
+  const data = read();
+  snap = { path: f, mtimeMs: st.mtimeMs, size: st.size, data };
+  return data;
+}
+
 function write(cache: Record<string, CacheEntry>): void {
+  snap = undefined;
   try {
     const f = file();
     const tmp = `${f}.${process.pid}.tmp`;
@@ -41,7 +63,18 @@ function write(cache: Record<string, CacheEntry>): void {
 }
 
 export function getEntry(key: string): CacheEntry | undefined {
-  return read()[key];
+  return snapshot()[key];
+}
+
+/** Many lookups against one snapshot: the cache file is parsed at most once for the whole list. */
+export function getEntries(keys: string[]): Map<string, CacheEntry> {
+  const data = snapshot();
+  const out = new Map<string, CacheEntry>();
+  for (const k of keys) {
+    const e = Object.prototype.hasOwnProperty.call(data, k) ? data[k] : undefined;
+    if (e) out.set(k, e);
+  }
+  return out;
 }
 
 const asTrack = (fields: Partial<Track>): Track => ({ id: '', artist: '', title: '', sources: {}, ...fields });

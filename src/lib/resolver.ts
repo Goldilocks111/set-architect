@@ -53,6 +53,7 @@ interface ResolveRun {
   deadline?: number; // epoch ms; checked between adapters
   aborted: boolean; // set by the caller when it stops waiting: the loop must stop writing
   providersSkipped: boolean; // a guarded adapter was skipped by cooldown/budget, or errored (offline, 5xx, 429, timeout)
+  without?: Set<string>; // adapters to leave out (background crate fill never touches iTunes)
   only?: Set<string>; // restrict to these adapters (preview refresh on a cache hit); skips preview analysis
   timedOut: boolean;
   deezerPreview?: string;
@@ -82,6 +83,7 @@ async function resolveInto(track: Track, run: ResolveRun): Promise<Track> {
   for (const adapter of ADAPTERS) {
     if (run.aborted) return track;
     if (run.only && !run.only.has(adapter.name)) continue;
+    if (run.without?.has(adapter.name)) continue;
     if (run.deadline !== undefined && Date.now() >= run.deadline) {
       run.timedOut = true;
       return track;
@@ -181,7 +183,7 @@ async function withFreshPreview(cached: Track, budgetMs: number): Promise<Track>
 export async function resolveWithStatus(
   artist: string,
   title: string,
-  opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string }; signal?: AbortSignal } = {}
+  opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string }; signal?: AbortSignal; without?: string[] } = {}
 ): Promise<Track> {
   const track = await resolveCore(artist, title, opts);
   if (!track.unresolved && !opts.signal?.aborted) {
@@ -293,6 +295,7 @@ async function resolveCore(
 
   const track = initialTrack(artist, title, opts.hints ?? {});
   const run = newRun(Date.now() + budgetMs);
+  if (opts.without?.length) run.without = new Set(opts.without);
   const { signal } = opts;
   const stopped = new Promise<never>((_, reject) => {
     if (signal?.aborted) reject(new Error('aborted'));
