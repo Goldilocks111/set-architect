@@ -100,6 +100,8 @@ export function suggestNext(args: {
         if (delta >= 3 || (keyKnown && !boost)) continue;
         if (boost && delta === 2) energy = { score: 0.9, label: 'Energy +2 with key boost' };
       }
+      // Rulebook §3 / Phase 4 pair rule: a drop of 4 or more is an "Energy crash" — never suggest one.
+      if (delta <= -4) continue;
       // Rulebook §3: penalize flat-too-long (>4 tracks at the same energy).
       if (
         delta === 0 &&

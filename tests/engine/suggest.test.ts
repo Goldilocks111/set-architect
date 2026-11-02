@@ -1,3 +1,4 @@
+import { pairViolations } from '@/engine/pairs';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_WEIGHTS, primaryArtist, suggestNext } from '@/engine/suggest';
 import { trackKeyOf, type Track } from '@/types/track';
@@ -99,6 +100,16 @@ describe('suggestNext', () => {
     const j2 = t('j2u', { bpm: 128, camelot: 'garbage', energy: 7 });
     const ids = suggestNext({ ...base, playlist: [last], candidates: [j3, j2] }).map((s) => s.track.id);
     expect(ids).toEqual(['j2u']);
+  });
+
+  it('excludes a −4 energy crash (the pair rule flags it); keeps −3', () => {
+    const high = t('hi', { bpm: 128, camelot: '8A', energy: 10 });
+    const crash = t('c4', { bpm: 128, camelot: '8A', energy: 6 });
+    const drop3 = t('d3', { bpm: 128, camelot: '8A', energy: 7 });
+    const ids = suggestNext({ ...base, playlist: [high], candidates: [crash, drop3] }).map((s) => s.track.id);
+    expect(ids).toEqual(['d3']);
+    expect(pairViolations([high, crash]).flatMap((v) => v.issues.map((i) => i.label))).toContain('Energy crash 10→6');
+    expect(pairViolations([high, drop3])).toEqual([]);
   });
 
   it('penalizes a fifth consecutive track at the same energy', () => {
@@ -290,7 +301,8 @@ describe('suggestNext', () => {
       };
       const lanes = ['techno', 'melodic-techno', 'house', 'tech-house', 'trance'];
       let checked = 0;
-      for (let seed = 1; seed <= 200; seed++) {
+      // 300 seeds: crash exclusion (Phase 4) shrinks compliant pools, keep > 50 scenarios exercised
+      for (let seed = 1; seed <= 300; seed++) {
         const r = rng(seed);
         const pick = <T,>(xs: T[]) => xs[Math.floor(r() * xs.length)];
         const rand = (id: string): Track =>
