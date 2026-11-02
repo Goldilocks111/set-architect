@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { isComplete, RETRYABLE_REASONS, withDanceabilityPrior } from '@/lib/completeness';
 import type { OverrideFields } from '@/lib/overrideValidation';
+import { plannedTrackCount } from '@/engine';
 import type { Track } from '@/types/track';
-import ArcTemplatePicker from './ArcTemplatePicker';
+import ArcPicker from './ArcPicker';
 import BillingActions from './BillingActions';
 import CratePanel from './CratePanel';
 import { addToCrate, clearCrate, loadCrate, mergeCrateKnown, removeFromCrate, type CrateKnownItem, type CrateTrack } from './crate';
@@ -18,7 +19,7 @@ import SetList from './SetList';
 import SpotifyConnect from './SpotifyConnect';
 import SuggestionBox from './SuggestionBox';
 import { loadLocal, saveLocal } from './persistence';
-import { initialPlaylistState, plannedLengthFor, playlistReducer, type PlaylistAction, type PlaylistState } from './playlistReducer';
+import { initialPlaylistState, playlistReducer, type LoadableState, type PlaylistAction } from './playlistReducer';
 import { fetchResolved, needsMetadata } from './trackFormat';
 
 const MINUTES_PER_TRACK = 4;
@@ -49,8 +50,8 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
   const [hydrated, setHydrated] = useState(false);
   const [crate, setCrate] = useState<CrateTrack[]>([]);
   const [crateOpen, setCrateOpen] = useState(false);
-  const { tracks, template } = state;
-  const plannedLength = plannedLengthFor(template);
+  const { tracks, arc, playFraction } = state;
+  const plannedCount = plannedTrackCount(arc, playFraction);
   const inSet = useMemo(() => new Set(tracks.flatMap(recordingKeys)), [tracks]);
 
   // Bumped on unmount so late answers from a previous mount are dropped.
@@ -274,7 +275,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
   );
 
   const loadSet = useCallback(
-    (p: PlaylistState) => {
+    (p: LoadableState) => {
       dispatch({ type: 'load', state: p });
       requeue(playlistReducer(initialPlaylistState, { type: 'load', state: p }).tracks);
     },
@@ -290,7 +291,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
         <div className="flex items-baseline gap-4">
           <h1 className="font-[family-name:var(--font-display)] text-[28px] leading-none font-semibold tracking-tight">Set Architect</h1>
           <p className="text-[13px] text-[#8A8FA3] tabular-nums" aria-live="polite">
-            {tracks.length} of {plannedLength} tracks, about {minutes} min
+            {tracks.length} of ~{plannedCount} tracks, about {minutes} min
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -298,7 +299,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
           <SpotifyConnect tracks={tracks} onAdd={add} onAddToCrate={(list) => addCrate(list, 'spotify')} />{/* spotify-connect */}
           {!demo && <BillingActions />}
           {!demo && (
-            <SavedSets tracks={tracks} template={template} onLoad={loadSet} />
+            <SavedSets tracks={tracks} arc={arc} onLoad={loadSet} />
           )}
           <button
             type="button"
@@ -307,7 +308,12 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
           >
             Crate: {crate.length} {crate.length === 1 ? 'track' : 'tracks'}
           </button>
-          <ArcTemplatePicker value={template} onChange={(t) => dispatch({ type: 'setTemplate', template: t })} />
+          <ArcPicker
+            value={arc}
+            onChange={(a) => dispatch({ type: 'setArc', arc: a })}
+            playFraction={playFraction}
+            onPlayFractionChange={(f) => dispatch({ type: 'setPlayFraction', playFraction: f })}
+          />
           <button
             type="button"
             disabled={tracks.length === 0}
@@ -323,7 +329,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
 
       <main className="mx-auto flex w-full max-w-[1280px] flex-1 flex-col gap-6 px-4 pb-10 sm:px-6">
         <section aria-label="Energy curve" className="rounded-xl border border-[#2A2F3F] bg-[#1A1D28] px-3 pt-4 pb-3 sm:px-5">
-          <EnergyCurve tracks={tracks} template={template} />
+          <EnergyCurve tracks={tracks} arc={arc} playFraction={playFraction} />
         </section>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
@@ -334,8 +340,8 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
             <SearchBar onAdd={add} inSet={inSet} />
             <SetList
               tracks={tracks}
-              template={template}
-              plannedLength={plannedLength}
+              arc={arc}
+              playFraction={playFraction}
               onRemove={(id) => dispatch({ type: 'remove', id })}
               onMove={(from, to) => dispatch({ type: 'reorder', from, to })}
               resolving={state.resolving}
@@ -344,7 +350,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
           </section>
 
           <aside className="min-w-0 rounded-xl border border-[#2A2F3F] bg-[#1A1D28] px-4 pt-4 pb-2 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
-            {hydrated && <SuggestionBox tracks={tracks} template={template} plannedLength={plannedLength} onAdd={add} busy={(state.resolving?.length ?? 0) > 0} crate={crate} onCrateKnown={crateKnown} />}
+            {hydrated && <SuggestionBox tracks={tracks} arc={arc} playFraction={playFraction} onAdd={add} busy={(state.resolving?.length ?? 0) > 0} crate={crate} onCrateKnown={crateKnown} />}
           </aside>
         </div>
       </main>

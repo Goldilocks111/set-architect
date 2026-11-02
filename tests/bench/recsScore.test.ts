@@ -45,7 +45,7 @@ const sug = (i: number, o: { compliant?: boolean; reasons?: number; styles?: str
   reasons: Array.from({ length: o.reasons ?? 2 }, () => ({ kind: 'key' as const, label: 'Perfect match', score: 1 })),
   compliant: o.compliant ?? true,
 });
-const sc = (id = 's1'): Scenario => ({ id, name: `Scenario ${id}`, lane: 'techno', template: '60min', plannedLength: 10, set: [{ artist: 'A', title: 'B' }] });
+const sc = (id = 's1'): Scenario => ({ id, name: `Scenario ${id}`, lane: 'techno', arc: { minutes: 60, shape: 'build' }, set: [{ artist: 'A', title: 'B' }] });
 const ten = (o: (i: number) => Parameters<typeof sug>[1] = () => ({})) => Array.from({ length: 10 }, (_, i) => sug(i, o(i)));
 
 describe('scenarios.json', () => {
@@ -53,6 +53,21 @@ describe('scenarios.json', () => {
     expect(scenarios).toHaveLength(10);
     expect(validateScenarios(scenarios)).toEqual([]);
     for (const s of scenarios) expect(LANES).toContain(s.lane);
+  });
+  it("carries minute arcs only: the old '60min' / '120min' templates migrated, plannedLength gone", () => {
+    for (const s of scenarios) {
+      expect(s, s.id).not.toHaveProperty('template');
+      expect(s, s.id).not.toHaveProperty('plannedLength');
+      expect([{ minutes: 60, shape: 'build' }, { minutes: 120, shape: 'journey' }], s.id).toContainEqual(s.arc);
+    }
+  });
+  it('validateScenarios rejects a missing or malformed arc', () => {
+    const bad = [
+      { ...sc('a'), arc: undefined },
+      { ...sc('b'), arc: { minutes: 5, shape: 'build' } },
+      { ...sc('c'), arc: { minutes: 60, shape: 'rave' } },
+    ] as unknown as Scenario[];
+    expect(validateScenarios(bad)).toEqual(['a: arc is not { minutes 15-480, shape }', 'b: arc is not { minutes 15-480, shape }', 'c: arc is not { minutes 15-480, shape }']);
   });
   const pools: Record<string, Array<{ artist: string; title: string }>> = JSON.parse(readFileSync(join(__dirname, '../../bench/recs/pools.json'), 'utf8'));
   const k = (t: { artist: string; title: string }) => `${t.artist}|${t.title}`;
@@ -180,6 +195,7 @@ describe('buildRatingFile (blind, engine vs baseline)', () => {
       }
     }
     expect(file.scenarios[0].set).toEqual([{ artist: 'A', title: 'B' }]);
+    expect(file.scenarios[0].arc).toEqual({ minutes: 60, shape: 'build' });
   });
   it('the key (results file only) says which list is the engine; the engine list holds the top 10, shuffled', () => {
     const { file, key } = buildRatingFile(results, { seed: 7, fileId: 'f1', lanePool: () => new Set(crate.map((c) => trackKeyOf(c.artist, c.title))) });

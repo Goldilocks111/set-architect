@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import PreviewPlayer from './PreviewPlayer';
 import { fetchResolved, previewSource } from './trackFormat';
 import { safeHttpUrl } from './trackSanitize';
+import { arcLabel, toArc } from '@/lib/arc';
 import type { Track } from '@/types/track';
 
 export const RATING_STORAGE_KEY = 'setarch:rating:v2';
@@ -12,7 +13,8 @@ type Label = 'A' | 'B';
 const LABELS: Label[] = ['A', 'B'];
 interface RTrack { artist: string; title: string }
 interface RList { label: Label; tracks: RTrack[] }
-interface RScenario { id: string; name: string; template?: string; set: RTrack[]; lists: RList[] }
+/** `arc` is a display label ("60 min build"). */
+interface RScenario { id: string; name: string; arc?: string; set: RTrack[]; lists: RList[] }
 export interface RatingFile { version: 2; fileId: string; scenarios: RScenario[] }
 interface Entry { A?: number; B?: number; note?: string }
 interface Saved { file: RatingFile; ratings: Record<string, Entry>; index: number }
@@ -38,7 +40,9 @@ export function parseRatingFile(text: string): RatingFile | null {
         if (!l || !Array.isArray(l.tracks) || !l.tracks.every(isRef)) return null;
         lists.push({ label, tracks: l.tracks.map(ref) });
       }
-      scenarios.push({ id: s.id, name: s.name, template: typeof s.template === 'string' ? s.template : undefined, set: s.set.map(ref), lists });
+      // files written before the minute arc carry `template` ('60min' / '120min') instead
+      const arc = s.arc && typeof s.arc === 'object' ? arcLabel(toArc(s.arc)) : isStr(s.template) ? arcLabel(toArc(s.template)) : undefined;
+      scenarios.push({ id: s.id, name: s.name, arc, set: s.set.map(ref), lists });
     }
     return { version: 2, fileId: j.fileId, scenarios };
   } catch {
@@ -212,7 +216,7 @@ export default function RatingSession() {
       </header>
 
       <section aria-label="Scenario" className="flex flex-col gap-2">
-        <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold">{sc.name}{sc.template ? <span className="ml-2 text-[13px] font-normal text-[#8A8FA3]">{sc.template}</span> : null}</h2>
+        <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold">{sc.name}{sc.arc ? <span className="ml-2 text-[13px] font-normal text-[#8A8FA3]">{sc.arc}</span> : null}</h2>
         <p className="text-[12px] tracking-wide text-[#8A8FA3] uppercase">The set so far</p>
         <ol className="list-decimal pl-5 text-[14px]">
           {sc.set.map((t, i) => <li key={i}>{t.artist} - {t.title}</li>)}

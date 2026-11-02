@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { ArcTemplate, Suggestion, Track } from '@/types/track';
+import { setPlayedMinutes } from '@/engine';
+import { DEFAULT_PLAY_FRACTION } from '@/lib/arc';
+import type { Arc, Suggestion, Track } from '@/types/track';
 import { crateForRequest, EMPTY_CRATE_COPY, isCrateComplete, type CrateKnownItem, type CrateTrack } from './crate';
 import { isInSet, recordingKeys } from './recordingKeys';
 import RadioControl, { RADIO_COUNTDOWN_S, radioPick, RadioStatus } from './RadioControl';
@@ -10,8 +12,9 @@ import { displayTitle } from './trackFormat';
 
 interface Props {
   tracks: Track[];
-  template: ArcTemplate;
-  plannedLength: number;
+  arc: Arc;
+  /** Share of each track played (0.5-1): places the set on the arc's minutes. */
+  playFraction?: number;
   onAdd: (track: Track) => void;
   crate?: CrateTrack[];
   /** What the server's cache knows about crate items; the owner folds it into the stored crate. */
@@ -22,20 +25,20 @@ interface Props {
 
 type Status = 'loading' | 'done' | 'error' | 'limit';
 
-/** User actions (add/remove/reorder, template, retry) refresh promptly. */
+/** User actions (add/remove/reorder, arc, retry) refresh promptly. */
 const PROMPT_MS = 150;
 /** Resolver answers only change a track's data: a burst of them (a set reload, "Add all") becomes one refresh. */
 export const ENRICH_DEBOUNCE_MS = 1500;
 
-/** What the server scores on; `unresolved`/resolving churn alone never changes it. */
+/** What the server scores on (duration places the next track on the arc); `unresolved`/resolving churn alone never changes it. */
 const dataKeyOf = (tracks: Track[]) =>
-  tracks.map((t) => [t.artist, t.title, t.bpm, t.camelot, t.energy, t.danceability].join('\u0001')).join('\n');
+  tracks.map((t) => [t.artist, t.title, t.bpm, t.camelot, t.energy, t.danceability, t.durationMs].join('\u0001')).join('\n');
 
 /** Fewer ready crate tracks than this and suggestions lean on neighbours/similar tracks: say how to fix that. */
 export const CRATE_HINT_BELOW = 30;
 const NO_CRATE: CrateTrack[] = [];
 
-export default function SuggestionBox({ tracks, template, plannedLength, onAdd, crate = NO_CRATE, onCrateKnown, busy = false }: Props) {
+export default function SuggestionBox({ tracks, arc, playFraction = DEFAULT_PLAY_FRACTION, onAdd, crate = NO_CRATE, onCrateKnown, busy = false }: Props) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [status, setStatus] = useState<Status>('loading');
   const [limitMessage, setLimitMessage] = useState('');
@@ -61,6 +64,10 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd, 
     latest.current = tracks;
   });
   const shapeKey = tracks.map((t) => t.id).join('\n');
+  const arcMinutes = arc.minutes;
+  const arcShape = arc.shape;
+  /** Radio stops once the set's played minutes fill the arc. */
+  const full = useMemo(() => setPlayedMinutes(tracks, playFraction) >= arcMinutes, [tracks, playFraction, arcMinutes]);
   const dataKey = dataKeyOf(tracks);
   const lastTrigger = useRef<string | null>(null);
   const requestCrate = useMemo(() => crateForRequest(crate, tracks), [crate, tracks]);
@@ -77,7 +84,7 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd, 
   useEffect(() => {
     const ctrl = new AbortController();
     let refetchTimer: ReturnType<typeof setTimeout> | undefined;
-    const trigger = JSON.stringify([shapeKey, template, plannedLength, retry]);
+    const trigger = JSON.stringify([shapeKey, arcMinutes, arcShape, playFraction, retry]);
     // recorded when the request fires, so a cancelled run (StrictMode, a quick follow-up change) stays prompt
     const prompt = lastTrigger.current !== trigger;
     const timer = setTimeout(async () => {
@@ -87,7 +94,7 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd, 
         const res = await fetch('/api/suggest', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ playlist: latest.current, template, plannedLength, crate: latestCrate.current }),
+          body: JSON.stringify({ playlist: latest.current, arc: { minutes: arcMinutes, shape: arcShape }, playFraction, crate: latestCrate.current }),
           signal: ctrl.signal,
         });
         if (res.status === 429) {
@@ -118,7 +125,7 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd, 
       clearTimeout(refetchTimer);
       ctrl.abort();
     };
-  }, [shapeKey, dataKey, crateKey, template, plannedLength, retry, lastKey]);
+  }, [shapeKey, dataKey, crateKey, arcMinutes, arcShape, playFraction, retry, lastKey]);
 
   const stopRadio = useCallback((why = '') => {
     clearTimeout(watchdog.current);
@@ -171,7 +178,7 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd, 
   const pickId = pick?.track.id;
   useEffect(() => {
     if (!radio) return;
-    if (tracks.length >= plannedLength) return stopRadio('Radio stopped: the set is full.');
+    if (full) return stopRadio('Radio stopped: the set is full.');
     if (status === 'error' || status === 'limit') return stopRadio('Radio stopped: suggestions failed.');
     if (!fresh || busy) return;
     if (!pick) return stopRadio('Radio stopped: no compliant suggestion.');
@@ -200,7 +207,7 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd, 
     };
     // pick is identified by its id: a same-top refresh must not restart the countdown
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [radio, fresh, busy, pickId, status, tracks.length, plannedLength]);
+  }, [radio, fresh, busy, pickId, status, tracks.length, full]);
 
   return (
     <section ref={sectionRef} aria-labelledby="suggestions-heading" className="flex flex-col">

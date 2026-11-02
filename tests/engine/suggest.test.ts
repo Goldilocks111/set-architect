@@ -10,7 +10,7 @@ const t = (id: string, o: Partial<Track> = {}): Track => ({
   danceability: 0.6,
   ...o,
 });
-const base = { template: '60min' as const, plannedLength: 15 };
+const base = { arc: { minutes: 60, shape: 'build' as const } };
 const reason = (s: { reasons: Array<{ kind: string; label: string; score: number }> }, kind: string) =>
   s.reasons.find((r) => r.kind === kind);
 
@@ -214,6 +214,27 @@ describe('suggestNext', () => {
     });
   });
 
+  describe('minute-based arc target', () => {
+    // Six set tracks ending at E8; the candidate climbs to E9 in the same key and tempo.
+    const setOf = (ms: number) =>
+      Array.from({ length: 6 }, (_, i) => t(`s${i}`, { bpm: 124, camelot: '8A', energy: i === 5 ? 8 : 6, durationMs: ms }));
+    const climb = t('climb', { bpm: 124, camelot: '8A', energy: 9 });
+    it('the next track is placed by played minutes, not by track count', () => {
+      // 6 x 10:00 at 75% = 45' into a 60' build -> the peak slot (E9): climbing is compliant
+      const [late] = suggestNext({ ...base, playlist: setOf(600_000), candidates: [climb] });
+      expect(late.compliant).toBe(true);
+      // 6 x 5:20 = 24' -> still building (E6): the same climb moves away from the arc
+      const [early] = suggestNext({ ...base, playlist: setOf(320_000), candidates: [climb] });
+      expect(early.compliant).toBe(false);
+    });
+    it('a shorter arc reaches the peak with fewer tracks; the play fraction moves the target', () => {
+      // 24' played + 2' = 26' of a 32' build = 81% -> the peak slot (E9)
+      expect(suggestNext({ arc: { minutes: 32, shape: 'build' }, playlist: setOf(320_000), candidates: [climb] })[0].compliant).toBe(true);
+      // at 50% played the same six 10:00 tracks are only 30' in: E7 territory, E9 is off-arc
+      expect(suggestNext({ ...base, playFraction: 0.5, playlist: setOf(600_000), candidates: [climb] })[0].compliant).toBe(false);
+    });
+  });
+
   describe('compliance-first ranking', () => {
     const full = { bpm: 128, camelot: '8A', energy: 5, danceability: 0.6 };
 
@@ -288,8 +309,8 @@ describe('suggestNext', () => {
           if (r() < 0.3) adjacency.set(trackKeyOf(c.artist, c.title), 1 + Math.floor(r() * 6));
           if (r() < 0.3) similarity.set(trackKeyOf(c.artist, c.title), r());
         }
-        const all = suggestNext({ ...base, plannedLength: 20, playlist, candidates, adjacency, similarity });
-        const pool = suggestNext({ ...base, plannedLength: 20, playlist, candidates, adjacency, similarity, limit: Infinity });
+        const all = suggestNext({ ...base, playlist, candidates, adjacency, similarity });
+        const pool = suggestNext({ ...base, playlist, candidates, adjacency, similarity, limit: Infinity });
         const poolCompliant = pool.filter((s) => s.compliant).length;
         if (poolCompliant < 10) continue;
         checked++;

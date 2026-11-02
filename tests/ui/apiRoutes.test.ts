@@ -182,10 +182,11 @@ describe('POST /api/playlists (configured)', () => {
       error: null,
     }));
     const entriesInsert = vi.fn(async () => ({ error: null }));
+    const playlistsInsert = vi.fn((_row: unknown) => ({ select: vi.fn(() => ({ single })) }));
     mocks.server.createClient.mockResolvedValue({
       from: vi.fn((table: string) =>
         table === 'playlists'
-          ? { insert: vi.fn(() => ({ select: vi.fn(() => ({ single })) })) }
+          ? { insert: playlistsInsert }
           : { insert: entriesInsert }
       ),
     });
@@ -211,6 +212,32 @@ describe('POST /api/playlists (configured)', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ id: 'demo-001', bpm: null, camelot: null, youtube_url: null, preview_url: null });
     expect(entriesInsert).toHaveBeenCalledWith([{ playlist_id: 'p1', position: 0, track_id: 'demo-001' }]);
+    // a legacy client's template is migrated; the legacy row value reads back as an arc
+    expect(playlistsInsert).toHaveBeenCalledWith({ user_id: 'u1', name: 'My set', arc_template: '60min:build' });
+    expect((await res.json()).playlist.arc).toEqual({ minutes: 60, shape: 'build' });
+  });
+
+  it('stores a minute arc in the arc_template text column and returns it', async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'anon';
+    mocks.auth.getCurrentUser.mockResolvedValue({ id: 'u1', email: null, isAdmin: false });
+    mocks.entitlements.canCreatePlaylist.mockResolvedValue(true);
+    const single = vi.fn(async () => ({
+      data: { id: 'p2', name: 'Long', arc_template: '240min:peak-time', created_at: 'now', user_id: 'u1' },
+      error: null,
+    }));
+    const insert = vi.fn(() => ({ select: vi.fn(() => ({ single })) }));
+    mocks.server.createClient.mockResolvedValue({ from: vi.fn(() => ({ insert })) });
+    const { POST } = await import('@/app/api/playlists/route');
+    const res = await POST(
+      new Request('http://x/api/playlists', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Long', arc: { minutes: 240, shape: 'peak-time' }, tracks: [] }),
+      })
+    );
+    expect(res.status).toBe(201);
+    expect(insert).toHaveBeenCalledWith({ user_id: 'u1', name: 'Long', arc_template: '240min:peak-time' });
+    expect((await res.json()).playlist.arc).toEqual({ minutes: 240, shape: 'peak-time' });
   });
 
   it('returns 503 when entitlements are unavailable', async () => {

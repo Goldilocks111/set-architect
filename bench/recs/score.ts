@@ -1,6 +1,7 @@
 import { LANES } from '../../src/lib/style/taxonomy';
 import { scoreBpmTransition } from '../../src/engine/bpm';
-import { trackKeyOf, type ArcTemplate, type Suggestion } from '../../src/types/track';
+import { ARC_MAX_MINUTES, ARC_MIN_MINUTES, ARC_SHAPES } from '../../src/lib/arc';
+import { trackKeyOf, type Arc, type Suggestion } from '../../src/types/track';
 
 export interface TrackRef {
   artist: string;
@@ -11,8 +12,7 @@ export interface Scenario {
   id: string;
   name: string;
   lane: string;
-  template: ArcTemplate;
-  plannedLength: number;
+  arc: Arc;
   set: TrackRef[];
   /** Filled at run time by withCrates (the shared crate minus this set); scenarios.json carries none. */
   crate?: TrackRef[];
@@ -36,6 +36,9 @@ export function validateScenarios(list: Scenario[]): string[] {
     if (seen.has(s.id)) errors.push(`${s.id}: duplicate id`);
     seen.add(s.id);
     if (!(LANES as readonly string[]).includes(s.lane)) errors.push(`${s.id}: lane "${s.lane}" is not in LANES`);
+    const a = s.arc as Partial<Arc> | undefined;
+    const minutesOk = typeof a?.minutes === 'number' && a.minutes >= ARC_MIN_MINUTES && a.minutes <= ARC_MAX_MINUTES;
+    if (!minutesOk || !ARC_SHAPES.includes(a?.shape as Arc['shape'])) errors.push(`${s.id}: arc is not { minutes ${ARC_MIN_MINUTES}-${ARC_MAX_MINUTES}, shape }`);
     if (s.set.length < 1 || s.set.length > 6) errors.push(`${s.id}: set has ${s.set.length} tracks (1-6)`);
   }
   return errors;
@@ -158,7 +161,7 @@ export interface RatingList {
 export interface RatingFile {
   version: 2;
   fileId: string;
-  scenarios: Array<{ id: string; name: string; template: ArcTemplate; set: TrackRef[]; lists: RatingList[] }>;
+  scenarios: Array<{ id: string; name: string; arc: Arc; set: TrackRef[]; lists: RatingList[] }>;
 }
 
 /** Which list is which, per scenario id: written to the results file only, never to the rating file. */
@@ -282,7 +285,7 @@ export function buildRatingFile(
     return {
       id: scenario.id,
       name: scenario.name,
-      template: scenario.template,
+      arc: scenario.arc,
       set: scenario.set.map(name),
       lists: [
         { label: 'A' as const, tracks: seededShuffle(a, s + 3) },

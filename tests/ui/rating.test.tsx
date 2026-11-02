@@ -12,7 +12,7 @@ const mkFile = (n = 10) => ({
   scenarios: Array.from({ length: n }, (_, i) => ({
     id: `s${i}`,
     name: `Scenario ${i}`,
-    template: '60min',
+    arc: { minutes: 60, shape: 'build' },
     set: [{ artist: 'Set Artist', title: `Set Title ${i}` }],
     lists: [list(i, 'A'), list(i, 'B')],
   })),
@@ -40,6 +40,15 @@ describe('parseRatingFile', () => {
     (f.scenarios[0].lists[0].tracks[0] as any).previewUrl = 'https://x/p.mp3';
     (f.scenarios[0].lists[0].tracks[0] as any).engine = true;
     expect(parseRatingFile(JSON.stringify(f))!.scenarios[0].lists[0].tracks[0]).toEqual({ artist: 'Artist A0', title: 'Track 0-A0' });
+  });
+  it('labels the arc; a rating file written before the minute arc (template) still loads', () => {
+    expect(parseRatingFile(JSON.stringify(mkFile(1)))!.scenarios[0].arc).toBe('60 min build');
+    const old = mkFile(1) as any;
+    delete old.scenarios[0].arc;
+    old.scenarios[0].template = '120min';
+    expect(parseRatingFile(JSON.stringify(old))!.scenarios[0].arc).toBe('120 min journey');
+    delete old.scenarios[0].template;
+    expect(parseRatingFile(JSON.stringify(old))!.scenarios[0].arc).toBeUndefined();
   });
 });
 

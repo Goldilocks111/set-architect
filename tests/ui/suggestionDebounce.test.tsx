@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 describe('<SuggestionBox /> refresh debounce', () => {
-  const box = (tracks: Track[]) => <SuggestionBox tracks={tracks} template="60min" plannedLength={15} onAdd={() => {}} />;
+  const box = (tracks: Track[]) => <SuggestionBox tracks={tracks} arc={{ minutes: 60, shape: 'build' }} onAdd={() => {}} />;
 
   it('resolving/failed churn (same ids, same essentials, new arrays) does not refetch', async () => {
     const { rerender } = render(box([t('a'), t('b')]));

@@ -90,7 +90,7 @@ describe('rating names come from provider display names, through the real cache'
       putResolved(k, { id: k, artist: c.artist, title: c.title, ...COMPLETE, sources: {} }, Date.now(), { artist: c.artist.toUpperCase(), title: c.title });
     }
     const provider = (r: { artist: string; title: string }) => getEntry(trackKeyOf(r.artist, r.title))?.display;
-    const sc: Scenario = { id: 's', name: 'S', lane: 'techno', template: '60min', plannedLength: 10, set: [pool], crate };
+    const sc: Scenario = { id: 's', name: 'S', lane: 'techno', arc: { minutes: 60, shape: 'build' }, set: [pool], crate };
     const sug = (artist: string, title: string, i: number): Suggestion => ({ track: { id: `x${i}`, artist, title, sources: {} }, score: 1, reasons: [] });
     const suggestions = [sug(ext.artist, ext.title, 0), sug(pool.artist, pool.title, 1)];
     const { file } = buildRatingFile([{ scenario: sc, suggestions, crate: [...crate, { ...pool, bpm: 124 }], lastBpm: 124 }], {

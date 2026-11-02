@@ -31,7 +31,7 @@ describe('danceability prior on the client', () => {
       { id: 'p', artist: 'A', title: 'P', bpm: 124, camelot: '8A', energy: 6, danceability: 0.75, sources: { danceability: 'estimate-prior' } },
       { id: 'r', artist: 'A', title: 'R', bpm: 124, camelot: '8A', energy: 6, danceability: 0.61, sources: { danceability: 'reccobeats' } },
     ];
-    render(<SetList tracks={tracks} template="60min" plannedLength={15} onRemove={() => {}} onMove={() => {}} />);
+    render(<SetList tracks={tracks} arc={{ minutes: 60, shape: 'build' }} onRemove={() => {}} onMove={() => {}} />);
     const est = screen.getAllByText(/est\./);
     expect(est).toHaveLength(1);
     expect(est[0].closest('[title]')?.getAttribute('title')).toMatch(/estimate/i);

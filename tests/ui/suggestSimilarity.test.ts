@@ -7,7 +7,7 @@ vi.mock('@/lib/adjacency', () => ({ loadAdjacency: vi.fn(), readData: vi.fn(), A
 
 const full = { bpm: 124, camelot: '8A', energy: 5, danceability: 0.6 };
 const tr = (id: string, o: Partial<Track> = {}): Track => ({ id, artist: `Artist ${id}`, title: `Title ${id}`, sources: {}, ...full, ...o });
-const input = (playlist: Track[]) => ({ playlist, template: '60min' as const, plannedLength: 15 });
+const input = (playlist: Track[]) => ({ playlist, arc: { minutes: 60, shape: 'build' as const } });
 const never = <T,>() => new Promise<T>(() => {});
 
 describe('similarity from the last 3 complete set tracks', () => {

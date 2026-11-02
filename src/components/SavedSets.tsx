@@ -1,23 +1,23 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import type { ArcTemplate, Track } from '@/types/track';
+import type { Arc, Track } from '@/types/track';
 
 interface SavedPlaylist {
   id: string;
   name: string;
-  template: ArcTemplate;
+  arc: Arc;
   tracks: Track[];
 }
 
 interface Props {
   tracks: Track[];
-  template: ArcTemplate;
-  onLoad: (p: { tracks: Track[]; template: ArcTemplate }) => void;
+  arc: Arc;
+  onLoad: (p: { tracks: Track[]; arc: Arc }) => void;
 }
 
 /** Account-backed save/load; only rendered when Supabase is configured. */
-export default function SavedSets({ tracks, template, onLoad }: Props) {
+export default function SavedSets({ tracks, arc, onLoad }: Props) {
   const [saved, setSaved] = useState<SavedPlaylist[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -40,7 +40,7 @@ export default function SavedSets({ tracks, template, onLoad }: Props) {
     const res = await fetch('/api/playlists', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name, template, tracks }),
+      body: JSON.stringify({ name, arc, tracks }),
     });
     const body = await res.json().catch(() => ({}));
     setBusy(false);
@@ -68,7 +68,7 @@ export default function SavedSets({ tracks, template, onLoad }: Props) {
           defaultValue=""
           onChange={(e) => {
             const p = saved.find((s) => s.id === e.target.value);
-            if (p) onLoad({ tracks: p.tracks, template: p.template });
+            if (p) onLoad({ tracks: p.tracks, arc: p.arc });
             e.target.value = '';
           }}
           className="rounded-md border border-[#2A2F3F] bg-[#12141C] px-2 py-1 text-[#E8E4DA]"

@@ -19,13 +19,13 @@ const partial: Track = { id: 'p', artist: 'Mystery', title: 'Unknown Data', sour
 
 describe('transitionParts', () => {
   it('scores known dimensions and marks unknown ones without a score', () => {
-    const parts = transitionParts({ from: full('a', '8A', 124, 5), to: partial, position: 1, template: '60min', plannedLength: 15 });
+    const parts = transitionParts({ from: full('a', '8A', 124, 5), to: partial, target: 4 });
     expect(parts.map((p) => p.detail)).toEqual(['Key unknown', 'BPM unknown', 'Energy unknown']);
     expect(parts.every((p) => p.score === undefined)).toBe(true);
   });
 
   it('describes a direct mix', () => {
-    const parts = transitionParts({ from: full('a', '8A', 124, 5), to: full('b', '8A', 125, 6), position: 1, template: '60min', plannedLength: 15 });
+    const parts = transitionParts({ from: full('a', '8A', 124, 5), to: full('b', '8A', 125, 6), target: 4 });
     expect(parts[0].text).toBe('8A→8A');
     expect(parts[1].text).toBe('+1 BPM');
     expect(parts[2].text).toBe('E +1');
@@ -37,7 +37,7 @@ describe('<SetList /> Spotify link-out', () => {
   it('renders only for tracks with spotifyUrl', () => {
     const withUrl = { ...full('a', '8A', 124, 5), spotifyUrl: 'https://open.spotify.com/track/a' };
     render(
-      <SetList tracks={[withUrl, full('b', '8A', 124, 5)]} template="60min" plannedLength={15} onRemove={() => {}} onMove={() => {}} />
+      <SetList tracks={[withUrl, full('b', '8A', 124, 5)]} arc={{ minutes: 60, shape: 'build' }} onRemove={() => {}} onMove={() => {}} />
     );
     const links = screen.getAllByRole('link', { name: /in Spotify/i, hidden: true });
     expect(links).toHaveLength(1);
@@ -52,8 +52,7 @@ describe('<SetList />', () => {
     const { container } = render(
       <SetList
         tracks={[full('a', '8A', 124, 5), partial, full('c', '9A', 125, 6)]}
-        template="60min"
-        plannedLength={15}
+        arc={{ minutes: 60, shape: 'build' }}
         onRemove={() => {}}
         onMove={() => {}}
       />
@@ -67,7 +66,7 @@ describe('<SetList />', () => {
     const onMove = vi.fn();
     const onRemove = vi.fn();
     render(
-      <SetList tracks={[full('a', '8A', 124, 5), full('b', '8A', 124, 5)]} template="60min" plannedLength={15} onRemove={onRemove} onMove={onMove} />
+      <SetList tracks={[full('a', '8A', 124, 5), full('b', '8A', 124, 5)]} arc={{ minutes: 60, shape: 'build' }} onRemove={onRemove} onMove={onMove} />
     );
     fireEvent.click(screen.getByRole('button', { name: 'Move Title b up' }));
     expect(onMove).toHaveBeenCalledWith(1, 0);

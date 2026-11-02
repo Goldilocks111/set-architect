@@ -1,24 +1,27 @@
 'use client';
 
-import { Fragment, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
+import { trackTargets } from '@/engine';
+import { DEFAULT_PLAY_FRACTION } from '@/lib/arc';
 import type { OverrideFields } from '@/lib/overrideValidation';
-import type { ArcTemplate, Track } from '@/types/track';
+import type { Arc, Track } from '@/types/track';
 import SetRow from './SetRow';
 import TransitionBadge from './TransitionBadge';
 
 interface Props {
   tracks: Track[];
-  template: ArcTemplate;
-  plannedLength: number;
+  arc: Arc;
+  playFraction?: number;
   onRemove: (id: string) => void;
   onMove: (from: number, to: number) => void;
   resolving?: string[];
   onOverride?: (track: Track, fields: OverrideFields) => Promise<string | null>;
 }
 
-export default function SetList({ tracks, template, plannedLength, onRemove, onMove, resolving, onOverride }: Props) {
+export default function SetList({ tracks, arc, playFraction = DEFAULT_PLAY_FRACTION, onRemove, onMove, resolving, onOverride }: Props) {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
+  const targets = useMemo(() => trackTargets(arc, tracks, playFraction), [arc, tracks, playFraction]);
 
   if (tracks.length === 0) {
     return (
@@ -34,7 +37,7 @@ export default function SetList({ tracks, template, plannedLength, onRemove, onM
       {tracks.map((track, i) => (
         <Fragment key={track.id}>
           {i > 0 && (
-            <TransitionBadge from={tracks[i - 1]} to={track} position={i} template={template} plannedLength={plannedLength} />
+            <TransitionBadge from={tracks[i - 1]} to={track} target={targets[i]} />
           )}
           <SetRow
             track={track}

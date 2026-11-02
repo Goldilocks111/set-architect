@@ -47,6 +47,7 @@ export type TracklistRow = {
 };
 export type TracklistEntryRow = { tracklist_id: string; position: number; track_id: string };
 export type AdjacencyRow = { from_track_id: string; to_track_id: string; count: number };
+/** arc_template holds lib/arc encodeArc text ("90min:journey"); rows saved before it hold '60min' / '120min'. */
 export type PlaylistRow = { id: string; user_id: string; name: string; arc_template: string; created_at: string };
 export type PlaylistTrackRow = { playlist_id: string; position: number; track_id: string };
 

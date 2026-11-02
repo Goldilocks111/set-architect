@@ -53,7 +53,7 @@ describe('<CompletenessBadge />', () => {
 
 describe('<SetList /> quarantine', () => {
   it('marks incomplete rows quarantined and complete rows not', () => {
-    render(<SetList tracks={[complete('a'), incomplete('b')]} template="60min" plannedLength={15} onRemove={() => {}} onMove={() => {}} />);
+    render(<SetList tracks={[complete('a'), incomplete('b')]} arc={{ minutes: 60, shape: 'build' }} onRemove={() => {}} onMove={() => {}} />);
     const rows = within(screen.getByRole('list', { name: 'Set list' })).getAllByRole('listitem');
     const byTitle = (t: string) => rows.find((r) => within(r).queryByText(t))!;
     expect(byTitle('Title a')).toHaveAttribute('data-quarantined', 'false');
@@ -61,7 +61,7 @@ describe('<SetList /> quarantine', () => {
     expect(byTitle('Title b').className).toMatch(/opacity-/);
   });
   it('shows all four essentials on a complete row', () => {
-    render(<SetList tracks={[complete('a')]} template="60min" plannedLength={15} onRemove={() => {}} onMove={() => {}} />);
+    render(<SetList tracks={[complete('a')]} arc={{ minutes: 60, shape: 'build' }} onRemove={() => {}} onMove={() => {}} />);
     const row = screen.getByRole('listitem');
     expect(row).toHaveTextContent('8A');
     expect(row).toHaveTextContent('124 BPM');
@@ -75,7 +75,7 @@ describe('<SetList /> quarantine', () => {
   });
   it('the editor saves four fields through onOverride', async () => {
     const onOverride = vi.fn(async () => null);
-    render(<SetList tracks={[incomplete('b', { bpm: undefined })]} template="60min" plannedLength={15} onRemove={() => {}} onMove={() => {}} onOverride={onOverride} />);
+    render(<SetList tracks={[incomplete('b', { bpm: undefined })]} arc={{ minutes: 60, shape: 'build' }} onRemove={() => {}} onMove={() => {}} onOverride={onOverride} />);
     fireEvent.click(screen.getByRole('button', { name: /edit values/i }));
     fireEvent.change(screen.getByLabelText('BPM'), { target: { value: '128' } });
     fireEvent.change(screen.getByLabelText('Danceability'), { target: { value: '0.5' } });
@@ -84,7 +84,7 @@ describe('<SetList /> quarantine', () => {
   });
   it('rejects an invalid value in the editor without calling onOverride', async () => {
     const onOverride = vi.fn(async () => null);
-    render(<SetList tracks={[incomplete('b')]} template="60min" plannedLength={15} onRemove={() => {}} onMove={() => {}} onOverride={onOverride} />);
+    render(<SetList tracks={[incomplete('b')]} arc={{ minutes: 60, shape: 'build' }} onRemove={() => {}} onMove={() => {}} onOverride={onOverride} />);
     fireEvent.click(screen.getByRole('button', { name: /edit values/i }));
     fireEvent.change(screen.getByLabelText('BPM'), { target: { value: '500' } });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })); });
@@ -96,7 +96,7 @@ describe('<SetList /> quarantine', () => {
 describe('override editor: only changed fields', () => {
   it('ignores an out-of-range untouched provider value and sends nothing for it', async () => {
     const onOverride = vi.fn(async () => null);
-    render(<SetList tracks={[incomplete('h', { bpm: 210 })]} template="60min" plannedLength={15} onRemove={() => {}} onMove={() => {}} onOverride={onOverride} />);
+    render(<SetList tracks={[incomplete('h', { bpm: 210 })]} arc={{ minutes: 60, shape: 'build' }} onRemove={() => {}} onMove={() => {}} onOverride={onOverride} />);
     fireEvent.click(screen.getByRole('button', { name: /edit values/i }));
     fireEvent.change(screen.getByLabelText('Danceability'), { target: { value: '0.9' } });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })); });
@@ -104,7 +104,7 @@ describe('override editor: only changed fields', () => {
   });
   it('saving with no change shows an error and does not call onOverride', async () => {
     const onOverride = vi.fn(async () => null);
-    render(<SetList tracks={[incomplete('h')]} template="60min" plannedLength={15} onRemove={() => {}} onMove={() => {}} onOverride={onOverride} />);
+    render(<SetList tracks={[incomplete('h')]} arc={{ minutes: 60, shape: 'build' }} onRemove={() => {}} onMove={() => {}} onOverride={onOverride} />);
     fireEvent.click(screen.getByRole('button', { name: /edit values/i }));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })); });
     expect(onOverride).not.toHaveBeenCalled();
