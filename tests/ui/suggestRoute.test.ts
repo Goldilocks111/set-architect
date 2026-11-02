@@ -600,7 +600,7 @@ describe('crate background fill and known report', () => {
   it('starts at most 2 incomplete crate items (the first = newest), without awaiting them', async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
-    const backgroundResolve = vi.fn(() => gate);
+    const backgroundResolve = vi.fn((_a: string, _t: string) => gate);
     const t0 = Date.now();
     await assembleSuggestions(base([ct(1, full), ct(2), ct(3), ct(4)]), { backgroundResolve });
     expect(Date.now() - t0).toBeLessThan(500); // returned while the fills are still pending
@@ -611,7 +611,7 @@ describe('crate background fill and known report', () => {
   it('dedupes per key while a fill is running, then lets the next request continue down the list', async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
-    const backgroundResolve = vi.fn(() => gate);
+    const backgroundResolve = vi.fn((_a: string, _t: string) => gate);
     await assembleSuggestions(base([ct(2), ct(3), ct(4)]), { backgroundResolve });
     await assembleSuggestions(base([ct(2), ct(3), ct(4)]), { backgroundResolve });
     expect(backgroundResolve.mock.calls.map((c) => c[1])).toEqual(['Crate Song 2', 'Crate Song 3', 'Crate Song 4']);
@@ -624,7 +624,7 @@ describe('crate background fill and known report', () => {
   it('skips items the cache already settled so they cannot hog the slots; a rejected fill is swallowed', async () => {
     const settled = { fields: { bpm: 120 }, reason: 'not-found', resolvedAt: Date.now() };
     const getCachedEntries = (keys: string[]) => new Map(keys.filter((k) => k === trackKeyOf('Crate Artist 1', 'Crate Song 1')).map((k) => [k, settled]));
-    const backgroundResolve = vi.fn(async () => { throw new Error('boom'); });
+    const backgroundResolve = vi.fn(async (_a: string, _t: string): Promise<unknown> => { throw new Error('boom'); });
     const res = await assembleSuggestions(base([ct(1), ct(2), ct(3), ct(4)]), { backgroundResolve, getCachedEntries });
     expect(res.suggestions.length).toBeGreaterThan(0);
     expect(backgroundResolve.mock.calls.map((c) => c[1])).toEqual(['Crate Song 2', 'Crate Song 3']);
