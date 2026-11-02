@@ -7,10 +7,12 @@ import SpotifyImport from './SpotifyImport';
 interface Props {
   tracks: Track[];
   onAdd: (track: Track) => void;
+  /** Adds playlist tracks to the crate without touching the set. */
+  onAddToCrate?: (tracks: Track[]) => void;
 }
 
 /** Header control: "Connect Spotify" -> display name + menu (import playlist, save set, disconnect). */
-export default function SpotifyConnect({ tracks, onAdd }: Props) {
+export default function SpotifyConnect({ tracks, onAdd, onAddToCrate }: Props) {
   const [name, setName] = useState<string | null>(null);
   const [checked, setChecked] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -171,6 +173,7 @@ export default function SpotifyConnect({ tracks, onAdd }: Props) {
         <SpotifyImport
           inSet={inSet}
           onAdd={onAdd}
+          onAddToCrate={onAddToCrate}
           onClose={() => setImporting(false)}
           onDisconnected={() => {
             setImporting(false);

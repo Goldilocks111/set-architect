@@ -44,7 +44,12 @@ export interface SuggestInput {
   playlist: Track[];
   template: ArcTemplate;
   plannedLength: number;
+  /** The DJ's own tracks (already sanitised); the primary candidate pool. */
+  crate?: Track[];
 }
+
+/** Below this many scoring-ready crate tracks the demo crate still pads the pool (demo mode only). */
+export const DEMO_CRATE_MIN = 30;
 
 const MAX_EXTERNAL = 8;
 /** Cache misses resolved per refresh; the rest wait for a later refresh (by then earlier ones are cached). */
@@ -150,7 +155,15 @@ export async function assembleSuggestions(
   input: SuggestInput,
   deps: SuggestDeps
 ): Promise<{ suggestions: Suggestion[] }> {
-  const pool = demoTracks();
+  // Crate items are enriched from the metadata cache only (manual > provider, no provider calls); incomplete ones
+  // stay out of scoring until the cache has them.
+  const crateReady: Track[] = [];
+  for (const c of input.crate ?? []) {
+    const entry = await safe(deps.getCachedEntry && (async () => deps.getCachedEntry!(keyOf(c))), undefined);
+    const t: Track = entry ? { ...c, ...entry.fields, id: c.id, artist: c.artist, title: c.title, sources: { ...c.sources, ...entry.sources } } : c;
+    if (isComplete(t)) crateReady.push(t);
+  }
+  const pool = isDemoMode() && crateReady.length < DEMO_CRATE_MIN ? [...crateReady, ...demoTracks()] : crateReady;
   const poolByKey = new Map(pool.map((t) => [keyOf(t), t]));
   // Incomplete set tracks have no usable essentials, so they can't anchor neighbor/similarity lookups.
   const last = input.playlist.filter(isComplete).pop();

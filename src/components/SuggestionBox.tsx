@@ -1,7 +1,9 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ArcTemplate, Suggestion, Track } from '@/types/track';
+import { crateForRequest, isCrateComplete, type CrateTrack } from './crate';
+import { EMPTY_CRATE_COPY } from './CratePanel';
 import SuggestionCard from './SuggestionCard';
 import { displayTitle } from './trackFormat';
 
@@ -10,6 +12,7 @@ interface Props {
   template: ArcTemplate;
   plannedLength: number;
   onAdd: (track: Track) => void;
+  crate?: CrateTrack[];
 }
 
 type Status = 'loading' | 'done' | 'error' | 'limit';
@@ -23,7 +26,11 @@ export const ENRICH_DEBOUNCE_MS = 1500;
 const dataKeyOf = (tracks: Track[]) =>
   tracks.map((t) => [t.artist, t.title, t.bpm, t.camelot, t.energy, t.danceability].join('\u0001')).join('\n');
 
-export default function SuggestionBox({ tracks, template, plannedLength, onAdd }: Props) {
+/** Fewer ready crate tracks than this and suggestions lean on neighbours/similar tracks: say how to fix that. */
+export const CRATE_HINT_BELOW = 30;
+const NO_CRATE: CrateTrack[] = [];
+
+export default function SuggestionBox({ tracks, template, plannedLength, onAdd, crate = NO_CRATE }: Props) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [status, setStatus] = useState<Status>('loading');
   const [limitMessage, setLimitMessage] = useState('');
@@ -39,6 +46,14 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd }
   const shapeKey = tracks.map((t) => t.id).join('\n');
   const dataKey = dataKeyOf(tracks);
   const lastTrigger = useRef<string | null>(null);
+  const requestCrate = useMemo(() => crateForRequest(crate, tracks), [crate, tracks]);
+  const readyCount = useMemo(() => requestCrate.filter(isCrateComplete).length, [requestCrate]);
+  const latestCrate = useRef(requestCrate);
+  useLayoutEffect(() => {
+    latestCrate.current = requestCrate;
+  });
+  // What the server can score from the crate; a refresh follows an import, not every re-sort or set add.
+  const crateKey = useMemo(() => requestCrate.map((c) => `${c.id}${isCrateComplete(c) ? '+' : '-'}`).sort().join('\n'), [requestCrate]);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -53,7 +68,7 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd }
         const res = await fetch('/api/suggest', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ playlist: latest.current, template, plannedLength }),
+          body: JSON.stringify({ playlist: latest.current, template, plannedLength, crate: latestCrate.current }),
           signal: ctrl.signal,
         });
         if (res.status === 429) {
@@ -82,7 +97,7 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd }
       clearTimeout(refetchTimer);
       ctrl.abort();
     };
-  }, [shapeKey, dataKey, template, plannedLength, retry, lastKey]);
+  }, [shapeKey, dataKey, crateKey, template, plannedLength, retry, lastKey]);
 
   return (
     <section aria-labelledby="suggestions-heading" className="flex flex-col">
@@ -106,6 +121,12 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd }
           'Tracks that fit the start of the arc. Pick one to open your set.'
         )}
       </p>
+
+      {readyCount < CRATE_HINT_BELOW && (
+        <p className="mb-2 text-xs text-[#8A8FA3]">
+          {readyCount === 0 ? EMPTY_CRATE_COPY : `${readyCount} crate track${readyCount === 1 ? ' is' : 's are'} ready to score. Import a Spotify playlist or a Mixed In Key CSV to suggest from more of your library.`}
+        </p>
+      )}
 
       {status === 'limit' && (
         <div role="alert" className="rounded-lg border border-[#F2B33D]/40 px-4 py-3 text-sm text-[#F2B33D]">

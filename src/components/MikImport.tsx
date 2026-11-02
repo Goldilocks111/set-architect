@@ -11,6 +11,8 @@ const CHUNK = 2000;
 interface Props {
   tracks: Track[];
   onApply: (updates: Array<{ id: string; fields: OverrideFields }>) => void;
+  /** Every row the server accepted, so the DJ's whole file joins their crate, not just what is in the set. */
+  onImported?: (rows: Array<{ artist: string; title: string; fields: OverrideFields }>) => void;
 }
 
 const fieldsOf = (r: MikRow): OverrideFields => ({
@@ -30,7 +32,7 @@ function readText(file: File): Promise<string> {
 }
 
 /** Mixed In Key export: the DJ's own analysis beats our estimates, so these land as manual values. */
-export default function MikImport({ tracks, onApply }: Props) {
+export default function MikImport({ tracks, onApply, onImported }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
@@ -85,6 +87,7 @@ export default function MikImport({ tracks, onApply }: Props) {
       }
       const updates = [...merged].flatMap(([k, fields]) => byKey.get(k)!.map((t) => ({ id: t.id, fields })));
       if (updates.length) onApply(updates);
+      if (applied.length) onImported?.(applied.map((r) => ({ artist: r.artist, title: r.title, fields: fieldsOf(r) })));
       const summary = `Imported ${applied.length}, matched ${updates.length} in this set, skipped ${skipped + rejected}`;
       setMessage(stopped ? { text: `${summary}. Stopped: ${stopped} ${notImported} rows not imported.`, error: true } : { text: summary });
     } catch {

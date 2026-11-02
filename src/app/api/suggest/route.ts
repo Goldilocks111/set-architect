@@ -6,9 +6,31 @@ import { ensureNeighborsFor } from '@/lib/adjacency/live';
 import { assembleSuggestions, loadSuggestDeps } from './assemble';
 
 const MAX_PLAYLIST = 200;
+/** Mirrors CRATE_SEND_MAX on the client: a bigger payload is truncated, not trusted. */
+const MAX_CRATE = 600;
+const MAX_CRATE_TEXT = 200;
+const MAX_STYLES = 10;
+
+/** A crate item is an ordinary client track under tighter text caps; one bad item never rejects the request. */
+function sanitizeCrate(raw: unknown): Track[] {
+  if (!Array.isArray(raw)) return [];
+  const out: Track[] = [];
+  for (const item of raw.slice(0, MAX_CRATE)) {
+    const o = item as Record<string, unknown> | null;
+    if (!o || typeof o !== 'object') continue;
+    if ([o.id, o.artist, o.title].some((v) => typeof v === 'string' && v.length > MAX_CRATE_TEXT)) continue;
+    const t = sanitizeTrack(o);
+    if (!t) continue;
+    const styles = Array.isArray(o.styles)
+      ? o.styles.filter((s): s is string => typeof s === 'string' && s.trim() !== '' && s.length <= MAX_CRATE_TEXT).slice(0, MAX_STYLES)
+      : [];
+    out.push(styles.length ? Object.assign(t, { styles }) : t);
+  }
+  return out;
+}
 
 export async function POST(request: Request) {
-  let body: { playlist?: unknown; template?: unknown; plannedLength?: unknown };
+  let body: { playlist?: unknown; template?: unknown; plannedLength?: unknown; crate?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -27,6 +49,7 @@ export async function POST(request: Request) {
     .map(sanitizeTrack)
     .filter((t): t is Track => t !== null)
     .slice(0, MAX_PLAYLIST);
+  const crate = sanitizeCrate(body.crate);
 
   // TODO(post-V1): rate limiting for demo mode and anonymous users is deferred; only signed-in free users are gated.
   let gatedUserId: string | null = null;
@@ -61,7 +84,7 @@ export async function POST(request: Request) {
   }
 
   const result: { suggestions: Suggestion[]; digging?: true } = await assembleSuggestions(
-    { playlist, template, plannedLength },
+    { playlist, template, plannedLength, crate },
     await loadSuggestDeps()
   );
   if (digging) result.digging = true;

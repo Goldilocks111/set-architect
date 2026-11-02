@@ -424,3 +424,195 @@ describe('live co-occurrence integration', () => {
     expect(withPc.score - without.score).toBeLessThanOrEqual(0.05);
   });
 });
+
+describe('crate as the primary candidate pool', () => {
+  const nonDemo = () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://example.supabase.co');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'anon');
+  };
+  afterEach(() => vi.unstubAllEnvs());
+
+  const full = { bpm: 124, camelot: '8A', energy: 6, danceability: 0.7 };
+  const crateTrack = (n: number, extra: Partial<Track> = {}): Track => ({
+    id: `crate-${n}`,
+    artist: `Crate Artist ${n}`,
+    title: `Crate Song ${n}`,
+    sources: {},
+    ...extra,
+  });
+  const capture = () => {
+    const suggestNext = vi.fn((_a: unknown) => []);
+    const candidates = () => (suggestNext.mock.calls[0][0] as { candidates: Track[] }).candidates;
+    return { suggestNext, candidates };
+  };
+  const input = (crate: Track[]) => ({ playlist: [last], template: '60min' as const, plannedLength: 15, crate });
+
+  it('uses complete crate tracks as the pool and leaves the demo crate out (non-demo)', async () => {
+    nonDemo();
+    const { suggestNext, candidates } = capture();
+    await assembleSuggestions(input([crateTrack(1, full), crateTrack(2, full)]), { suggestNext });
+    const ids = candidates().map((c) => c.id);
+    expect(ids).toEqual(expect.arrayContaining(['crate-1', 'crate-2']));
+    expect(candidates().some((c) => c.sources.bpm === 'demo-seed')).toBe(false);
+  });
+
+  it('demo crate is used only in demo mode with fewer than 30 complete crate tracks', async () => {
+    const small = Array.from({ length: 29 }, (_, i) => crateTrack(i, full));
+    const a = capture();
+    await assembleSuggestions(input(small), { suggestNext: a.suggestNext }); // demo mode (no supabase env)
+    expect(a.candidates().some((c) => c.sources.bpm === 'demo-seed')).toBe(true);
+    expect(a.candidates().some((c) => c.id === 'crate-0')).toBe(true);
+
+    const enough = Array.from({ length: 30 }, (_, i) => crateTrack(i, full));
+    const b = capture();
+    await assembleSuggestions(input(enough), { suggestNext: b.suggestNext });
+    expect(b.candidates().some((c) => c.sources.bpm === 'demo-seed')).toBe(false);
+
+    // incomplete tracks do not count toward the 30
+    const padded = [...small, ...Array.from({ length: 10 }, (_, i) => crateTrack(100 + i))];
+    const c = capture();
+    await assembleSuggestions(input(padded), { suggestNext: c.suggestNext });
+    expect(c.candidates().some((x) => x.sources.bpm === 'demo-seed')).toBe(true);
+  });
+
+  it('no demo crate outside demo mode, whatever the crate size', async () => {
+    nonDemo();
+    const { suggestNext, candidates } = capture();
+    await assembleSuggestions(input([]), { suggestNext });
+    expect(candidates().some((c) => c.sources.bpm === 'demo-seed')).toBe(false);
+  });
+
+  it('enriches crate tracks from the metadata cache only: cache wins, no provider calls, incomplete stay out', async () => {
+    nonDemo();
+    const { suggestNext, candidates } = capture();
+    const resolveTrack = vi.fn(async () => null as unknown as Track);
+    const getSimilarTracks = vi.fn(async () => []);
+    const entries: Record<string, { fields: Partial<Track>; sources?: Record<string, string> }> = {
+      [trackKeyOf('Crate Artist 1', 'Crate Song 1')]: { fields: { ...full, bpm: 128 }, sources: { bpm: 'manual' } },
+      [trackKeyOf('Crate Artist 2', 'Crate Song 2')]: { fields: { bpm: 120 } }, // still incomplete
+    };
+    const getCachedEntry = vi.fn((k: string) => entries[k]);
+    await assembleSuggestions(
+      input([crateTrack(1, { bpm: 100 }), crateTrack(2), crateTrack(3), crateTrack(4, full)]),
+      { suggestNext, resolveTrack, getCachedEntry, getSimilarTracks }
+    );
+    const byId = new Map(candidates().map((c) => [c.id, c]));
+    expect(byId.get('crate-1')).toMatchObject({ ...full, bpm: 128 });
+    expect(byId.get('crate-1')!.sources.bpm).toBe('manual');
+    expect(byId.has('crate-2')).toBe(false);
+    expect(byId.has('crate-3')).toBe(false);
+    expect(byId.get('crate-4')).toMatchObject(full); // client-supplied essentials may be used directly
+    expect(resolveTrack).not.toHaveBeenCalled();
+  });
+
+  it('crate tracks already in the set are not suggested', async () => {
+    nonDemo();
+    const { suggestNext, candidates } = capture();
+    await assembleSuggestions(
+      { playlist: [last, crateTrack(1, full)], template: '60min', plannedLength: 15, crate: [crateTrack(1, full), crateTrack(2, full)] },
+      { suggestNext }
+    );
+    expect(candidates().map((c) => c.id)).toEqual(['crate-2']);
+  });
+
+  it('tiny crate falls back: neighbours still appear and the hint-worthy empty pool does not break scoring', async () => {
+    nonDemo();
+    const neighborKey = trackKeyOf('Outside', 'Neighbor');
+    const { suggestNext, candidates } = capture();
+    await assembleSuggestions(input([crateTrack(1, full)]), {
+      suggestNext,
+      loadAdjacency: async () => ({
+        getNeighbors: async () => [{ trackKey: neighborKey, count: 3, direction: 'after' as const }],
+        pairCount: 1,
+        trackCount: 2,
+      }),
+      getCachedEntry: (k) => (k === neighborKey ? { fields: { ...full } } : undefined),
+    });
+    const ids = candidates().map((c) => c.id);
+    expect(ids).toContain(`cache-${neighborKey}`);
+    expect(ids).toContain('crate-1');
+  });
+
+  it('tiny crate falls back to the demo crate in demo mode', async () => {
+    const res = await assembleSuggestions(input([crateTrack(1, full)]), {});
+    expect(res.suggestions.length).toBeGreaterThan(0);
+  });
+});
+
+describe('POST /api/suggest crate validation', () => {
+  const post = async (body: unknown) => {
+    vi.resetModules();
+    const assemble = vi.fn(async () => ({ suggestions: [] }));
+    vi.doMock('@/app/api/suggest/assemble', () => ({ assembleSuggestions: assemble, loadSuggestDeps: async () => ({}) }));
+    vi.doMock('@/lib/adjacency/live', () => ({ ensureNeighborsFor: async () => ({ digging: false }) }));
+    const { POST } = await import('@/app/api/suggest/route');
+    const res = await POST(new Request('http://x/api/suggest', { method: 'POST', body: JSON.stringify(body) }));
+    vi.doUnmock('@/app/api/suggest/assemble');
+    vi.doUnmock('@/lib/adjacency/live');
+    const crate = ((assemble.mock.calls[0] as unknown[] | undefined)?.[0] as { crate?: Array<Record<string, unknown>> } | undefined)?.crate;
+    return { res, crate };
+  };
+  const row = (n: number, extra: Record<string, unknown> = {}) => ({ id: `c${n}`, artist: `A${n}`, title: `T${n}`, sources: {}, ...extra });
+
+  it('payload capped at 600 items', async () => {
+    const { res, crate } = await post({ playlist: [], template: '60min', crate: Array.from({ length: 700 }, (_, i) => row(i)) });
+    expect(res.status).toBe(200);
+    expect(crate).toHaveLength(600);
+  });
+
+  it('drops invalid items and strings over 200 chars; sanitises ranges and styles', async () => {
+    const { crate } = await post({
+      playlist: [],
+      template: '60min',
+      crate: [
+        row(1, { bpm: 124, camelot: '8A', energy: 6, danceability: 0.7, styles: ['techno', 'x'.repeat(201), 5] }),
+        row(2, { artist: 'x'.repeat(201) }),
+        row(3, { title: 'y'.repeat(201) }),
+        row(4, { id: 'z'.repeat(201) }),
+        { id: 'c5' },
+        'nope',
+        row(6, { bpm: 9999, camelot: 'ZZ' }),
+      ],
+    });
+    expect(crate!.map((c) => c.id)).toEqual(['c1', 'c6']);
+    expect(crate![0]).toMatchObject({ bpm: 124, camelot: '8A', energy: 6, danceability: 0.7, styles: ['techno'] });
+    expect(crate![1].bpm).toBeUndefined();
+    expect(crate![1].camelot).toBeUndefined();
+  });
+
+  it('a missing or non-array crate is simply empty; a crate is not required', async () => {
+    expect((await post({ playlist: [], template: '60min' })).crate).toEqual([]);
+    expect((await post({ playlist: [], template: '60min', crate: 'x' })).crate).toEqual([]);
+  });
+});
+
+describe('crate scale', () => {
+  it('payload capped and request < 1 s with 2000-track crate (mocked providers)', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/adjacency/live', () => ({ ensureNeighborsFor: async () => ({ digging: false }) }));
+    vi.doMock('@/lib/resolver', () => ({ ...mocks.resolver, resolveWithStatus: vi.fn(), getSimilarTracks: async () => [] }));
+    vi.doMock('@/lib/adjacency', () => ({ ...mocks.adjacency, loadAdjacency: async () => { throw new Error('none'); } }));
+    vi.doMock('@/lib/metadataCache', () => ({ getEntry: () => undefined }));
+    const { POST } = await import('@/app/api/suggest/route');
+    const crate = Array.from({ length: 2000 }, (_, i) => ({
+      id: `c${i}`,
+      artist: `Artist ${i}`,
+      title: `Song ${i}`,
+      bpm: 118 + (i % 14),
+      camelot: `${(i % 12) + 1}${i % 2 ? 'A' : 'B'}`,
+      energy: 1 + (i % 10),
+      danceability: 0.6,
+      sources: {},
+    }));
+    const t0 = performance.now();
+    const res = await POST(new Request('http://x/api/suggest', { method: 'POST', body: JSON.stringify({ playlist: [last], template: '60min', crate }) }));
+    const ms = performance.now() - t0;
+    expect(res.status).toBe(200);
+    expect((await res.json()).suggestions.length).toBeGreaterThan(0);
+    expect(ms).toBeLessThan(1000);
+    vi.doUnmock('@/lib/adjacency/live');
+    vi.doUnmock('@/lib/resolver');
+    vi.doUnmock('@/lib/adjacency');
+    vi.doUnmock('@/lib/metadataCache');
+  });
+});
