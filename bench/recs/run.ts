@@ -114,6 +114,8 @@ async function main(): Promise<void> {
   const deps = await loadSuggestDeps();
   // Results must not depend on scenario order: no background crate fills, no scheduled retries; styles settle between scenarios.
   deps.backgroundResolve = undefined;
+  // The rated pool is the scenario crate + neighbours + similar only: a thin crate is reported PARTIAL, never demo-padded.
+  deps.noStarterCrate = true;
   const { setReresolveDeps } = await import('../../src/lib/reresolve');
   setReresolveDeps({ setTimer: () => undefined });
 

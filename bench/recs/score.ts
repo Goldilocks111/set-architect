@@ -19,7 +19,7 @@ export interface Scenario {
 export const TOP_N = 10;
 /** Criterion 3: at least this many of the top 10 are compliant. */
 export const MIN_COMPLIANT = 8;
-/** Below this many scoring-ready crate tracks the suggest pool is padded with demo tracks (assemble DEMO_CRATE_MIN). */
+/** Ready crate tracks a full (40-track) scenario crate needs; the bench never demo-pads (deps.noStarterCrate). */
 export const MIN_CRATE_READY = 30;
 export const SHUFFLE_SEED = 20261102;
 
@@ -68,7 +68,7 @@ export function summarizeRecs(rows: ScenarioScore[]): { n: number; passed: numbe
 /** PARTIAL on any provider degrade: a run that lost a provider says nothing about recommendation quality. */
 export function recsStatus(o: { passed: number; n: number; stopped: string[]; refused: string[]; cooldowns: string[]; lowCrate?: string[] }): string {
   const parts: string[] = [];
-  if (o.lowCrate?.length) parts.push(`crate under ${MIN_CRATE_READY} ready tracks (demo-padded): ${o.lowCrate.join(', ')}`);
+  if (o.lowCrate?.length) parts.push(`crate below its ready threshold, min(${MIN_CRATE_READY}, 75% of the crate) (thin pool; the bench never adds demo tracks): ${o.lowCrate.join(', ')}`);
   if (o.stopped.length) parts.push(`rate-limited: ${o.stopped.join(', ')}`);
   if (o.refused.length) parts.push(`budget exhausted: ${o.refused.join(', ')}`);
   if (o.cooldowns.length) parts.push(`breaker cooldown: ${o.cooldowns.join(', ')}`);

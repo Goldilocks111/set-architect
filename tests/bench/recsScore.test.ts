@@ -177,6 +177,12 @@ describe('crate readiness', () => {
     const base = { passed: 10, n: 10, stopped: [], refused: [], cooldowns: [] };
     expect(recsStatus({ ...base, lowCrate: [] })).toBe('PASS');
     expect(recsStatus({ ...base, lowCrate: ['b', 'c'] })).toMatch(/^PARTIAL.*crate.*b, c/);
+    const msg = recsStatus({ ...base, lowCrate: ['b'] });
+    expect(msg).toMatch(/min\(30, 75% of the crate\)/);
+    expect(msg).not.toMatch(/demo-padded|under 30 ready/);
+  });
+  it('the bench never pads a crate with the demo starter crate (run.ts opts out)', () => {
+    expect(readFileSync(join(__dirname, '../../bench/recs/run.ts'), 'utf8')).toMatch(/^\s*deps\.noStarterCrate = true;/m);
   });
 });
 

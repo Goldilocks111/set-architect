@@ -42,6 +42,8 @@ export interface SuggestDeps {
   budgetMs?: number;
   /** Per-call cap for the adjacency and similarity lookups. */
   callTimeoutMs?: number;
+  /** Never pad a thin crate with the demo starter crate (the recs bench: its pool is the scenario crate + neighbours + similar only). */
+  noStarterCrate?: boolean;
 }
 
 /** Incomplete crate items started in the background per suggest request, newest first. */
@@ -220,7 +222,7 @@ export async function assembleSuggestions(
     }
   }
   // Below DEMO_CRATE_MIN ready tracks the demo crate is a starter crate, so Openers/Next up are never empty.
-  const pool = crateReady.length < DEMO_CRATE_MIN ? [...crateReady, ...demoTracks()] : crateReady;
+  const pool = crateReady.length < DEMO_CRATE_MIN && !deps.noStarterCrate ? [...crateReady, ...demoTracks()] : crateReady;
   const poolByKey = new Map(pool.map((t) => [keyOf(t), t]));
   // Incomplete set tracks have no usable essentials, so they can't anchor neighbor/similarity lookups.
   const completeSet = input.playlist.filter(isComplete);
