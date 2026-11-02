@@ -14,7 +14,7 @@ import { lanesFromTags } from './style/taxonomy';
 import { lastfmConfigured, lastfmSimilar, type SimilarItem } from './sources/lastfm';
 import { listenbrainzSimilar } from './sources/listenbrainz';
 import { getSimilarCached, putSimilar, SIMILAR_FALLBACK_TTL_MS } from './similarCache';
-import { musicbrainzAdapter } from './sources/musicbrainz';
+import { musicBrainzQueueDelayMs, musicbrainzAdapter } from './sources/musicbrainz';
 import { reccobeatsAdapter } from './sources/reccobeats';
 import { soundstatAdapter } from './sources/soundstat';
 import { spotifyAdapter } from './sources/spotify';
@@ -395,10 +395,13 @@ export async function searchTracks(query: string): Promise<Track[]> {
   });
 }
 
+/** The ListenBrainz fallback is skipped while its MusicBrainz lookup would wait longer than this for a slot. */
+export const SIMILAR_MB_MAX_QUEUE_MS = 2000;
+
 /**
  * Similar tracks, cached 24 h per trackKey (empty answers too). Last.fm goes through the shared 'lastfm' breaker,
  * app budget and pacing; while it is cooling down, out of budget or failing, ListenBrainz answers instead and that
- * fallback is cached only briefly.
+ * fallback (or its failure) is cached only briefly.
  */
 export async function getSimilarTracks(artist: string, title: string): Promise<SimilarItem[]> {
   const key = trackKeyOf(artist, title);
@@ -421,11 +424,15 @@ export async function getSimilarTracks(artist: string, title: string): Promise<S
       if (!(err instanceof LastfmSkippedError)) recordFailure(LASTFM, err);
     }
   }
+  // A deep MusicBrainz queue (resolves running) would only time this out after taking a slot: skip it, cache nothing.
+  if (musicBrainzQueueDelayMs() > SIMILAR_MB_MAX_QUEUE_MS) return [];
   try {
     const res = await withTimeout(listenbrainzSimilar(artist, title), ADAPTER_TIMEOUT_MS, 'listenbrainz');
     putSimilar(key, res, authoritative ? {} : { ttlMs: SIMILAR_FALLBACK_TTL_MS });
     return res;
   } catch {
+    // cached briefly, so every refresh does not re-ask Last.fm and MusicBrainz for the same seed
+    putSimilar(key, [], { ttlMs: SIMILAR_FALLBACK_TTL_MS });
     return [];
   }
 }
