@@ -8,13 +8,13 @@ interface Deps {
   now: () => number;
   /** Arms a timer; returning undefined means "no real timer" (tests). */
   setTimer: (fn: () => void, ms: number) => unknown;
-  resolve: (artist: string, title: string) => Promise<Track>;
+  resolve: (artist: string, title: string, opts?: { without?: string[] }) => Promise<Track>;
 }
 
 interface Queue {
   deps: Partial<Deps>;
   injected: boolean;
-  jobs: Array<{ key: string; artist: string; title: string }>;
+  jobs: Array<{ key: string; artist: string; title: string; without?: string[] }>;
   timers: Map<string, unknown>;
   running: boolean;
 }
@@ -39,9 +39,9 @@ const realDeps = (q: Queue): Deps => ({
     }),
   resolve:
     q.deps.resolve ??
-    (async (artist, title) => {
+    (async (artist, title, opts) => {
       const { resolveWithStatus } = await import('./resolver');
-      return resolveWithStatus(artist, title, { force: true });
+      return resolveWithStatus(artist, title, { force: true, ...(opts?.without?.length ? { without: opts.without } : {}) });
     }),
 });
 
@@ -65,9 +65,10 @@ export function resetReresolve(): void {
 /**
  * Plans the next retry for a track that came back incomplete. Only breaker/timeout reasons are retried, on
  * RETRY_BACKOFF_MS by attempt count; returns the retryAt (persisted in the metadata cache so the client can
- * show it) or undefined when the reason is permanent or the schedule is exhausted.
+ * show it) or undefined when the reason is permanent or the schedule is exhausted. `without` (adapters the first
+ * attempt left out, e.g. iTunes for the background crate fill) is carried into the retry job.
  */
-export function scheduleRetry(artist: string, title: string, reason: IncompleteReason): number | undefined {
+export function scheduleRetry(artist: string, title: string, reason: IncompleteReason, without?: string[]): number | undefined {
   if (!RETRYABLE_REASONS.includes(reason)) return undefined;
   const q = state();
   const d = realDeps(q);
@@ -87,7 +88,7 @@ export function scheduleRetry(artist: string, title: string, reason: IncompleteR
     key,
     d.setTimer(() => {
       q.timers.delete(key);
-      if (!q.jobs.some((j) => j.key === key)) q.jobs.push({ key, artist, title });
+      if (!q.jobs.some((j) => j.key === key)) q.jobs.push({ key, artist, title, ...(without?.length ? { without } : {}) });
       void drain(q);
     }, delay)
   );
@@ -104,8 +105,8 @@ async function drain(q: Queue): Promise<void> {
       try {
         // resolveWithStatus honours breaker cooldowns and budgets, updates the metadata cache and schedules the
         // next retry itself; this only covers an injected resolver that doesn't
-        const t = await realDeps(q).resolve(job.artist, job.title);
-        if (t.unresolved && t.unresolved.retryAt === undefined) scheduleRetry(job.artist, job.title, t.unresolved.reason);
+        const t = await realDeps(q).resolve(job.artist, job.title, job.without ? { without: job.without } : undefined);
+        if (t.unresolved && t.unresolved.retryAt === undefined) scheduleRetry(job.artist, job.title, t.unresolved.reason, job.without);
       } catch {
         // a failed retry is dropped; the client's next request resolves afresh
       }

@@ -3,9 +3,9 @@ import type { Track } from '@/types/track';
 // Pure: imported by both client and server. Do not import node modules here.
 export const ESSENTIALS = ['bpm', 'camelot', 'energy', 'danceability'] as const;
 export type Essential = (typeof ESSENTIALS)[number];
-export type IncompleteReason = 'not-found' | 'no-preview' | 'analysis-failed' | 'providers-unavailable' | 'timeout';
+export type IncompleteReason = 'not-found' | 'no-preview' | 'analysis-failed' | 'providers-unavailable' | 'timeout' | 'exhausted';
 
-/** Reasons worth retrying later; the others are properties of the track itself. */
+/** Reasons worth retrying later; the others are properties of the track itself (`exhausted`: retries already used up). */
 export const RETRYABLE_REASONS: readonly IncompleteReason[] = ['providers-unavailable', 'timeout'];
 
 const present = (t: Track, f: Essential): boolean => {

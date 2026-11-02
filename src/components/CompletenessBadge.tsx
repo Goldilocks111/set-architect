@@ -7,6 +7,7 @@ export const REASON_COPY: Record<IncompleteReason, string> = {
   'analysis-failed': 'Couldn’t analyse the preview — set values by hand',
   'providers-unavailable': 'Providers busy — retrying automatically',
   timeout: 'Still looking — retrying automatically',
+  exhausted: 'Couldn’t find full data after several tries — set values by hand',
 };
 
 const FIELD_LABEL: Record<Essential, string> = { bpm: 'BPM', camelot: 'key', energy: 'energy', danceability: 'danceability' };

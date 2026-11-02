@@ -29,10 +29,10 @@ function read(): Record<string, CacheEntry> {
 }
 
 /**
- * Read-only snapshot for lookups, re-read only when the file's mtime or size changed (or after our own write).
+ * Read-only snapshot for lookups, re-read only when the file's mtime, size or inode changed (or after our own write).
  * Writers keep using read() so they never mutate what lookups share.
  */
-let snap: { path: string; mtimeMs: number; size: number; data: Record<string, CacheEntry> } | undefined;
+let snap: { path: string; mtimeMs: number; size: number; ino: number; data: Record<string, CacheEntry> } | undefined;
 
 function snapshot(): Record<string, CacheEntry> {
   const f = file();
@@ -43,9 +43,9 @@ function snapshot(): Record<string, CacheEntry> {
     snap = undefined;
     return {};
   }
-  if (snap && snap.path === f && snap.mtimeMs === st.mtimeMs && snap.size === st.size) return snap.data;
+  if (snap && snap.path === f && snap.mtimeMs === st.mtimeMs && snap.size === st.size && snap.ino === st.ino) return snap.data;
   const data = read();
-  snap = { path: f, mtimeMs: st.mtimeMs, size: st.size, data };
+  snap = { path: f, mtimeMs: st.mtimeMs, size: st.size, ino: st.ino, data };
   return data;
 }
 

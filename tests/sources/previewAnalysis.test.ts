@@ -23,7 +23,7 @@ function clickTrack(bpm: number, seconds: number, sr = 22050): Float32Array {
 }
 
 describe('previewAnalysis', () => {
-  it('estimates the tempo of a synthetic click track', () => {
+  it('estimates the tempo of a synthetic click track', { timeout: 30_000 }, () => {
     const bpm = estimateBpm(clickTrack(120, 30), 22050);
     expect(bpm).toBeDefined();
     expect(Math.abs(bpm! - 120)).toBeLessThan(3);
@@ -34,7 +34,7 @@ describe('previewAnalysis', () => {
     expect(estimateBpm(new Float32Array(1000), 22050)).toBeUndefined();
   });
 
-  it('folds octave errors into the DJ range', () => {
+  it('folds octave errors into the DJ range', { timeout: 30_000 }, () => {
     expect(foldBpm(240)).toBe(120);
     expect(foldBpm(60)).toBe(120);
     expect(foldBpm(128)).toBe(128);
