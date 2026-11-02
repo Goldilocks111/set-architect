@@ -174,17 +174,6 @@ export const normalizeName = (s: string): string => s.trim().replace(/\s+/g, ' '
 export const inTempo = (last: number | undefined, bpm: number | undefined): boolean =>
   last === undefined || (bpm !== undefined && (scoreBpmTransition(last, bpm).relation !== 'clash' || Math.abs(bpm - last) / last <= BASELINE_BPM_TOLERANCE));
 
-/**
- * The one spelling source for the rating file: the provider's display name stored in the cache, else the pool entry.
- * Undefined when neither knows the track (the caller then keeps the given name, normalized). Same rule for every track.
- */
-export function displayResolver(cacheDisplay: (key: string) => TrackRef | undefined, pool: ReadonlyMap<string, TrackRef>): (t: TrackRef) => TrackRef | undefined {
-  return (t) => {
-    const k = trackKeyOf(t.artist, t.title);
-    return cacheDisplay(k) ?? pool.get(k);
-  };
-}
-
 export type CrateRef = TrackRef & { bpm?: number; styles?: string[] };
 
 /**
@@ -223,6 +212,9 @@ export function baselinePicks(o: { crate: CrateRef[]; lane: string; lanePool: Re
 /** Off-tempo tracks the baseline may keep before both lists are trimmed further. */
 export const MAX_OFF_TEMPO = 2;
 
+/** Where a scenario's names came from: the provider's display names (every shown track has one), else the pool/normalized spelling for all. */
+export type NamingMode = 'provider' | 'pool';
+
 /** `<day>-<HHMMss>-<rand4>`: unique per measured run; names the rating file and namespaces its A/B key. */
 export function makeRunId(day: string, now: Date, rand: () => number = Math.random): string {
   const p = (n: number) => String(n).padStart(2, '0');
@@ -249,16 +241,14 @@ export const writesRating = (limit?: number): boolean => limit === undefined;
  */
 export function buildRatingFile(
   results: Array<{ scenario: Scenario; suggestions: Suggestion[]; crate: CrateRef[]; lastBpm?: number }>,
-  opts: { seed?: number; fileId: string; lanePool: (lane: string) => ReadonlySet<string>; display?: (t: TrackRef) => TrackRef | undefined },
-): { file: RatingFile; key: RatingKey; short: Array<{ id: string; engine: number; baseline: number; offTempo: number; used: number }>; offTempo: Record<string, number> } {
+  opts: { seed?: number; fileId: string; lanePool: (lane: string) => ReadonlySet<string>; provider?: (t: TrackRef) => TrackRef | undefined; pool?: (t: TrackRef) => TrackRef | undefined },
+): { file: RatingFile; key: RatingKey; short: Array<{ id: string; engine: number; baseline: number; offTempo: number; used: number }>; offTempo: Record<string, number>; naming: Record<string, NamingMode> } {
   const seed = opts.seed ?? seedFromRunId(opts.fileId);
   const key: RatingKey = {};
   const short: Array<{ id: string; engine: number; baseline: number; offTempo: number; used: number }> = [];
   const offTempoBy: Record<string, number> = {};
-  const name = (t: TrackRef): TrackRef => {
-    const d = opts.display?.(t) ?? t;
-    return { artist: normalizeName(d.artist), title: normalizeName(d.title) };
-  };
+  const naming: Record<string, NamingMode> = {};
+  const clean = (d: TrackRef): TrackRef => ({ artist: normalizeName(d.artist), title: normalizeName(d.title) });
   const scenarios = results.map(({ scenario, suggestions, crate, lastBpm }, i) => {
     const s = seed + i * 7919;
     const engineAll = suggestions.slice(0, TOP_N).map(({ track: t }) => ({ artist: t.artist, title: t.title }));
@@ -270,6 +260,12 @@ export function buildRatingFile(
     const baselineAll = [...onTempo, ...drawn.picks.filter((p) => !onTempo.includes(p)).slice(0, MAX_OFF_TEMPO)];
     const used = Math.min(engineAll.length, baselineAll.length);
     if (used < TOP_N) short.push({ id: scenario.id, engine: engineAll.length, baseline: drawn.picks.length, offTempo: drawn.offTempo, used });
+    // One rule per scenario: provider display names only when EVERY shown track (set + both lists) has one; otherwise
+    // every track uses the pool entry, else its normalized given name, so no list is spelled differently from the other.
+    const shown = [...scenario.set, ...engineAll.slice(0, used), ...baselineAll.slice(0, used)];
+    const mode: NamingMode = opts.provider && shown.every((t) => opts.provider!(t)) ? 'provider' : 'pool';
+    naming[scenario.id] = mode;
+    const name = (t: TrackRef): TrackRef => clean(mode === 'provider' ? opts.provider!(t)! : (opts.pool?.(t) ?? t));
     const engine = engineAll.slice(0, used).map(name);
     const baseline = baselineAll.slice(0, used).map(name);
     const engineFirst = rng(s + 2)() < 0.5;
@@ -286,7 +282,7 @@ export function buildRatingFile(
       ],
     };
   });
-  return { file: { version: 2, fileId: opts.fileId, scenarios }, key, short, offTempo: offTempoBy };
+  return { file: { version: 2, fileId: opts.fileId, scenarios }, key, short, offTempo: offTempoBy, naming };
 }
 
 /** Acceptance: the engine list rated >= 7 on >= 8 scenarios AND rated above the baseline on >= 7. */

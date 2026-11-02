@@ -1,4 +1,5 @@
 import type { Track } from '@/types/track';
+import { titleMatches } from './match';
 import { fetchJson } from '../http';
 import type { SourceAdapter } from './types';
 
@@ -74,7 +75,7 @@ async function findHit(partial: Track): Promise<DeezerTrack | undefined> {
       const res = await fetchJson<{ data?: DeezerTrack[] }>(
         `${BASE}/search?q=${encodeURIComponent(q)}&limit=5`
       );
-      const hit = (res.data ?? []).find((t) => artistMatches(partial.artist, t.artist?.name));
+      const hit = (res.data ?? []).find((t) => artistMatches(partial.artist, t.artist?.name) && titleMatches(partial.title, t.title));
       if (hit) return hit;
     } catch (err) {
       if (q === attempts[0]) throw err;

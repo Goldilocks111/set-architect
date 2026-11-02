@@ -6,7 +6,7 @@ import { json, mockFetch } from './helpers';
 import { resolveWithStatus, settleStyles } from '@/lib/resolver';
 import { getEntry, putResolved } from '@/lib/metadataCache';
 import { displayFromKey } from '@/app/api/suggest/assemble';
-import { buildRatingFile, displayResolver, type Scenario } from '../../bench/recs/score';
+import { buildRatingFile, type Scenario } from '../../bench/recs/score';
 import { trackKeyOf, type Suggestion } from '@/types/track';
 
 const deezer = (artist: string, title: string) => ['api.deezer.com', () => json({ data: [{ id: 1, title, rank: 5, preview: 'p', artist: { name: artist } }] })] as [string, () => Response];
@@ -50,6 +50,23 @@ describe('provider display names persist in the metadata cache', () => {
   });
 });
 
+describe('a display name is accepted only for the same recording', () => {
+  it('a feat. variant matched by the adapter is not stored as the display name (keys differ); an (Original Mix) variant is', async () => {
+    mockFetch([deezer('Real Artist', 'Real Title (feat. Someone)'), ['itunes.apple.com', () => json({ results: [] })], ['musicbrainz.org', () => json({ recordings: [] })]]);
+    await resolveWithStatus('Real Artist', 'Real Title');
+    expect(getEntry(trackKeyOf('Real Artist', 'Real Title'))?.display).toBeUndefined();
+    mockFetch([deezer('REAL Artist', 'Other Title (Original Mix)'), ['itunes.apple.com', () => json({ results: [] })], ['musicbrainz.org', () => json({ recordings: [] })]]);
+    await resolveWithStatus('REAL Artist', 'Other Title');
+    expect(getEntry(trackKeyOf('REAL Artist', 'Other Title'))?.display).toEqual({ artist: 'REAL Artist', title: 'Other Title (Original Mix)' });
+  });
+  it('a wrong-song hit leaves the cache without its preview or display name', async () => {
+    mockFetch([deezer('Real Artist', 'A Different Song'), ['itunes.apple.com', () => json({ results: [] })], ['musicbrainz.org', () => json({ recordings: [] })]]);
+    const t = await resolveWithStatus('Real Artist', 'Real Title');
+    expect(t.previewUrl).toBeUndefined();
+    expect(getEntry(trackKeyOf('Real Artist', 'Real Title'))?.display).toBeUndefined();
+  });
+});
+
 describe('rating names come from provider display names, through the real cache', () => {
   it('an external named via displayFromKey and a pool track both render with provider casing', async () => {
     const ext = displayFromKey(trackKeyOf('real  artist', 'real title')); // title-cased tell
@@ -58,25 +75,23 @@ describe('rating names come from provider display names, through the real cache'
       const k = trackKeyOf(r.artist, r.title);
       putResolved(k, { id: k, artist: r.artist, title: r.title, ...COMPLETE, sources: {} }, Date.now(), { artist: a, title: t });
     }
-    const display = displayResolver((k) => getEntry(k)?.display, new Map([[trackKeyOf(pool.artist, pool.title), pool]]));
+    // every track on the sheet carries a provider name, so the scenario renders in provider mode
     const crate = Array.from({ length: 12 }, (_, i) => ({ artist: `Pool ${i}`, title: `T${i}`, bpm: 124 }));
+    for (const c of crate) {
+      const k = trackKeyOf(c.artist, c.title);
+      putResolved(k, { id: k, artist: c.artist, title: c.title, ...COMPLETE, sources: {} }, Date.now(), { artist: c.artist.toUpperCase(), title: c.title });
+    }
+    const provider = (r: { artist: string; title: string }) => getEntry(trackKeyOf(r.artist, r.title))?.display;
     const sc: Scenario = { id: 's', name: 'S', lane: 'techno', template: '60min', plannedLength: 10, set: [pool], crate };
     const sug = (artist: string, title: string, i: number): Suggestion => ({ track: { id: `x${i}`, artist, title, sources: {} }, score: 1, reasons: [] });
     const suggestions = [sug(ext.artist, ext.title, 0), sug(pool.artist, pool.title, 1)];
     const { file } = buildRatingFile([{ scenario: sc, suggestions, crate: [...crate, { ...pool, bpm: 124 }], lastBpm: 124 }], {
-      fileId: 'r', lanePool: () => new Set([...crate.map((c) => trackKeyOf(c.artist, c.title)), trackKeyOf(pool.artist, pool.title)]), display,
+      fileId: 'r', lanePool: () => new Set([...crate.map((c) => trackKeyOf(c.artist, c.title)), trackKeyOf(pool.artist, pool.title)]), provider,
     });
     const names = file.scenarios[0].lists.flatMap((l) => l.tracks.map((t) => `${t.artist} | ${t.title}`));
     expect(names).toContain('REAL Artist | Real TITLE');
     expect(names).toContain('POOL Artist | Pool TITLE');
     expect(file.scenarios[0].set).toEqual([{ artist: 'POOL Artist', title: 'Pool TITLE' }]);
     expect(names.join('\n')).not.toContain('Real Artist'); // the displayFromKey spelling is gone
-  });
-
-  it('falls back to the pool entry, then to the normalized input', () => {
-    const pool = new Map([[trackKeyOf('A', 'B'), { artist: 'Pool A', title: 'Pool B' }]]);
-    const d = displayResolver(() => undefined, pool);
-    expect(d({ artist: 'a', title: 'b' })).toEqual({ artist: 'Pool A', title: 'Pool B' });
-    expect(d({ artist: ' x  y ', title: 'z' })).toBeUndefined();
   });
 });

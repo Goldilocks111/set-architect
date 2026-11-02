@@ -161,7 +161,7 @@ export const MAX_PER_ARTIST = 2;
 
 /** First credited artist, normalized the way track keys are ("A feat. B", "A & B", "A x B" -> a). */
 export function primaryArtist(artist: string): string {
-  const first = artist.split(/\s*(?:,|;|\/|&|\bfeat\.?|\bft\.?|\bfeaturing\b|\bvs\.?|\bx\b)\s*/i)[0] ?? artist;
+  const first = artist.split(/\s*(?:,|;|\/|&|\bfeat\b\.?|\bft\b\.?|\bfeaturing\b|\bvs\b\.?|\bx\b(?![-\w]))\s*/i)[0] ?? artist;
   return trackKeyOf(first, '').split('|')[0];
 }
 

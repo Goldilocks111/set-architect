@@ -102,7 +102,8 @@ async function resolveInto(track: Track, run: ResolveRun): Promise<Track> {
       const partial = await withTimeout(adapter.enrich({ ...track }), adapter.timeoutMs ?? ADAPTER_TIMEOUT_MS, adapter.name);
       if (run.aborted) return track;
       if (guarded) recordSuccess(guarded);
-      if (!run.display && (adapter.name === 'deezer' || adapter.name === 'spotify') && partial?.artist && partial?.title) run.display = { artist: partial.artist, title: partial.title };
+      // only the same recording supplies a display name (same key once Original/Extended Mix qualifiers drop out)
+      if (!run.display && (adapter.name === 'deezer' || adapter.name === 'spotify') && partial?.artist && partial?.title && trackKeyOf(partial.artist, partial.title) === trackKeyOf(track.artist, track.title)) run.display = { artist: partial.artist, title: partial.title };
       if (adapter.name === 'deezer') run.deezerPreview = partial?.previewUrl;
       const overrides = OVERRIDES[adapter.name] ?? [];
       for (const [field, value] of Object.entries(partial ?? {}) as Array<[keyof Track, unknown]>) {

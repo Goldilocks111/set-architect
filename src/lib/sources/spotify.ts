@@ -1,4 +1,5 @@
 import type { Track } from '@/types/track';
+import { titleMatches } from './match';
 import { fetchJson, fetchWithTimeout, HttpError } from '../http';
 import type { SourceAdapter } from './types';
 
@@ -84,7 +85,7 @@ export const spotifyAdapter: SourceAdapter = {
   configured: () => !!creds(),
   async enrich(partial) {
     const items = await search(`${partial.artist} ${partial.title}`);
-    const hit = items.find((t) => t.artists?.some((a) => artistMatches(partial.artist, a.name)));
+    const hit = items.find((t) => t.artists?.some((a) => artistMatches(partial.artist, a.name)) && titleMatches(partial.title, t.name));
     if (!hit) return {};
     const out: Partial<Track> = { spotifyId: hit.id };
     if (hit.name && hit.artists?.[0]?.name) Object.assign(out, { artist: hit.artists[0].name, title: hit.name }); // display name only

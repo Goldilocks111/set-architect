@@ -33,7 +33,7 @@ describe('resolveTrack', () => {
       ['accounts.spotify.com', () => json({ access_token: 't', expires_in: 3600 })],
       [
         'api.spotify.com',
-        () => json({ tracks: { items: [{ id: 'SPX', artists: [{ name: 'A' }], external_urls: { spotify: 'https://open.spotify.com/track/SPX' } }] } }),
+        () => json({ tracks: { items: [{ id: 'SPX', name: 'T', artists: [{ name: 'A' }], external_urls: { spotify: 'https://open.spotify.com/track/SPX' } }] } }),
       ],
       ['api.reccobeats.com/v1/audio-features?ids=SPX', () => json({ content: [{ tempo: 124, energy: 1 }] })],
       ['api.deezer.com', () => json({ data: [] })],

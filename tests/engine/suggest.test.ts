@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_WEIGHTS, suggestNext } from '@/engine/suggest';
+import { DEFAULT_WEIGHTS, primaryArtist, suggestNext } from '@/engine/suggest';
 import { trackKeyOf, type Track } from '@/types/track';
 
 const t = (id: string, o: Partial<Track> = {}): Track => ({
@@ -303,6 +303,15 @@ describe('suggestNext', () => {
   describe('artist diversity (at most 2 per primary artist)', () => {
     const lastT = t('last', { bpm: 128, camelot: '8A', energy: 5 });
     const good = { bpm: 128, camelot: '8A', energy: 5 };
+    it('primaryArtist splits credits on whole words only', () => {
+      for (const a of ['Featurecast', 'Ftampa', 'Vsevolod', 'X-Press 2', 'Xavier']) expect(primaryArtist(a), a).toBe(trackKeyOf(a, '').split('|')[0]);
+      expect(primaryArtist('Same DJ feat. X')).toBe('same dj');
+      expect(primaryArtist('A ft. B')).toBe('a');
+      expect(primaryArtist('A vs. B')).toBe('a');
+      expect(primaryArtist('A x B')).toBe('a');
+      expect(primaryArtist('A, B')).toBe('a');
+      expect(primaryArtist('A & B')).toBe('a');
+    });
     it('5 same-artist high scorers: only 2 reach the top 10, the rest fill from further down', () => {
       const same = Array.from({ length: 5 }, (_, i) => t(`s${i}`, { artist: 'Same DJ', ...good }));
       const others = Array.from({ length: 10 }, (_, i) => t(`o${i}`, { bpm: 129, camelot: '8A', energy: 5 }));
