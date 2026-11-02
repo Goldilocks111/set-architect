@@ -137,6 +137,13 @@ describe('applyOrder / undoOrder (Review Focus 3)', () => {
     for (const tr of s.tracks) expect(tr).toBe(before.tracks.find((x) => x.id === tr.id));
   });
 
+  it('applying the current order is a no-op and arms no undo', () => {
+    const before = withTracks('a', 'b', 'c');
+    const s = playlistReducer(before, { type: 'applyOrder', ids: ['a', 'b', 'c'] });
+    expect(s).toBe(before);
+    expect(s.orderUndo).toBeUndefined();
+  });
+
   it('rejects anything that is not a permutation of the current ids', () => {
     const before = withTracks('a', 'b', 'c');
     for (const bad of [['a', 'b'], ['a', 'b', 'c', 'd'], ['a', 'a', 'b'], ['a', 'b', 'z'], []]) {

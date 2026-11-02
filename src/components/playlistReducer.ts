@@ -112,7 +112,8 @@ export function playlistReducer(state: PlaylistState, action: PlaylistAction): P
     case 'applyOrder': {
       // never drops, duplicates or swaps a track: anything but a permutation of the current ids is ignored
       const tracks = permute(state.tracks, action.ids);
-      return tracks ? { ...state, tracks, orderUndo: state.tracks.map((t) => t.id) } : state;
+      if (!tracks || tracks.every((t, i) => t === state.tracks[i])) return state; // unchanged order: nothing to undo
+      return { ...state, tracks, orderUndo: state.tracks.map((t) => t.id) };
     }
     case 'undoOrder': {
       const tracks = state.orderUndo && permute(state.tracks, state.orderUndo);

@@ -52,6 +52,7 @@ describe('Suggest order → preview → Apply / Cancel → Undo', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Undo reorder' }));
     expect(setOrder()).toEqual(['c', 'a', 'd', 'b']);
     expect(screen.queryByRole('button', { name: 'Undo reorder' })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Suggest order' })); // focus not lost on unmount
   });
 
   it('Cancel leaves the set untouched', async () => {
@@ -61,6 +62,48 @@ describe('Suggest order → preview → Apply / Cancel → Undo', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(setOrder()).toEqual(['c', 'a', 'd', 'b']);
     expect(screen.queryByRole('button', { name: 'Undo reorder' })).toBeNull();
+  });
+});
+
+describe('preview dialog accessibility', () => {
+  it('is a labelled modal dialog that takes focus and traps Tab inside', async () => {
+    await renderBuilder(shuffled);
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest order' }));
+    const dialog = screen.getByRole('dialog', { name: 'Suggested order' });
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(document.getElementById(dialog.getAttribute('aria-labelledby')!)?.textContent).toBe('Suggested order');
+    const apply = within(dialog).getByRole('button', { name: 'Apply' });
+    const first = within(dialog).getByRole('checkbox', { name: 'Keep first track' });
+    expect(document.activeElement).toBe(apply);
+    fireEvent.keyDown(apply, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(apply);
+    // focus that somehow escaped the dialog is pulled back in
+    screen.getByRole('button', { name: 'Suggest order' }).focus();
+    fireEvent.keyDown(dialog, { key: 'Tab' });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  it('Escape cancels and focus returns to "Suggest order"', async () => {
+    await renderBuilder(shuffled);
+    // no opener.focus(): Safari doesn't focus a clicked button, focus must still come back to it
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest order' }));
+    fireEvent.keyDown(within(screen.getByRole('dialog')).getByRole('button', { name: 'Apply' }), { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(setOrder()).toEqual(['c', 'a', 'd', 'b']);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Suggest order' }));
+  });
+
+  it('focus returns to "Suggest order" after Apply and after Cancel', async () => {
+    await renderBuilder(shuffled);
+    for (const action of ['Cancel', 'Apply']) {
+      (document.activeElement as HTMLElement | null)?.blur();
+      fireEvent.click(screen.getByRole('button', { name: 'Suggest order' }));
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: action }));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(document.activeElement, action).toBe(screen.getByRole('button', { name: 'Suggest order' }));
+    }
   });
 });
 

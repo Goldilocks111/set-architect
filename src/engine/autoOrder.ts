@@ -20,10 +20,16 @@ export interface AutoOrderOptions {
   keepFirst?: boolean;
   /** Pin the current last track as the closer. */
   keepLast?: boolean;
-  /** Safety cutoff for the annealing loop; the iteration budget normally ends it well before. */
+  /** Wall-clock guard for the annealing loop (default AUTO_ORDER_MAX_MS); Infinity leaves it to the iteration budget. */
   maxMs?: number;
   playFraction?: number;
 }
+
+/**
+ * Default wall-clock guard. The iteration budget decides the result: about 50-150 ms for 15-30 tracks, so the guard
+ * only trips on a badly overloaded machine (when it does, the answer is the best found so far and may vary by run).
+ */
+export const AUTO_ORDER_MAX_MS = 1000;
 
 const VIOLATION = 1000;
 const LAMBDA = 0.3;
@@ -76,14 +82,14 @@ export function orderCost(tracks: Track[], arc: Arc, playFraction = DEFAULT_PLAY
  * without turning it round: boosts and energy steps are directional). Up to 7 movable tracks every order is tried.
  * The result is always a permutation of the input ids. Incomplete tracks (isComplete false) are not reordered: they
  * keep their relative order at the end, before a pinned closer. `feasible` is false when the returned order still has
- * a violation: the exact minimum up to 7 movable tracks, the fewest found beyond. Deterministic per seed unless the
- * maxMs safety cutoff ends the search first.
+ * a violation: the exact minimum up to 7 movable tracks, the fewest found beyond. Deterministic per seed: the
+ * iteration budget ends the search, unless the maxMs wall-clock guard trips first (tests pass maxMs: Infinity).
  */
 export function autoOrder(tracks: Track[], arc: Arc, opts: AutoOrderOptions = {}): AutoOrderResult {
   const n = tracks.length;
   const pf = opts.playFraction ?? DEFAULT_PLAY_FRACTION;
   const rnd = mulberry32(opts.seed ?? 1);
-  const maxMs = opts.maxMs ?? 200;
+  const maxMs = opts.maxMs ?? AUTO_ORDER_MAX_MS;
   const started = Date.now();
 
   const head = opts.keepFirst && n > 0 ? [0] : [];

@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import Builder from '@/components/Builder';
 import SetList from '@/components/SetList';
@@ -56,7 +56,9 @@ describe('header "N rough transitions" button', () => {
   it('scrolls to and focuses the first flagged transition', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ suggestions: [] })));
     const scroll = vi.fn();
+    const original = Element.prototype.scrollIntoView;
     Element.prototype.scrollIntoView = scroll;
+    onTestFinished(() => { Element.prototype.scrollIntoView = original; });
     const d = 0.6;
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       arc: { minutes: 60, shape: 'build' },

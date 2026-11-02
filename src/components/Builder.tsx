@@ -51,6 +51,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
   const [crate, setCrate] = useState<CrateTrack[]>([]);
   const [crateOpen, setCrateOpen] = useState(false);
   const [ordering, setOrdering] = useState(false);
+  const suggestRef = useRef<HTMLButtonElement>(null);
   const { tracks, arc, playFraction } = state;
   const plannedCount = plannedTrackCount(arc, playFraction);
   const inSet = useMemo(() => new Set(tracks.flatMap(recordingKeys)), [tracks]);
@@ -313,6 +314,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
           )}
           {tracks.length >= 3 && (
             <button
+              ref={suggestRef}
               type="button"
               onClick={() => setOrdering(true)}
               className="rounded-md border border-[#2A2F3F] px-2 py-0.5 text-[12px] text-[#E8E4DA] hover:border-[#8A8FA3] focus-visible:outline-2 focus-visible:outline-[#F2B33D]"
@@ -323,7 +325,10 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
           {state.orderUndo && (
             <button
               type="button"
-              onClick={() => dispatch({ type: 'undoOrder' })}
+              onClick={() => {
+                dispatch({ type: 'undoOrder' });
+                suggestRef.current?.focus(); // this button unmounts: hand focus to "Suggest order"
+              }}
               className="rounded-md px-2 py-0.5 text-[12px] text-[#8A8FA3] underline underline-offset-2 hover:text-[#E8E4DA] focus-visible:outline-2 focus-visible:outline-[#F2B33D]"
             >
               Undo reorder
@@ -401,6 +406,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
             setOrdering(false);
           }}
           onCancel={() => setOrdering(false)}
+          returnFocus={suggestRef}
         />
       )}
 
