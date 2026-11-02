@@ -62,8 +62,24 @@ describe('features', () => {
     });
     const random = extractFeatures(clicks(rnd, 20, 0.8), SR);
     // fitted on club tracks only (all 0.5-1.0 on the reference scale), so the spread is small but the order holds
-    expect(danceabilityFrom(steady, 124)).toBeGreaterThan(danceabilityFrom(random) + 0.05);
-    expect(danceabilityFrom(steady, 124)).toBeGreaterThan(0.6);
-    expect(danceabilityFrom(random)).toBeGreaterThanOrEqual(0);
+    expect(steady.pulseClarity).toBeGreaterThan(random.pulseClarity + 0.2);
+    expect(danceabilityFrom(steady)).toBeGreaterThan(danceabilityFrom(random)); // pulse-clarity term alone
+    expect(danceabilityFrom(random)).toBeGreaterThanOrEqual(0.6); // the fitted scale sits near the club-track mean
+    expect(danceabilityFrom(random)).toBeLessThanOrEqual(0.72);
+  });
+
+  it('a club tempo (95-150 BPM) adds about 0.04, other tempos add nothing', () => {
+    const f = extractFeatures(clicks(grid(124, 20), 20, 0.8), SR);
+    const bonus = danceabilityFrom(f, 124) - danceabilityFrom(f);
+    expect(bonus).toBeGreaterThanOrEqual(0.03);
+    expect(bonus).toBeLessThanOrEqual(0.06);
+    expect(danceabilityFrom(f, 180)).toBe(danceabilityFrom(f));
+    expect(danceabilityFrom(f, 80)).toBe(danceabilityFrom(f));
+  });
+
+  it('danceability is clamped to 0..1', () => {
+    const f = extractFeatures(clicks(grid(124, 20), 20, 0.8), SR);
+    expect(danceabilityFrom({ ...f, pulseClarity: 100 }, 124)).toBe(1);
+    expect(danceabilityFrom({ ...f, pulseClarity: -100 })).toBe(0);
   });
 });

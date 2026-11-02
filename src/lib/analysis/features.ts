@@ -15,9 +15,9 @@ const HIGH_HZ = 5000;
 const HIGH_RATIO_CAP = 0.15;
 
 // Least-squares fits against ReccoBeats energy (1-10) / danceability on the U2 bench (n=48 club tracks, 2026-11-02;
-// bench/data/tune/fit.ts). Held-out (leave-one-out) MAE: energy 0.96, danceability 0.085. The reference
-// danceability barely varies across club tracks (0.5-1.0) and pulse clarity hardly predicts it, so the fit sits close
-// to its mean: treat danceability as a weak signal.
+// bench/data/tune/fit.ts). MAE with the feature set chosen inside each leave-one-out fold: energy 1.02 (about the old
+// placeholder; the 1.0 target is not demonstrated), danceability 0.083. The reference danceability barely varies across
+// club tracks (0.5-1.0) and pulse clarity hardly predicts it, so the fit sits close to its mean: treat it as a weak signal.
 export const ENERGY_COEFFS = { intercept: 8.69, rmsDb: 0.1178, highRatio: 26.16 };
 export const DANCE_COEFFS = { intercept: 0.6372, pulseClarity: 0.05891, clubTempo: 0.04426 };
 

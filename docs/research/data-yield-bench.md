@@ -29,24 +29,30 @@ Date: 2026-11-02. Bench: `bench/data/run.ts` (result JSON gitignored). Tuning: `
 | Key exact+relative | ≥ 60% | 32% (12/38) | **56%** (22/39), nested leave-one-out over 384 configs |
 | Key miss | ≤ 20% | 42% | **28%** (11/39); fifth 6, no key 9 |
 | Key yield (all analysed) | ≥ 80% | 81% | 85% |
-| Energy MAE (1–10) | ≤ 1.0 | 1.00 | **0.96** leave-one-out |
-| Danceability MAE | ≤ 0.12 | 0.148 | **0.085** leave-one-out |
+| Energy MAE (1–10) | ≤ 1.0 | 1.00 | **1.02**, nested leave-one-out: **target not demonstrated** |
+| Danceability MAE | ≤ 0.12 | 0.148 | **0.083**, nested leave-one-out (met) |
 
 - **Key changes shipped:** pitch bins averaged rather than summed, whitening against a ±6-semitone mean, and the Temperley profile.
-  Each one alone is worth 7–20 points. Levers tried and dropped: FIR anti-aliasing (no change), HPSS, log magnitude, tuning-offset
+  They only work together. Alone, from the old analyser, mean averaging gives +6 points, Temperley +4, and whitening −4.
+  Removing one from the shipped combination costs 7 (whitening), 12 (mean averaging) or 20 (Temperley) points. Levers tried and dropped: FIR anti-aliasing (no change), HPSS, log magnitude, tuning-offset
   correction, tonalness weighting, frequency ranges, minor bias. A verification pass running the shipped code end to end
   reproduced the held-out key result exactly.
 - **The key target is not met.** The reference is noisy too: it says major for 28 of the 48 club tracks, and most remaining
   misses are harmonic neighbours (5 fifth+mode, 3 two-fifths).
-- Energy = loudness + share of power above 5 kHz. Danceability barely varies on club tracks: predicting the mean (0.083) does as
-  well as the fit, so treat it as a weak signal.
+- **Energy** = loudness + share of power above 5 kHz. The single-level leave-one-out MAE of that model is 0.96, but the feature set
+  was chosen among 13 candidates on that same leave-one-out, so 0.96 is optimistic. With the set chosen inside each fold, the MAE
+  is **1.02**. That is about the old placeholder (1.00) and better than predicting the mean (1.15), but it does not show the ≤ 1.0
+  target. Even this nested number is mildly optimistic: the highRatio candidates were added after looking at correlations.
+- **Danceability** barely varies on club tracks. Nested selection picks the constant model in 38 of 48 folds (MAE 0.083), and the
+  shipped fit scores 0.085, so treat danceability as a weak signal.
 
 ## 4. Decision
 - **Local analysis is the default for every missing field** (bpm, key, energy, danceability). It is free, adds about 0.6 s, and
   takes recent releases from 2% to 78% complete.
 - **SoundStat fallback: recommended for key only**, because local key accuracy stays under target (56% / 28% against 60% / 20%).
   Use it only when no provider key exists, and only after the owner approves the cost. It keys off spotifyId, which recent tracks
-  have. Do not add it for bpm, energy or danceability: those targets are met locally. Until then, label local keys "estimated".
+  have. Do not add it for bpm or danceability, whose targets are met locally. Energy is not demonstrated (1.02), but it is no worse
+  than before. If energy precision matters, test SoundStat energy in the same trial as key. Until then, label local keys "estimated".
 
 ## 5. Deezer API terms: server-side analysis of previews
 Source: Deezer, "Terms of use of Deezer for Developers" (developers.deezer.com/termsofuse, read 2026-11-02; the page gives no

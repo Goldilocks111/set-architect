@@ -108,6 +108,25 @@ function main(): void {
       const fmt = Object.entries(c).map(([k, v]) => `${k} ${Number(v.toPrecision(4))}`).join(', ');
       console.log(`  ${names.join('+').padEnd(70)} LOO MAE ${loo(X, y, names, out).toFixed(3)}   full-fit {${fmt}}`);
     }
+
+    // nested: the feature set (constant model included) is chosen by inner LOO on the other rows of each outer fold
+    const candidates = [[], ...sets.filter((names) => X.every((x) => names.every((k) => Number.isFinite(x[k]))))];
+    let err = 0;
+    const picks = new Map<string, number>();
+    for (let i = 0; i < X.length; i++) {
+      const Xi = X.filter((_, j) => j !== i);
+      const yi = y.filter((_, j) => j !== i);
+      let best = candidates[0];
+      let bestMae = Infinity;
+      for (const names of candidates) {
+        const m = loo(Xi, yi, names, out);
+        if (m < bestMae) [best, bestMae] = [names, m];
+      }
+      const label = best.join('+') || 'constant';
+      picks.set(label, (picks.get(label) ?? 0) + 1);
+      err += Math.abs(out(predict(fitLinear(Xi, yi, best), X[i])) - y[i]);
+    }
+    console.log(`  NESTED LOO MAE (set chosen inside each fold): ${(err / X.length).toFixed(3)}   picks ${JSON.stringify(Object.fromEntries(picks))}`);
   }
 }
 
