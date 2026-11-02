@@ -41,7 +41,8 @@ const realDeps = (q: Queue): Deps => ({
     q.deps.resolve ??
     (async (artist, title, opts) => {
       const { resolveWithStatus } = await import('./resolver');
-      return resolveWithStatus(artist, title, { force: true, ...(opts?.without?.length ? { without: opts.without } : {}) });
+      // the exclusion is intentional (crate fill): it must survive every hop of the retry chain
+      return resolveWithStatus(artist, title, { force: true, ...(opts?.without?.length ? { without: opts.without, retryWithout: opts.without } : {}) });
     }),
 });
 

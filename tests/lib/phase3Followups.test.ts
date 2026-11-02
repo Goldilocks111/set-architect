@@ -125,6 +125,8 @@ describe('self-starvation: candidate resolves leave half the budget to the user'
   });
 });
 
+const drainRunning = () => (globalThis as unknown as Record<symbol, { running: boolean }>)[Symbol.for('setarchitect.reresolve')].running;
+
 describe('iTunes leaks in the background fill', () => {
   const complete = { id: 'x', artist: 'A', title: 'T', bpm: 124, camelot: '8A', energy: 6, danceability: 0.7, sources: {} } as Track;
   it('a cache-hit preview refresh honours `without`', async () => {
@@ -177,6 +179,26 @@ describe('iTunes leaks in the background fill', () => {
     const byTitle = Object.fromEntries(resolve.mock.calls.map((c) => [c[1], c[2]]));
     expect(byTitle.One).toBeUndefined();
     expect(byTitle.Two).toEqual({ without: ['itunes'] });
+  });
+  it('real drain path: a crate-fill retry chain never touches iTunes on any hop', { timeout: 30_000 }, async () => {
+    const timers: Array<() => void> = [];
+    setReresolveDeps({ setTimer: (fn) => void timers.push(fn) }); // real resolver, fake clock
+    const fetchFn = mockFetch([
+      ['api.deezer.com', () => { throw new Error('offline'); }],
+      ['itunes.apple.com', () => json({ results: [] })],
+      ['musicbrainz.org', () => json({ recordings: [] })],
+    ]);
+    const first = await resolveWithStatus('Ch', 'Ain', { without: ['itunes'], retryWithout: ['itunes'] });
+    expect(first.unresolved?.retryAt).toBeTypeOf('number');
+    for (let hop = 1; hop <= 3; hop++) {
+      const before = fetchFn.mock.calls.length;
+      timers.shift()!();
+      await vi.waitFor(() => expect(timers.length).toBe(1), { timeout: 8000 }); // the hop ran and scheduled the next retry
+      expect(fetchFn.mock.calls.length).toBeGreaterThan(before);
+      // the next timer is armed from inside the hop's resolve, i.e. while the drain is still running: wait it out
+      await vi.waitFor(() => expect(drainRunning()).toBe(false), { timeout: 8000 });
+    }
+    expect(hosts(fetchFn)).not.toContain('itunes.apple.com');
   });
   it('resolveWithStatus passes its `retryWithout` into the retry', async () => {
     const timers: Array<() => void> = [];
