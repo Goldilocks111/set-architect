@@ -3,7 +3,7 @@ import { dataDir } from '@/lib/dataDir';
 import { HttpError } from '@/lib/http';
 import type { SearchResult } from './types';
 
-type Name = SearchResult['provider'];
+type Name = SearchResult['provider'] | 'lastfm';
 
 /** Cooldown when a provider throttles without saying for how long. */
 export const THROTTLE_COOLDOWN_MS = 5 * 60_000;
@@ -108,7 +108,7 @@ export function resetBreakers(): void {
  * (`app`), so the benchmark, which paces itself, measures search unthrottled.
  */
 export const PER_MINUTE_BUDGET: Partial<Record<Name, number>> = { itunes: 20 };
-export const APP_PER_MINUTE_BUDGET: Partial<Record<Name, number>> = { spotify: 30 };
+export const APP_PER_MINUTE_BUDGET: Partial<Record<Name, number>> = { spotify: 30, lastfm: 120 };
 const recentCalls = new Map<string, number[]>();
 
 function take(key: string, limit: number, now: number): boolean {

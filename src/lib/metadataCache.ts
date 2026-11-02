@@ -11,6 +11,8 @@ export interface CacheEntry {
   attempts: number;
   reason?: IncompleteReason;
   retryAt?: number;
+  /** When Last.fm last answered with no genre tags for this track: not asked again for STYLES_RECHECK_MS. */
+  stylesCheckedAt?: number;
 }
 
 const file = () => dataDir('index', 'metadata.json');
@@ -129,6 +131,28 @@ export function putPrior(key: string): CacheEntry | undefined {
   const e = cache[key];
   if (!e || !fillPrior(e)) return e;
   settle(e);
+  write(cache);
+  return e;
+}
+
+export const STYLES_RECHECK_MS = 7 * 24 * 3600_000;
+
+/** True when styles are known, or Last.fm found none recently: no need to ask. */
+export function stylesSettled(e: CacheEntry, now = Date.now()): boolean {
+  if (e.sources.styles === 'manual' || e.fields.styles?.length) return true;
+  return e.stylesCheckedAt !== undefined && now - e.stylesCheckedAt < STYLES_RECHECK_MS;
+}
+
+/** Stores the lanes found for a track (none → the "no styles" marker). Needs an existing entry. */
+export function putStyles(key: string, styles: string[], now = Date.now()): CacheEntry | undefined {
+  const cache = read();
+  const e = cache[key];
+  if (!e || e.sources.styles === 'manual') return e;
+  if (styles.length) {
+    e.fields.styles = styles;
+    e.sources.styles = 'lastfm-tags';
+    delete e.stylesCheckedAt;
+  } else e.stylesCheckedAt = now;
   write(cache);
   return e;
 }

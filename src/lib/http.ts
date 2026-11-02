@@ -4,6 +4,8 @@ export interface FetchOptions {
   headers?: Record<string, string>;
   method?: string;
   body?: string;
+  /** Caller abort: no request is sent when already aborted, an in-flight one is cancelled, and nothing is retried. */
+  signal?: AbortSignal;
 }
 
 export class HttpError extends Error {
@@ -24,10 +26,13 @@ export const DEFAULT_TIMEOUT_MS = 4000;
 
 /** fetch with an abort timeout; retries once on network errors and 5xx (never on timeouts or 4xx). */
 export async function fetchWithTimeout(url: string, opts: FetchOptions = {}): Promise<Response> {
-  const { timeoutMs = DEFAULT_TIMEOUT_MS, retries = 1, headers, method, body } = opts;
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, retries = 1, headers, method, body, signal } = opts;
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
+    if (signal?.aborted) throw new Error(`Aborted before request to ${url}`);
     const ctrl = new AbortController();
+    const onAbort = () => ctrl.abort();
+    signal?.addEventListener('abort', onAbort, { once: true });
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
@@ -43,10 +48,12 @@ export async function fetchWithTimeout(url: string, opts: FetchOptions = {}): Pr
       return res;
     } catch (err) {
       if (timedOut) throw new Error(`Timeout after ${timeoutMs}ms for ${url}`);
+      if (signal?.aborted) throw new Error(`Aborted request to ${url}`);
       if (err instanceof HttpError && err.status < 500) throw err;
       lastErr = err;
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));

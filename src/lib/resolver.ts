@@ -1,6 +1,6 @@
 import { trackKeyOf, type Track } from '@/types/track';
 import { ESSENTIALS, RETRYABLE_REASONS, missingEssentials, type IncompleteReason } from './completeness';
-import { getEntry, putPrior, putResolved, type CacheEntry } from './metadataCache';
+import { getEntry, putPrior, putResolved, putStyles, stylesSettled, type CacheEntry } from './metadataCache';
 import { scheduleRetry } from './reresolve';
 import { searchDemoTracks } from './demo';
 import { withTimeout } from './http';
@@ -9,6 +9,8 @@ import { acousticbrainzAdapter } from './sources/acousticbrainz';
 import { deezerAdapter } from './sources/deezer';
 import { getSongBpmAdapter } from './sources/getsongbpm';
 import { itunesAdapter } from './sources/itunes';
+import { LastfmSkippedError, lastfmTagsDisabled, lastfmTopTags } from './sources/lastfmTags';
+import { lanesFromTags } from './style/taxonomy';
 import { lastfmConfigured, lastfmSimilar, type SimilarItem } from './sources/lastfm';
 import { listenbrainzSimilar } from './sources/listenbrainz';
 import { musicbrainzAdapter } from './sources/musicbrainz';
@@ -25,6 +27,7 @@ import type { MergedHit } from './search/types';
 export const ADAPTER_TIMEOUT_MS = 4000;
 
 const GUARDED = new Set<string>(['spotify', 'deezer', 'itunes', 'musicbrainz']);
+const STYLES_PROVIDER = 'lastfm';
 const isGuarded = (name: string): name is MergedHit['providers'][number] => GUARDED.has(name);
 
 // youtube is appended last: keyless it only builds a search URL, so it costs nothing.
@@ -179,6 +182,90 @@ export async function resolveWithStatus(
   artist: string,
   title: string,
   opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string }; signal?: AbortSignal } = {}
+): Promise<Track> {
+  const track = await resolveCore(artist, title, opts);
+  if (!track.unresolved && !opts.signal?.aborted) {
+    try {
+      queueStyles(track);
+    } catch {
+      // styles are best-effort: never fail an essentials response
+    }
+  }
+  return track;
+}
+
+interface StylesJob {
+  track: Track;
+  done: Promise<void>;
+  finish: () => void;
+}
+const STYLES_CONCURRENCY = 2;
+export const STYLES_QUEUE_CAP = 200;
+const stylesJobs = new Map<string, StylesJob>(); // queued or running, by track key: the dedupe set
+const stylesQueue: string[] = []; // keys waiting for a worker, oldest first
+let stylesRunning = 0;
+
+/** Resolves when every queued styles lookup has settled (tests, shutdown). */
+export async function settleStyles(): Promise<void> {
+  while (stylesJobs.size) await Promise.allSettled([...stylesJobs.values()].map((j) => j.done));
+}
+
+/**
+ * Style lanes from Last.fm tags, after the essentials and off the response path. Lookups wait in a bounded queue
+ * (2 at a time, 200 waiting; the oldest waiting one is dropped and simply re-queued by its next resolve, since no
+ * marker was written), pace themselves, and land in the metadata cache for the next request. Never an essential:
+ * a cached entry (styles, or a recent "no genre tags" marker) costs nothing, and a missing key, open breaker,
+ * spent budget or failure just skips the step. Only real HTTP failures count against the breaker.
+ */
+export function queueStyles(track: Track): void {
+  const key = trackKeyOf(track.artist, track.title);
+  if (stylesJobs.has(key) || !lastfmConfigured() || lastfmTagsDisabled()) return;
+  const entry = getEntry(key);
+  if (!entry || stylesSettled(entry) || cooldownUntil(STYLES_PROVIDER)) return;
+  let finish!: () => void;
+  const done = new Promise<void>((r) => (finish = r));
+  stylesJobs.set(key, { track, done, finish });
+  stylesQueue.push(key);
+  while (stylesQueue.length > STYLES_QUEUE_CAP) {
+    const dropped = stylesQueue.shift()!;
+    stylesJobs.get(dropped)?.finish();
+    stylesJobs.delete(dropped);
+  }
+  pumpStyles();
+}
+
+function pumpStyles(): void {
+  while (stylesRunning < STYLES_CONCURRENCY && stylesQueue.length) {
+    const key = stylesQueue.shift()!;
+    const job = stylesJobs.get(key);
+    if (!job) continue;
+    stylesRunning++;
+    runStyles(key, job.track).finally(() => {
+      stylesRunning--;
+      stylesJobs.delete(key);
+      job.finish();
+      pumpStyles();
+    });
+  }
+}
+
+async function runStyles(key: string, track: Track): Promise<void> {
+  if (cooldownUntil(STYLES_PROVIDER)) return;
+  const take = () => !cooldownUntil(STYLES_PROVIDER) && takeBudget(STYLES_PROVIDER, { app: true });
+  try {
+    // no outer timeout: each HTTP call carries its own, started when it is sent (not while waiting for a pacing slot)
+    const tags = await lastfmTopTags(track.artist, track.title, { take });
+    recordSuccess(STYLES_PROVIDER);
+    putStyles(key, lanesFromTags(tags));
+  } catch (err) {
+    if (!(err instanceof LastfmSkippedError)) recordFailure(STYLES_PROVIDER, err);
+  }
+}
+
+async function resolveCore(
+  artist: string,
+  title: string,
+  opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string }; signal?: AbortSignal }
 ): Promise<Track> {
   const key = trackKeyOf(artist, title);
   const budgetMs = opts.budgetMs ?? RESOLVE_BUDGET_MS;
