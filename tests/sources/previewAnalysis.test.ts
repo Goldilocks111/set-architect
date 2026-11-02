@@ -56,7 +56,8 @@ describe('analyseFull / analysePcm', () => {
     expect(await analyseFull(new Uint8Array([1, 2, 3, 4]))).toBeUndefined();
   });
 
-  it('returns v3 with energy and danceability for a click track', () => {
+  // CPU-bound (20 s of PCM through the full feature pipeline): slow under parallel load, so its timeout is explicit
+  it('returns v3 with energy and danceability for a click track', { timeout: 30_000 }, () => {
     const a = analysePcm(clickTrack(124, 20), 22050);
     expect(a?.v).toBe(3);
     expect(a?.energy).toBeGreaterThanOrEqual(1);
