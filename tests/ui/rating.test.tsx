@@ -64,6 +64,7 @@ describe('RatingSession', () => {
     render(<RatingSession />);
     await screen.findByLabelText('Rating file');
     await upload(mkFile(1));
+    await screen.findByText('Scenario 0'); // the file is read asynchronously
     expect(document.querySelector('audio')).toBeNull();
     const a = screen.getByRole('region', { name: 'List A' });
     fireEvent.click(within(a).getAllByRole('button', { name: /Find a preview/ })[3]);
@@ -77,6 +78,7 @@ describe('RatingSession', () => {
     render(<RatingSession />);
     await screen.findByLabelText('Rating file');
     await upload(mkFile(1));
+    await screen.findByText('Scenario 0');
     fireEvent.click(screen.getAllByRole('button', { name: /Find a preview/ })[0]);
     expect(await screen.findByText('No preview found')).toBeInTheDocument();
     expect(document.querySelector('audio')).toBeNull();
