@@ -51,7 +51,20 @@ async function pace(signal?: AbortSignal): Promise<void> {
     });
 }
 
-async function topTags(method: string, params: Record<string, string>, key: string, take?: () => boolean, signal?: AbortSignal): Promise<Tag[]> {
+/**
+ * One paced Last.fm API call, shared by every Last.fm lookup (tags, similar tracks). `take` is asked once before the
+ * request (false → LastfmSkippedError). Error bodies (HTTP 200): 6 "not found" → undefined, 29 → HttpError 429 (opens
+ * the breaker), key errors switch Last.fm off for the process.
+ */
+export async function lastfmGet<T>(
+  method: string,
+  params: Record<string, string>,
+  opts: { take?: () => boolean; signal?: AbortSignal } = {}
+): Promise<T | undefined> {
+  const key = process.env.LASTFM_API_KEY;
+  if (!key) return undefined;
+  if (disabled) throw new LastfmError(0, 'disabled after a key error');
+  const { take, signal } = opts;
   if (signal?.aborted) throw new LastfmSkippedError('aborted');
   if (take && !take()) throw new LastfmSkippedError('budget');
   await pace(signal);
@@ -59,21 +72,26 @@ async function topTags(method: string, params: Record<string, string>, key: stri
   const qs = Object.entries(params)
     .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
     .join('&');
-  const data = await fetchJson<{ toptags?: { tag?: Array<{ name: string; count: number | string }> }; error?: number; message?: string }>(
+  const data = await fetchJson<T & { error?: number; message?: string }>(
     `https://ws.audioscrobbler.com/2.0/?method=${method}&${qs}&api_key=${encodeURIComponent(key)}&format=json`,
     { timeoutMs: LASTFM_TIMEOUT_MS, retries: 0, signal }
   );
   if (data.error !== undefined) {
     const code = Number(data.error);
-    if (code === 6) return []; // unknown track/artist: a real answer, not a failure
+    if (code === 6) return undefined; // unknown track/artist: a real answer, not a failure
     if (code === 29) throw new HttpError(429, 'ws.audioscrobbler.com (rate limit exceeded)'); // opens the breaker
     if (KEY_ERRORS.has(code) && !disabled) {
       disabled = true;
-      console.warn(`Last.fm key error ${code}: ${data.message ?? ''}. Style tags are off until restart.`);
+      console.warn(`Last.fm key error ${code}: ${data.message ?? ''}. Last.fm lookups are off until restart.`);
     }
     throw new LastfmError(code, data.message ?? 'unknown');
   }
-  return (data.toptags?.tag ?? [])
+  return data;
+}
+
+async function topTags(method: string, params: Record<string, string>, take?: () => boolean, signal?: AbortSignal): Promise<Tag[]> {
+  const data = await lastfmGet<{ toptags?: { tag?: Array<{ name: string; count: number | string }> } }>(method, params, { take, signal });
+  return (data?.toptags?.tag ?? [])
     .map((t) => ({ name: t.name, count: Number(t.count) }))
     .filter((t) => t.name && Number.isFinite(t.count));
 }
@@ -88,8 +106,8 @@ export async function lastfmTopTags(artist: string, title: string, opts: { take?
   const key = process.env.LASTFM_API_KEY;
   if (!key) return [];
   if (disabled) throw new LastfmError(0, 'disabled after a key error');
-  const tags = await topTags('track.gettoptags', { artist, track: title }, key, opts.take, opts.signal);
+  const tags = await topTags('track.gettoptags', { artist, track: title }, opts.take, opts.signal);
   if (genreTags(tags) >= 2) return tags;
-  const artistTags = await topTags('artist.gettoptags', { artist }, key, opts.take, opts.signal);
+  const artistTags = await topTags('artist.gettoptags', { artist }, opts.take, opts.signal);
   return [...tags, ...artistTags.map((t) => ({ name: t.name, count: t.count / 2 }))];
 }

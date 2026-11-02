@@ -156,6 +156,10 @@ describe('suggestNext', () => {
       expect(res[0].reasons).toContainEqual(
         expect.objectContaining({ kind: 'energy', label: 'Set tracks still resolving — scored from arc start' })
       );
+      // no anchor to verify key/tempo against: compliance falls back to the opener rule (energy within 1 of target 4)
+      expect(res[0].compliant).toBe(true);
+      const off = suggestNext({ ...base, playlist: [t('i1', { bpm: 100 }), t('i2')], candidates: [t('o', { ...full, energy: 7 })] });
+      expect(off[0].compliant).toBe(false);
     });
 
     it('empty playlist keeps the plain arc-start wording', () => {

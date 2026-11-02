@@ -13,6 +13,7 @@ import { LastfmSkippedError, lastfmTagsDisabled, lastfmTopTags } from './sources
 import { lanesFromTags } from './style/taxonomy';
 import { lastfmConfigured, lastfmSimilar, type SimilarItem } from './sources/lastfm';
 import { listenbrainzSimilar } from './sources/listenbrainz';
+import { getSimilarCached, putSimilar, SIMILAR_FALLBACK_TTL_MS } from './similarCache';
 import { musicbrainzAdapter } from './sources/musicbrainz';
 import { reccobeatsAdapter } from './sources/reccobeats';
 import { soundstatAdapter } from './sources/soundstat';
@@ -27,7 +28,7 @@ import type { MergedHit } from './search/types';
 export const ADAPTER_TIMEOUT_MS = 4000;
 
 const GUARDED = new Set<string>(['spotify', 'deezer', 'itunes', 'musicbrainz']);
-const STYLES_PROVIDER = 'lastfm';
+const LASTFM = 'lastfm';
 const isGuarded = (name: string): name is MergedHit['providers'][number] => GUARDED.has(name);
 
 // youtube is appended last: keyless it only builds a search URL, so it costs nothing.
@@ -227,7 +228,7 @@ export function queueStyles(track: Track): void {
   const key = trackKeyOf(track.artist, track.title);
   if (stylesJobs.has(key) || !lastfmConfigured() || lastfmTagsDisabled()) return;
   const entry = getEntry(key);
-  if (!entry || stylesSettled(entry) || cooldownUntil(STYLES_PROVIDER)) return;
+  if (!entry || stylesSettled(entry) || cooldownUntil(LASTFM)) return;
   let finish!: () => void;
   const done = new Promise<void>((r) => (finish = r));
   stylesJobs.set(key, { track, done, finish });
@@ -256,15 +257,15 @@ function pumpStyles(): void {
 }
 
 async function runStyles(key: string, track: Track): Promise<void> {
-  if (cooldownUntil(STYLES_PROVIDER)) return;
-  const take = () => !cooldownUntil(STYLES_PROVIDER) && takeBudget(STYLES_PROVIDER, { app: true });
+  if (cooldownUntil(LASTFM)) return;
+  const take = () => !cooldownUntil(LASTFM) && takeBudget(LASTFM, { app: true });
   try {
     // no outer timeout: each HTTP call carries its own, started when it is sent (not while waiting for a pacing slot)
     const tags = await lastfmTopTags(track.artist, track.title, { take });
-    recordSuccess(STYLES_PROVIDER);
+    recordSuccess(LASTFM);
     putStyles(key, lanesFromTags(tags));
   } catch (err) {
-    if (!(err instanceof LastfmSkippedError)) recordFailure(STYLES_PROVIDER, err);
+    if (!(err instanceof LastfmSkippedError)) recordFailure(LASTFM, err);
   }
 }
 
@@ -393,17 +394,36 @@ export async function searchTracks(query: string): Promise<Track[]> {
   });
 }
 
+/**
+ * Similar tracks, cached 24 h per trackKey (empty answers too). Last.fm goes through the shared 'lastfm' breaker,
+ * app budget and pacing; while it is cooling down, out of budget or failing, ListenBrainz answers instead and that
+ * fallback is cached only briefly.
+ */
 export async function getSimilarTracks(artist: string, title: string): Promise<SimilarItem[]> {
-  if (lastfmConfigured()) {
+  const key = trackKeyOf(artist, title);
+  const hit = getSimilarCached(key);
+  if (hit) return hit;
+  // Last.fm unconfigured (or switched off by a key error): ListenBrainz is the real answer, not a fallback.
+  let authoritative = !lastfmConfigured() || lastfmTagsDisabled();
+  if (!authoritative && !cooldownUntil(LASTFM)) {
+    const take = () => !cooldownUntil(LASTFM) && takeBudget(LASTFM, { app: true });
     try {
-      const res = await withTimeout(lastfmSimilar(artist, title), ADAPTER_TIMEOUT_MS, 'lastfm');
-      if (res.length) return res;
-    } catch {
-      // fall through to ListenBrainz
+      // no outer timeout: the HTTP call carries its own, started when it is sent (not while waiting for a pacing slot)
+      const res = await lastfmSimilar(artist, title, { take });
+      recordSuccess(LASTFM);
+      authoritative = true;
+      if (res.length) {
+        putSimilar(key, res);
+        return res;
+      }
+    } catch (err) {
+      if (!(err instanceof LastfmSkippedError)) recordFailure(LASTFM, err);
     }
   }
   try {
-    return await withTimeout(listenbrainzSimilar(artist, title), ADAPTER_TIMEOUT_MS, 'listenbrainz');
+    const res = await withTimeout(listenbrainzSimilar(artist, title), ADAPTER_TIMEOUT_MS, 'listenbrainz');
+    putSimilar(key, res, authoritative ? {} : { ttlMs: SIMILAR_FALLBACK_TTL_MS });
+    return res;
   } catch {
     return [];
   }

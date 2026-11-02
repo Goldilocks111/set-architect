@@ -1,10 +1,27 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+// @vitest-environment node
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { lastfmSimilar } from '@/lib/sources/lastfm';
 import { listenbrainzSimilar } from '@/lib/sources/listenbrainz';
+import { configureLastfmPacing, resetLastfmTags } from '@/lib/sources/lastfmTags';
 import { getSimilarTracks } from '@/lib/resolver';
+import { cooldownUntil, resetBreakers, resetBudgets, takeBudget, APP_PER_MINUTE_BUDGET } from '@/lib/search/breaker';
+import { getSimilarCached, putSimilar, SIMILAR_FALLBACK_TTL_MS, SIMILAR_TTL_MS } from '@/lib/similarCache';
+import { trackKeyOf } from '@/types/track';
 import { json, mockFetch } from './helpers';
 
+beforeEach(() => {
+  // the similar cache and the breaker persist under the data dir: never the owner's ~/.setarchitect
+  vi.stubEnv('SETARCHITECT_DATA_DIR', fs.mkdtempSync(path.join(os.tmpdir(), 'similar-')));
+  resetBreakers();
+  resetBudgets();
+  resetLastfmTags();
+  configureLastfmPacing(0);
+});
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
@@ -35,6 +52,11 @@ describe('lastfm', () => {
     vi.stubEnv('LASTFM_API_KEY', 'k');
     mockFetch([['audioscrobbler', () => json({}, 403)]]);
     await expect(lastfmSimilar('a', 'b')).rejects.toThrow();
+  });
+  it('not-found body (error 6) is an empty answer', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    mockFetch([['audioscrobbler', () => json({ error: 6, message: 'Track not found' })]]);
+    expect(await lastfmSimilar('a', 'b')).toEqual([]);
   });
 });
 
@@ -74,5 +96,86 @@ describe('getSimilarTracks', () => {
     vi.stubEnv('LASTFM_API_KEY', '');
     mockFetch([]);
     expect(await getSimilarTracks('a', 'b')).toEqual([]);
+  });
+
+  it('a cache hit makes no call', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    const f = mockFetch([['audioscrobbler', lfm], ...lb]);
+    await getSimilarTracks('Daft Punk', 'One More Time');
+    expect(f).toHaveBeenCalledTimes(1);
+    // same trackKey, other spelling
+    expect((await getSimilarTracks('daft punk', 'One More Time (Original Mix)'))[0].title).toBe('Around the World');
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+  it('empty answers are cached too', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    const f = mockFetch([
+      ['audioscrobbler', () => json({ similartracks: { track: [] } })],
+      ['musicbrainz.org', () => json({ recordings: [] })],
+    ]);
+    expect(await getSimilarTracks('a', 'b')).toEqual([]);
+    const calls = f.mock.calls.length;
+    expect(await getSimilarTracks('a', 'b')).toEqual([]);
+    expect(f).toHaveBeenCalledTimes(calls);
+    expect(getSimilarCached(trackKeyOf('a', 'b'))).toEqual([]);
+  });
+  it('while Last.fm cools down it is not called; ListenBrainz answers and is cached only briefly', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    mockFetch([['audioscrobbler', () => json({ error: 29, message: 'Rate limit exceeded' })], ...lb]);
+    await getSimilarTracks('x', 'y'); // code 29 opens the breaker
+    expect(cooldownUntil('lastfm')).toBeGreaterThan(Date.now());
+    const f = mockFetch([['audioscrobbler', lfm], ...lb]);
+    expect((await getSimilarTracks('a', 'b'))[0].title).toBe('A');
+    expect(f.mock.calls.some((c) => String(c[0]).includes('audioscrobbler'))).toBe(false);
+    const now = Date.now();
+    expect(getSimilarCached(trackKeyOf('a', 'b'), now + SIMILAR_FALLBACK_TTL_MS - 1000)).toBeDefined();
+    expect(getSimilarCached(trackKeyOf('a', 'b'), now + SIMILAR_FALLBACK_TTL_MS + 1000)).toBeUndefined();
+  });
+  it('a code-29 body opens the lastfm breaker', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    mockFetch([['audioscrobbler', () => json({ error: 29, message: 'Rate limit exceeded' })], ...lb]);
+    expect(cooldownUntil('lastfm')).toBe(0);
+    expect((await getSimilarTracks('a', 'b'))[0].title).toBe('A');
+    expect(cooldownUntil('lastfm')).toBeGreaterThan(Date.now());
+  });
+  it('a spent lastfm app budget skips Last.fm without opening the breaker', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    for (let i = 0; i < APP_PER_MINUTE_BUDGET.lastfm!; i++) takeBudget('lastfm', { app: true });
+    const f = mockFetch([['audioscrobbler', lfm], ...lb]);
+    expect((await getSimilarTracks('a', 'b'))[0].title).toBe('A');
+    expect(f.mock.calls.some((c) => String(c[0]).includes('audioscrobbler'))).toBe(false);
+    expect(cooldownUntil('lastfm')).toBe(0);
+  });
+  it('each Last.fm call spends one app budget unit', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    mockFetch([['audioscrobbler', lfm], ...lb]);
+    await getSimilarTracks('a', 'b');
+    let left = 0;
+    while (takeBudget('lastfm', { app: true })) left++;
+    expect(left).toBe(APP_PER_MINUTE_BUDGET.lastfm! - 1);
+  });
+  it('3 parallel seed lookups share the process-wide Last.fm pacing', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    configureLastfmPacing(250);
+    vi.useFakeTimers();
+    const at: number[] = [];
+    mockFetch([['audioscrobbler', () => (at.push(Date.now()), lfm())]]);
+    const all = Promise.all([getSimilarTracks('a', '1'), getSimilarTracks('a', '2'), getSimilarTracks('a', '3')]);
+    await vi.advanceTimersByTimeAsync(1000);
+    await all;
+    expect(at).toHaveLength(3);
+    expect(at[1] - at[0]).toBeGreaterThanOrEqual(250);
+    expect(at[2] - at[1]).toBeGreaterThanOrEqual(250);
+  });
+});
+
+describe('similarCache', () => {
+  it('expires after 24 h and drops expired entries on write', () => {
+    putSimilar('k|1', [{ artist: 'A', title: 'B', match: 1 }], { now: 1000 });
+    expect(getSimilarCached('k|1', 1000 + SIMILAR_TTL_MS - 1)).toHaveLength(1);
+    expect(getSimilarCached('k|1', 1000 + SIMILAR_TTL_MS)).toBeUndefined();
+    putSimilar('k|2', [], { now: 1000 + SIMILAR_TTL_MS });
+    const raw = JSON.parse(fs.readFileSync(path.join(process.env.SETARCHITECT_DATA_DIR!, 'index', 'similar.json'), 'utf8'));
+    expect(Object.keys(raw)).toEqual(['k|2']);
   });
 });
