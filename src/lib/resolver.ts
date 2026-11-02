@@ -267,7 +267,7 @@ async function runStyles(key: string, track: Track): Promise<void> {
 async function resolveCore(
   artist: string,
   title: string,
-  opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string }; signal?: AbortSignal }
+  opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string }; signal?: AbortSignal; without?: string[] }
 ): Promise<Track> {
   const key = trackKeyOf(artist, title);
   const budgetMs = opts.budgetMs ?? RESOLVE_BUDGET_MS;
