@@ -14,6 +14,7 @@ interface PlaylistTrack {
   spotifyId: string;
   spotifyUrl?: string;
   popularity?: number;
+  durationMs?: number;
 }
 
 interface Props {
@@ -31,9 +32,11 @@ export const toTrack = (t: PlaylistTrack): Track => ({
   spotifyId: t.spotifyId,
   spotifyUrl: t.spotifyUrl,
   popularity: t.popularity,
+  durationMs: t.durationMs,
   sources: {
     spotifyId: 'spotify',
     ...(t.popularity !== undefined ? { popularity: 'spotify' } : {}),
+    ...(t.durationMs !== undefined ? { durationMs: 'spotify' } : {}),
   },
 });
 

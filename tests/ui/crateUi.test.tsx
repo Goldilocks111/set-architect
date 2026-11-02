@@ -72,7 +72,7 @@ describe('<SuggestionBox /> sends the crate', () => {
     vi.stubGlobal('fetch', fetchMock);
     const set = [t('s1', full)];
     const crate = [item(1), item(2, full), { ...item(3, full), artist: 'Artist s1', title: 'Title s1' }];
-    render(<SuggestionBox tracks={set} template="60min" plannedLength={15} onAdd={vi.fn()} crate={crate} />);
+    render(<SuggestionBox tracks={set} arc={{ minutes: 60, shape: 'build' }} onAdd={vi.fn()} crate={crate} />);
     await waitFor(() => expect(fetchMock).toHaveBeenCalled(), { timeout: 2000 });
     const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
     expect(body.crate.map((c: CrateTrack) => c.id)).toEqual(['c2', 'c1']);
@@ -82,19 +82,19 @@ describe('<SuggestionBox /> sends the crate', () => {
     const known = [{ key: 'ca 1|ct 1', bpm: 124, camelot: '8A', energy: 6, danceability: 0.7 }];
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ suggestions: [], crateKnown: known }))));
     const onCrateKnown = vi.fn();
-    render(<SuggestionBox tracks={[]} template="60min" plannedLength={15} onAdd={vi.fn()} crate={[item(1)]} onCrateKnown={onCrateKnown} />);
+    render(<SuggestionBox tracks={[]} arc={{ minutes: 60, shape: 'build' }} onAdd={vi.fn()} crate={[item(1)]} onCrateKnown={onCrateKnown} />);
     await waitFor(() => expect(onCrateKnown).toHaveBeenCalledWith(known), { timeout: 2000 });
   });
 
   it('shows how many imported tracks are ready while the crate fills in', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ suggestions: [] }))));
-    render(<SuggestionBox tracks={[]} template="60min" plannedLength={15} onAdd={vi.fn()} crate={[item(1, full), item(2), item(3)]} />);
+    render(<SuggestionBox tracks={[]} arc={{ minutes: 60, shape: 'build' }} onAdd={vi.fn()} crate={[item(1, full), item(2), item(3)]} />);
     expect(screen.getByText('Imported tracks get analysed a few at a time as you build \u2014 1 of 3 ready.')).toBeInTheDocument();
   });
 
   it('hints how to fill the crate while it is small', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ suggestions: [] }))));
-    render(<SuggestionBox tracks={[]} template="60min" plannedLength={15} onAdd={vi.fn()} crate={[]} />);
+    render(<SuggestionBox tracks={[]} arc={{ minutes: 60, shape: 'build' }} onAdd={vi.fn()} crate={[]} />);
     expect(screen.getByText(/Import a Spotify playlist or a Mixed In Key CSV to fill your crate/)).toBeInTheDocument();
     await act(async () => {});
   });
@@ -128,9 +128,10 @@ describe('<Builder /> crate', () => {
     stubApi();
     await act(async () => { render(<Builder demo getSongBpmConfigured={false} />); });
     expect(screen.getByRole('button', { name: 'Crate: 0 tracks' })).toBeInTheDocument();
-    const input = screen.getByRole('combobox');
+    const input = screen.getByPlaceholderText(/Search artist or title/); // the arc picker's selects are comboboxes too
     fireEvent.change(input, { target: { value: 'found' } });
-    await screen.findAllByRole('option', {}, { timeout: 2000 });
+    // scoped: the arc picker's selects hold <option>s too
+    await within(await screen.findByRole('listbox', { name: 'Search results' }, { timeout: 2000 })).findAllByRole('option');
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Crate: 1 track' })).toBeInTheDocument());
     expect(JSON.parse(localStorage.getItem(CRATE_KEY)!)[0]).toMatchObject({ id: 'found', from: 'set', ...full });

@@ -54,7 +54,7 @@ export function estimatedDurationMs(t: Pick<Track,'version'|'title'>): number; /
 export function durationOf(t: Track): { ms: number; estimated: boolean };
 export function formatMinutes(ms: number): string; // "m:ss" / "h:mm:ss"
 ```
-- [ ] Tests (mocked responses) per adapter; cache persistence; estimate rules; formatting. Commit.
+- [x] Tests (mocked responses) per adapter; cache persistence; estimate rules; formatting. Commit.
 
 ### Task 2: Minute-based arc
 **Files:** `src/types/track.ts` (Arc, ArcShape; remove ArcTemplate usages), `src/engine/energy.ts`, all callers (`suggest.ts`, `compliance.ts`, `assemble.ts`, route, `TransitionBadge.tsx`, `EnergyCurve.tsx`/`curveData.ts`, `playlistReducer.ts`, `persistence.ts`, `SavedSets`, bench scenarios + recs bench); replace `ArcTemplatePicker` with `ArcPicker` (length presets 30/60/90/120/180/240 + custom 15–480, shape select).
@@ -63,7 +63,7 @@ export function energyTargetAtMinute(arc: Arc, minute: number): number; // shape
 export function startMinutes(tracks: Track[], playFraction?: number): number[]; // cumulative played minutes at each track start (durationOf × fraction)
 export function plannedTrackCount(arc: Arc, playFraction?: number): number; // ≈ minutes / (5.0 × fraction), for "N of ~M tracks"
 ```
-- [ ] Failing tests: shapes scale to 30/60/240 min (peak minute fraction preserved); `'60min'`/`'120min'` migration in reducer load, localStorage, saved sets; engine/compliance use minute targets (existing rulebook tests updated only for the signature, values unchanged for 60/120 equivalents); play fraction setting (50–100%, default 75%) persisted. Commit.
+- [x] Failing tests: shapes scale to 30/60/240 min (peak minute fraction preserved); `'60min'`/`'120min'` migration in reducer load, localStorage, saved sets; engine/compliance use minute targets (existing rulebook tests updated only for the signature, values unchanged for 60/120 equivalents); play fraction setting (50–100%, default 75%) persisted. Commit.
 
 ## Wave 2 (after Wave 1; parallel)
 
@@ -73,7 +73,7 @@ export function plannedTrackCount(arc: Arc, playFraction?: number): number; // �
 export type PairIssue = { kind: 'key' | 'tempo' | 'energy'; label: string };
 export function pairViolations(tracks: Track[], arc: Arc): Array<{ index: number; issues: PairIssue[] }>; // index = position of the incoming track
 ```
-- [ ] Tests: the exact violation rules above (incl. Camelot wrap, half/double-time, +2 with/without boost, crash ≤ −4); unknown values never violate; incomplete tracks skipped (pair formed with the previous complete track? NO — pairs are literal neighbours; an incomplete neighbour yields "?" not a violation). UI: violating transitions get a warning style + text ("Key clash 8A→3B"); header summary "2 rough transitions" with a button that scrolls to the first. Commit.
+- [x] Tests: the exact violation rules above (incl. Camelot wrap, half/double-time, +2 with/without boost, crash ≤ −4); unknown values never violate; incomplete tracks skipped (pair formed with the previous complete track? NO — pairs are literal neighbours; an incomplete neighbour yields "?" not a violation). UI: violating transitions get a warning style + text ("Key clash 8A→3B"); header summary "2 rough transitions" with a button that scrolls to the first. Commit.
 
 ### Task 4: Auto-order (propose → preview → apply/undo)
 **Files:** create `src/engine/autoOrder.ts`, `src/components/AutoOrderPanel.tsx`; modify `playlistReducer.ts` (`applyOrder`, `undoOrder`), `Builder.tsx`.
@@ -82,10 +82,10 @@ export interface AutoOrderResult { order: string[]; violations: number; cost: nu
 export function autoOrder(tracks: Track[], arc: Arc, opts?: { seed?: number; keepFirst?: boolean; keepLast?: boolean; maxMs?: number }): AutoOrderResult;
 ```
 Cost = 1000 × violations + Σ (1 − pair score) + λ·Σ |E − target(minute)| (λ = 0.3). Greedy construction from the best opener, then simulated annealing with 2-swap and segment-reverse moves, seeded, ≤ 300 ms for 30 tracks. Incomplete tracks keep their relative position at the end (documented).
-- [ ] Failing tests: Review Focus 3 & 4; determinism by seed; keepFirst/keepLast; acceptance property: 10 scripted 15-track crates built from a known zero-violation chain then shuffled (seeded) → autoOrder finds 0 violations on all 10; runtime bound. UI: "Suggest order" → preview (diff: moved tracks highlighted, before/after violation counts) → Apply / Cancel; Undo after apply. Commit.
+- [x] Failing tests: Review Focus 3 & 4; determinism by seed; keepFirst/keepLast; acceptance property: 10 scripted 15-track crates built from a known zero-violation chain then shuffled (seeded) → autoOrder finds 0 violations on all 10; runtime bound. UI: "Suggest order" → preview (diff: moved tracks highlighted, before/after violation counts) → Apply / Cancel; Undo after apply. Commit.
 
 ## Wave 3
 
 ### Task 5: Timing UI
 **Files:** `SetRow.tsx` (start time "0:00 / 4:52…", duration, "~" when estimated), `Builder.tsx` header ("38:20 of 60:00 · 9 of ~16 tracks"), `EnergyCurve.tsx`/`curveData.ts` (x-axis in minutes; target curve by minute across the planned length; set energy as a step line at track start minutes; overrun shaded).
-- [ ] Tests: cumulative times with mixed real/estimated durations; header text; curve data points by minute; overrun beyond planned length. Browser check by controller. Commit.
+- [x] Tests: cumulative times with mixed real/estimated durations; header text; curve data points by minute; overrun beyond planned length. Browser check by controller. Commit.

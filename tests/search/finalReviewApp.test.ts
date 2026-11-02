@@ -150,7 +150,7 @@ describe('M2: sanitizeTrack keeps search fields', () => {
   it('keeps a valid version, duration and Spotify link and drops invalid ones', () => {
     const ok = sanitizeTrack({ id: 'x', artist: 'A', title: 'T', version: 'Extended Mix', durationMs: 401_000, spotifyUrl: 'https://open.spotify.com/track/abc' });
     expect(ok).toMatchObject({ version: 'Extended Mix', durationMs: 401_000, spotifyUrl: 'https://open.spotify.com/track/abc' });
-    const bad = sanitizeTrack({ id: 'x', artist: 'A', title: 'T', version: 'x'.repeat(101), durationMs: 4_000_000, spotifyUrl: 'https://evil.example/track' });
+    const bad = sanitizeTrack({ id: 'x', artist: 'A', title: 'T', version: 'x'.repeat(101), durationMs: 8_000_000, spotifyUrl: 'https://evil.example/track' });
     expect(bad).not.toHaveProperty('version');
     expect(bad).not.toHaveProperty('durationMs');
     expect(bad).not.toHaveProperty('spotifyUrl');
@@ -187,7 +187,7 @@ describe('M3: stable ids and recording-level "already in set"', () => {
     const a: Track = { id: 'search-a', artist: 'CamelPhat', title: 'Cola (Extended Mix)', version: 'Extended Mix', sources: {} };
     const sameIsrcX: Track = { id: 'isrc-GB1', artist: 'X', title: 'Y', isrc: 'GB1', sources: {} };
     const sameIsrcY: Track = { id: 'search-z', artist: 'Other', title: 'Other', isrc: 'gb1', sources: {} };
-    let s = playlistReducer({ tracks: [], template: '60min' }, { type: 'add', track: a });
+    let s = playlistReducer({ tracks: [], arc: { minutes: 60, shape: 'build' }, playFraction: 0.75 }, { type: 'add', track: a });
     s = playlistReducer(s, { type: 'add', track: { ...a, id: 'search-b' } });
     expect(s.tracks).toHaveLength(1);
     // a different version of the same work is a different recording

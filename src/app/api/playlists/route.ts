@@ -1,8 +1,9 @@
+import { encodeArc, toArc } from '@/lib/arc';
 import { isDemoMode } from '@/lib/demo';
 import type { TrackRow } from '@/lib/supabase/types';
 import type { Track } from '@/types/track';
 import { sanitizeTrack } from '@/components/trackSanitize';
-import { rowToTrack, toTemplate, trackToRow, type SavedPlaylist } from './mapping';
+import { rowToTrack, trackToRow, type SavedPlaylist } from './mapping';
 
 const MAX_TRACKS = 200;
 
@@ -59,7 +60,7 @@ export async function GET() {
   const playlists: SavedPlaylist[] = lists.map((p) => ({
     id: p.id,
     name: p.name,
-    template: toTemplate(p.arc_template),
+    arc: toArc(p.arc_template),
     createdAt: p.created_at,
     tracks: (entries ?? [])
       .filter((e) => e.playlist_id === p.id)
@@ -72,11 +73,11 @@ export async function GET() {
 export async function POST(request: Request) {
   if (isDemoMode()) return demoResponse();
 
-  let body: { name?: unknown; template?: unknown; tracks?: unknown };
+  let body: { name?: unknown; arc?: unknown; template?: unknown; tracks?: unknown };
   try {
     body = await request.json();
   } catch {
-    return Response.json({ error: 'Request body must be JSON: { name, template, tracks }' }, { status: 400 });
+    return Response.json({ error: 'Request body must be JSON: { name, arc, tracks }' }, { status: 400 });
   }
   const name = typeof body?.name === 'string' && body.name.trim() ? body.name.trim().slice(0, 120) : 'Untitled set';
   const tracks = Array.isArray(body?.tracks)
@@ -112,7 +113,7 @@ export async function POST(request: Request) {
 
   const { data: created, error } = await supabase
     .from('playlists')
-    .insert({ user_id: user.id, name, arc_template: toTemplate(body.template) })
+    .insert({ user_id: user.id, name, arc_template: encodeArc(toArc(body.arc ?? body.template)) })
     .select('*')
     .single();
   if (error || !created) return failed('Could not save the set.');
@@ -130,7 +131,7 @@ export async function POST(request: Request) {
   const playlist: SavedPlaylist = {
     id: created.id,
     name: created.name,
-    template: toTemplate(created.arc_template),
+    arc: toArc(created.arc_template),
     createdAt: created.created_at,
     tracks,
   };

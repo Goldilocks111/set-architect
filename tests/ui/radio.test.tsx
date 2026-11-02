@@ -5,7 +5,8 @@ import SuggestionBox from '@/components/SuggestionBox';
 import { radioPick, RADIO_COUNTDOWN_S } from '@/components/RadioControl';
 import type { Suggestion, Track } from '@/types/track';
 
-const t = (id: string, extra: Partial<Track> = {}): Track => ({ id, artist: `A ${id}`, title: `T ${id}`, sources: {}, ...extra });
+// 5:00 played in full: one track = 5 minutes of the arc
+const t = (id: string, extra: Partial<Track> = {}): Track => ({ id, artist: `A ${id}`, title: `T ${id}`, sources: {}, durationMs: 300_000, ...extra });
 const sug = (id: string, extra: Partial<Suggestion> & { compliant?: boolean } = {}): Suggestion => ({ track: t(id), score: 0.8, reasons: [], ...extra });
 
 let respond: (playlist: Track[]) => Response | Promise<Response>;
@@ -37,8 +38,8 @@ function Harness({ planned = 3, busy = false }: { planned?: number; busy?: boole
       <input aria-label="search" role="combobox" />
       <SuggestionBox
         tracks={tracks}
-        template="60min"
-        plannedLength={planned}
+        arc={{ minutes: planned * 5, shape: 'build' }}
+        playFraction={1}
         busy={busy}
         onAdd={(x) => {
           added.push(x.id);
@@ -104,6 +105,21 @@ describe('Radio mode', () => {
     await tick(10_000);
     expect(added).toEqual(['c1', 'c2']);
     expect(screen.getByRole('switch', { name: /radio/i })).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('stops when the played minutes reach the arc length, not a track count', async () => {
+    // 5' opener + two 10' picks = 25' = the planned 25-minute arc (a count of 5 tracks would add more)
+    respond = (pl) => ok([{ ...sug(`c${pl.length}`), track: t(`c${pl.length}`, { durationMs: 600_000 }) }]);
+    render(<Harness planned={5} />);
+    await radioOn();
+    await tick(4_200);
+    await tick(600);
+    await tick(4_200);
+    expect(added).toEqual(['c1', 'c2']);
+    await tick(10_000);
+    expect(added).toEqual(['c1', 'c2']);
+    expect(screen.getByRole('switch', { name: /radio/i })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('status').textContent).toMatch(/set is full/);
   });
 
   it('Cancel stops the countdown and turns radio off', async () => {
@@ -201,7 +217,7 @@ describe('Radio mode', () => {
 
   it('stops visibly if the set does not grow after radio adds', async () => {
     function Stuck() {
-      return <SuggestionBox tracks={[t('a')]} template="60min" plannedLength={5} onAdd={(x) => added.push(x.id)} />;
+      return <SuggestionBox tracks={[t('a')]} arc={{ minutes: 25, shape: 'build' }} playFraction={1} onAdd={(x) => added.push(x.id)} />;
     }
     render(<Stuck />);
     await radioOn();

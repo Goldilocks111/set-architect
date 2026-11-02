@@ -26,7 +26,7 @@ const last = seed[0];
 
 describe('assembleSuggestions (demo data, no external deps)', () => {
   it('returns ≤10 suggestions, each with reasons, from the demo pool', async () => {
-    const res = await assembleSuggestions({ playlist: [last], template: '60min', plannedLength: 15 }, {});
+    const res = await assembleSuggestions({ playlist: [last], arc: { minutes: 60, shape: 'build' } }, {});
     expect(res.suggestions.length).toBeGreaterThan(0);
     expect(res.suggestions.length).toBeLessThanOrEqual(10);
     for (const s of res.suggestions) {
@@ -42,7 +42,7 @@ describe('assembleSuggestions (demo data, no external deps)', () => {
       resolveTrack: async () => dupWithOtherId,
     };
     const res = await assembleSuggestions(
-      { playlist: [seed[1], last], template: '60min', plannedLength: 15 },
+      { playlist: [seed[1], last], arc: { minutes: 60, shape: 'build' } },
       deps
     );
     const keys = res.suggestions.map((s) => trackKeyOf(s.track.artist, s.track.title));
@@ -51,7 +51,7 @@ describe('assembleSuggestions (demo data, no external deps)', () => {
   });
 
   it('works with an empty set (arc-start suggestions)', async () => {
-    const res = await assembleSuggestions({ playlist: [], template: '120min', plannedLength: 30 }, {});
+    const res = await assembleSuggestions({ playlist: [], arc: { minutes: 120, shape: 'journey' } }, {});
     expect(res.suggestions.length).toBe(10);
   });
 
@@ -67,7 +67,7 @@ describe('assembleSuggestions (demo data, no external deps)', () => {
     );
     const suggestNext = vi.fn((_args: unknown) => []);
     await assembleSuggestions(
-      { playlist: [last], template: '60min', plannedLength: 15 },
+      { playlist: [last], arc: { minutes: 60, shape: 'build' } },
       {
         loadAdjacency: async () => ({ getNeighbors, pairCount: 1, trackCount: 2 }),
         getSimilarTracks: async () => [{ artist: 'Other', title: 'Similar', match: 0.7 }],
@@ -92,7 +92,7 @@ describe('assembleSuggestions (demo data, no external deps)', () => {
 
   it('degrades to demo pool when deps throw', async () => {
     const res = await assembleSuggestions(
-      { playlist: [last], template: '60min', plannedLength: 15 },
+      { playlist: [last], arc: { minutes: 60, shape: 'build' } },
       {
         loadAdjacency: async () => {
           throw new Error('no index');
@@ -123,7 +123,7 @@ describe('metadata cache first, incomplete exclusion', () => {
     const getCachedEntry = vi.fn((k: string) => (k === neighborKey ? { fields: { ...full } } : undefined));
     const suggestNext = vi.fn((_a: unknown) => []);
     await assembleSuggestions(
-      { playlist: [last], template: '60min', plannedLength: 15 },
+      { playlist: [last], arc: { minutes: 60, shape: 'build' } },
       deps({ resolveTrack, getCachedEntry, suggestNext })
     );
     expect(resolveTrack).not.toHaveBeenCalled();
@@ -135,7 +135,7 @@ describe('metadata cache first, incomplete exclusion', () => {
   it('an incomplete cache entry falls through to resolveTrack', async () => {
     const resolveTrack = vi.fn(async () => ({ id: 'r', artist: 'Outside', title: 'Neighbor', sources: {}, ...full }) as Track);
     await assembleSuggestions(
-      { playlist: [last], template: '60min', plannedLength: 15 },
+      { playlist: [last], arc: { minutes: 60, shape: 'build' } },
       deps({ resolveTrack, getCachedEntry: () => ({ fields: { bpm: 122 } }) })
     );
     expect(resolveTrack).toHaveBeenCalledTimes(1);
@@ -146,7 +146,7 @@ describe('metadata cache first, incomplete exclusion', () => {
     const resolveTrack = vi.fn(async (a: string, t: string) => ({ id: `r-${t}`, artist: a, title: t, sources: {}, ...full }) as Track);
     const suggestNext = vi.fn((_a: unknown) => []);
     await assembleSuggestions(
-      { playlist: [last], template: '60min', plannedLength: 15 },
+      { playlist: [last], arc: { minutes: 60, shape: 'build' } },
       deps({
         loadAdjacency: async () => ({
           getNeighbors: async () => keys.map((trackKey) => ({ trackKey, count: 1, direction: 'after' as const })),
@@ -165,7 +165,7 @@ describe('metadata cache first, incomplete exclusion', () => {
   it('an incomplete last set track is not used for neighbor lookup; all-incomplete still yields suggestions', async () => {
     const getNeighbors = vi.fn(async () => []);
     const res = await assembleSuggestions(
-      { playlist: [{ id: 'x', artist: 'A', title: 'B', sources: {} }], template: '60min', plannedLength: 15 },
+      { playlist: [{ id: 'x', artist: 'A', title: 'B', sources: {} }], arc: { minutes: 60, shape: 'build' } },
       { loadAdjacency: async () => ({ getNeighbors, pairCount: 0, trackCount: 0 }) }
     );
     expect(getNeighbors).not.toHaveBeenCalled();
@@ -175,7 +175,7 @@ describe('metadata cache first, incomplete exclusion', () => {
 
   it('never returns incomplete tracks from the resolver', async () => {
     const res = await assembleSuggestions(
-      { playlist: [last], template: '60min', plannedLength: 15 },
+      { playlist: [last], arc: { minutes: 60, shape: 'build' } },
       deps({ resolveTrack: async (a, t) => ({ id: 'half', artist: a, title: t, sources: {}, bpm: 122, camelot: '9A', energy: 5 }) as Track })
     );
     expect(res.suggestions.map((s) => s.track.id)).not.toContain('half');
@@ -204,6 +204,16 @@ describe('POST /api/suggest', () => {
     expect(body.suggestions[0].reasons.length).toBeGreaterThan(0);
   });
 
+  it('passes the minute arc and play fraction to the engine; a legacy template still maps', async () => {
+    const { arcInput } = await import('@/lib/arc');
+    expect(arcInput({ arc: { minutes: 240, shape: 'peak-time' }, playFraction: 0.6 })).toEqual({ arc: { minutes: 240, shape: 'peak-time' }, playFraction: 0.6 });
+    expect(arcInput({ template: '120min' })).toEqual({ arc: { minutes: 120, shape: 'journey' }, playFraction: 0.75 });
+    expect(arcInput({ arc: 'junk', playFraction: 7 })).toEqual({ arc: { minutes: 60, shape: 'build' }, playFraction: 1 });
+    const suggestNext = vi.fn((_args: unknown) => []);
+    await assembleSuggestions({ playlist: [last], arc: { minutes: 90, shape: 'warm-up' }, playFraction: 0.5 }, { suggestNext });
+    expect(suggestNext.mock.calls[0][0]).toMatchObject({ arc: { minutes: 90, shape: 'warm-up' }, playFraction: 0.5 });
+  });
+
   it('rejects a malformed body with 400', async () => {
     const { POST } = await import('@/app/api/suggest/route');
     const res = await POST(new Request('http://x/api/suggest', { method: 'POST', body: 'not json' }));
@@ -219,7 +229,7 @@ describe('neighbor display names (M1)', () => {
     const resolveTrack = vi.fn(async (artist: string, title: string) => ({ id: 'r1', artist, title, sources: {} }) as Track);
     const suggestNext = vi.fn((_args: unknown) => []);
     await assembleSuggestions(
-      { playlist: [last], template: '60min', plannedLength: 15 },
+      { playlist: [last], arc: { minutes: 60, shape: 'build' } },
       {
         loadAdjacency: async () => ({
           getNeighbors: neighbors,
@@ -240,7 +250,7 @@ describe('neighbor display names (M1)', () => {
     expect(displayFromKey('ben bohmer|breathing in')).toEqual({ artist: 'Ben Bohmer', title: 'Breathing In' });
     const resolveTrack = vi.fn(async (artist: string, title: string) => ({ id: 'r1', artist, title, sources: {} }) as Track);
     await assembleSuggestions(
-      { playlist: [last], template: '60min', plannedLength: 15 },
+      { playlist: [last], arc: { minutes: 60, shape: 'build' } },
       { loadAdjacency: async () => ({ getNeighbors: neighbors, pairCount: 1, trackCount: 2 }), resolveTrack }
     );
     expect(resolveTrack).toHaveBeenCalledWith('Ben Bohmer', 'Breathing In', expect.anything());
@@ -249,7 +259,7 @@ describe('neighbor display names (M1)', () => {
   it("prefers the resolver's canonical names when it returns them", async () => {
     const suggestNext = vi.fn((_args: unknown) => []);
     await assembleSuggestions(
-      { playlist: [last], template: '60min', plannedLength: 15 },
+      { playlist: [last], arc: { minutes: 60, shape: 'build' } },
       {
         loadAdjacency: async () => ({ getNeighbors: neighbors, pairCount: 1, trackCount: 2 }),
         resolveTrack: async () => ({ id: 'r1', artist: 'Ben Böhmer', title: 'Breathing In (Original Mix)', sources: {} }),
@@ -269,7 +279,7 @@ describe('time budget (M2)', () => {
     vi.useFakeTimers();
     let res: Awaited<ReturnType<typeof assembleSuggestions>> | undefined;
     const p = assembleSuggestions(
-      { playlist: [last], template: '60min', plannedLength: 15 },
+      { playlist: [last], arc: { minutes: 60, shape: 'build' } },
       { loadAdjacency: () => never(), getSimilarTracks: () => never(), callTimeoutMs: 50, budgetMs: 1000 }
     ).then((r) => (res = r));
     // well inside the 1s budget: each hung lookup is cut at its 50ms cap
@@ -286,7 +296,7 @@ describe('time budget (M2)', () => {
     vi.useFakeTimers();
     let done = false;
     const p = assembleSuggestions(
-      { playlist: [last], template: '60min', plannedLength: 15 },
+      { playlist: [last], arc: { minutes: 60, shape: 'build' } },
       {
         getSimilarTracks: async () => [
           { artist: 'Fast', title: 'One', match: 0.9 },
@@ -350,7 +360,7 @@ describe('loadSuggestDeps demo-adjacency fallback (M3)', () => {
     expect(handle.nameOf?.(demoOnlyKey)).toEqual({ artist: 'Outside Artist', title: 'Not In Pool' });
 
     const suggestNext = vi.fn((_args: unknown) => []);
-    await assembleSuggestions({ playlist: [last], template: '60min', plannedLength: 15 }, { ...deps, suggestNext });
+    await assembleSuggestions({ playlist: [last], arc: { minutes: 60, shape: 'build' } }, { ...deps, suggestNext });
     const args = suggestNext.mock.calls[0][0] as { candidates: Track[]; adjacency: Map<string, number> };
     expect(args.adjacency.get(demoOnlyKey)).toBe(4);
     expect(mocks.resolver.resolveWithStatus).toHaveBeenCalledWith('Outside Artist', 'Not In Pool', expect.anything());
@@ -378,7 +388,7 @@ describe('loadSuggestDeps demo-adjacency fallback (M3)', () => {
     const deps = await loadSuggestDeps();
     const suggestNext = vi.fn((_args: unknown) => []);
     await assembleSuggestions(
-      { playlist: [last], template: '60min', plannedLength: 15 },
+      { playlist: [last], arc: { minutes: 60, shape: 'build' } },
       { ...deps, backgroundResolve: undefined, noStarterCrate: true, suggestNext }
     );
     const args = suggestNext.mock.calls[0][0] as { candidates: Track[]; adjacency: Map<string, number> };
@@ -392,7 +402,7 @@ describe('loadSuggestDeps demo-adjacency fallback (M3)', () => {
   it('noStarterCrate drops sample-flagged neighbours from any adjacency handle', async () => {
     const suggestNext = vi.fn((_args: unknown) => []);
     await assembleSuggestions(
-      { playlist: [last], template: '60min', plannedLength: 15 },
+      { playlist: [last], arc: { minutes: 60, shape: 'build' } },
       {
         noStarterCrate: true,
         suggestNext,
@@ -418,7 +428,7 @@ describe('loadSuggestDeps demo-adjacency fallback (M3)', () => {
     mocks.resolver.getSimilarTracks.mockResolvedValue([]);
     const deps = await loadSuggestDeps();
     const suggestNext = vi.fn((_args: unknown) => []);
-    await assembleSuggestions({ playlist: [last], template: '60min', plannedLength: 15 }, { ...deps, suggestNext });
+    await assembleSuggestions({ playlist: [last], arc: { minutes: 60, shape: 'build' } }, { ...deps, suggestNext });
     const args = suggestNext.mock.calls[0][0] as { candidates: Track[]; adjacency: Map<string, number> };
     expect(args.adjacency.get(poolKey)).toBe(5);
     expect(mocks.resolver.resolveWithStatus).not.toHaveBeenCalled();
@@ -450,7 +460,7 @@ describe('live co-occurrence integration', () => {
     const neighbor: Track = { ...seed[2], id: 'ext-pc', artist: 'Outside', title: 'Neighbor' };
     const run = (playCountOf?: (k: string) => number | undefined) =>
       assembleSuggestions(
-        { playlist: [last], template: '60min', plannedLength: 15 },
+        { playlist: [last], arc: { minutes: 60, shape: 'build' } },
         {
           loadAdjacency: async () => ({
             getNeighbors: async () => [{ trackKey: key, count: 2, direction: 'after' as const }],
@@ -491,7 +501,7 @@ describe('crate as the primary candidate pool', () => {
     const candidates = () => (suggestNext.mock.calls[0][0] as { candidates: Track[] }).candidates;
     return { suggestNext, candidates };
   };
-  const input = (crate: Track[]) => ({ playlist: [last], template: '60min' as const, plannedLength: 15, crate });
+  const input = (crate: Track[]) => ({ playlist: [last], arc: { minutes: 60, shape: 'build' as const }, crate });
 
   it('uses complete crate tracks as the pool and leaves the demo crate out once there are 30 (non-demo)', async () => {
     nonDemo();
@@ -508,7 +518,7 @@ describe('crate as the primary candidate pool', () => {
     await assembleSuggestions(input([crateTrack(1, full)]), { suggestNext: a.suggestNext });
     expect(a.candidates().some((c) => c.sources.bpm === 'demo-seed')).toBe(true);
     expect(a.candidates().some((c) => c.id === 'crate-1')).toBe(true);
-    const res = await assembleSuggestions({ playlist: [], template: '60min', plannedLength: 15, crate: [] }, {});
+    const res = await assembleSuggestions({ playlist: [], arc: { minutes: 60, shape: 'build' }, crate: [] }, {});
     expect(res.suggestions.length).toBe(10);
   });
 
@@ -558,7 +568,7 @@ describe('crate as the primary candidate pool', () => {
     nonDemo();
     const { suggestNext, candidates } = capture();
     await assembleSuggestions(
-      { playlist: [last, crateTrack(1, full)], template: '60min', plannedLength: 15, crate: [crateTrack(1, full), crateTrack(2, full)] },
+      { playlist: [last, crateTrack(1, full)], arc: { minutes: 60, shape: 'build' }, crate: [crateTrack(1, full), crateTrack(2, full)] },
       { suggestNext }
     );
     const ids = candidates().map((c) => c.id);
@@ -640,7 +650,7 @@ describe('POST /api/suggest crate validation', () => {
 describe('crate background fill and known report', () => {
   const full = { bpm: 124, camelot: '8A', energy: 6, danceability: 0.7 };
   const ct = (n: number, extra: Partial<Track> = {}): Track => ({ id: `c${n}`, artist: `Crate Artist ${n}`, title: `Crate Song ${n}`, sources: {}, ...extra });
-  const base = (crate: Track[]) => ({ playlist: [last], template: '60min' as const, plannedLength: 15, crate });
+  const base = (crate: Track[]) => ({ playlist: [last], arc: { minutes: 60, shape: 'build' as const }, crate });
   beforeEach(() => resetCrateBackground());
 
   it('starts at most 2 incomplete crate items (the first = newest), without awaiting them', async () => {
@@ -724,7 +734,7 @@ describe('crate scale', () => {
       const deps = await load();
       const crate: Track[] = Array.from({ length: 600 }, (_, i) => ({ id: `c${i}`, artist: `Artist ${i}`, title: `Song ${i}`, sources: {} }));
       const t0 = performance.now();
-      const res = await assemble({ playlist: [last], template: '60min', plannedLength: 15, crate }, deps);
+      const res = await assemble({ playlist: [last], arc: { minutes: 60, shape: 'build' }, crate }, deps);
       const ms = performance.now() - t0;
       expect(res.suggestions.length).toBeGreaterThan(0);
       expect(res.crateKnown).toHaveLength(600);

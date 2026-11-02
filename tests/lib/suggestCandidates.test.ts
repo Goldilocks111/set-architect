@@ -25,7 +25,7 @@ import { demoTracks } from '@/lib/demo';
 import { trackKeyOf, type Track } from '@/types/track';
 
 const last = demoTracks()[0];
-const input = { playlist: [last], template: '60min' as const, plannedLength: 15 };
+const input = { playlist: [last], arc: { minutes: 60, shape: 'build' as const } };
 const deezerHit = (over = {}) => ({ id: 1, title: 'Neighbor', rank: 5, artist: { name: 'Outside' }, ...over });
 
 beforeEach(() => {

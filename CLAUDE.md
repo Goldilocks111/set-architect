@@ -147,3 +147,20 @@ through subagents working off `docs/specs/build-plan.md`.
   12"/remaster = same recording). Pre-fix caches moved to ~/.setarchitect/backup-2026-11-02-prematchfix;
   U2 accuracy numbers flagged provisional (erratum in docs/research/data-yield-bench.md §6).
   Lesson: "first hit by the right artist" is never a match — always verify title + version.
+- 2026-11-02 (V2 Phase 4 — timing, branch v2-phase4 → main): Tasks 1–4 merged (durations
+  everywhere, minute-based arc {minutes, shape} + play fraction, inline pair diagnostics, seeded
+  auto-order propose → preview → apply/undo) + Task 5 timing UI (row start · length, "~" estimates,
+  "played of planned" header with "+m:ss over", minute-axis curve with overrun shading; one timing
+  source setTiming()). Final review fix: suggestNext now excludes ΔE ≤ −4 "Energy crash" (was marked
+  compliant while the pair rule flagged it). 1425 tests. Deferred to Phase 5: Supabase sets drop
+  durationMs/playFraction; recs bench needs a live re-run (compliant pool shrank). Lessons:
+  - Two rule sources drift: the suggestion filter and the pair-violation rule must be checked against
+    each other whenever either changes (the whole-branch review caught what per-task reviews couldn't).
+  - Correctness tests must never run under a wall-clock cutoff (a loaded box turns a timeout into a
+    false "1 violation" failure) — pass maxMs: Infinity, assert runtime separately; the app keeps a
+    1000 ms guard only as a freeze safety net.
+  - Worktrees lack Next's generated route types → tsc fails on LayoutProps; run `npx next typegen` first.
+  - A paused session kills in-flight subagents silently: on resume, check worktrees for uncommitted
+    work with no report before redispatching.
+  - Turbopack refuses a worktree whose node_modules is a symlink outside its root — browser-check a
+    worktree branch by detaching the main checkout at that commit instead.

@@ -34,7 +34,7 @@ async function queueImportedStyles(tracks: Track[]): Promise<void> {
 }
 
 /**
- * Manual values for one track: POST {artist, title, fields: {bpm?, camelot?, energy?, danceability?}}
+ * Manual values for one track: POST {artist, title, fields: {bpm?, camelot?, energy?, danceability?, durationMs?}}
  * or a batch: POST {items: [{artist, title, fields}]} (<= MAX_BATCH) -> {applied, rejected: [{index, error}], tracks}
  */
 export async function POST(request: Request) {

@@ -16,6 +16,24 @@ beforeEach(() => {
 });
 
 describe('putManualMany', () => {
+  it('putManual stores durationMs as a manual field that providers never overwrite', () => {
+    putManual('a|mk', { durationMs: 401000, bpm: 124 });
+    expect(getEntry('a|mk')?.fields.durationMs).toBe(401000);
+    expect(getEntry('a|mk')?.sources.durationMs).toBe('manual');
+    putResolved('a|mk', t({ id: 'a|mk', durationMs: 200000, sources: { durationMs: 'deezer' } }));
+    expect(getEntry('a|mk')?.fields.durationMs).toBe(401000);
+    putManualMany([{ key: 'a|mk2', fields: { durationMs: 99000 } }]);
+    expect(getEntry('a|mk2')?.fields.durationMs).toBe(99000);
+  });
+  it('persists durationMs and never overwrites a manual value', () => {
+    putResolved('a|d', t({ id: 'a|d', durationMs: 390000, sources: { durationMs: 'spotify' } }));
+    expect(getEntry('a|d')?.fields.durationMs).toBe(390000);
+    expect(getEntry('a|d')?.sources.durationMs).toBe('spotify');
+    const key = 'a|m';
+    putResolved(key, t({ id: key, durationMs: 100000, sources: { durationMs: 'manual' } }));
+    putResolved(key, t({ id: key, durationMs: 200000, sources: { durationMs: 'deezer' } }));
+    expect(getEntry(key)?.fields.durationMs).toBe(100000);
+  });
   it('writes the file once for the whole batch, marks fields manual, and last item wins', () => {
     const spy = vi.spyOn(fs, 'writeFileSync');
     const entries = putManualMany([

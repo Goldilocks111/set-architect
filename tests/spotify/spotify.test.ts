@@ -129,6 +129,7 @@ describe('api mapping', () => {
                 id: 'abc',
                 name: 'Song',
                 popularity: 55,
+                duration_ms: 201000,
                 artists: [{ name: 'A' }, { name: 'B' }],
                 external_urls: {
                   spotify: 'https://open.spotify.com/track/abc',
@@ -155,6 +156,7 @@ describe('api mapping', () => {
         spotifyId: 'abc',
         spotifyUrl: 'https://open.spotify.com/track/abc',
         popularity: 55,
+        durationMs: 201000,
       },
       {
         artist: 'C',

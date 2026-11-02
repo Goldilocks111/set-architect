@@ -1,36 +1,40 @@
 import { DANCEABILITY_PRIOR_SOURCE, ESSENTIALS, missingEssentials, withDanceabilityPrior, type IncompleteReason } from '@/lib/completeness';
-import type { ArcTemplate, Track } from '@/types/track';
+import { clampPlayFraction, DEFAULT_ARC, DEFAULT_PLAY_FRACTION, toArc } from '@/lib/arc';
+import type { Arc, Track } from '@/types/track';
 import { isInSet, recordingKeys } from './recordingKeys';
 import { sanitizeTrack } from './trackSanitize';
 
 export interface PlaylistState {
   tracks: Track[];
-  template: ArcTemplate;
+  arc: Arc;
+  /** Share of each track played before the next is mixed in (0.5-1). */
+  playFraction: number;
   /** ids with a resolve request in flight; client-only, never persisted. */
   resolving?: string[];
+  /** The order before the last applyOrder (one undo level); client-only, never persisted. */
+  orderUndo?: string[];
 }
+
+/** What a load accepts: a saved set carries tracks + arc only; missing fields fall back. */
+export type LoadableState = Pick<PlaylistState, 'tracks'> & Partial<Omit<PlaylistState, 'tracks'>>;
 
 export type PlaylistAction =
   | { type: 'add'; track: Track }
   | { type: 'remove'; id: string }
   | { type: 'reorder'; from: number; to: number }
+  | { type: 'applyOrder'; ids: string[] }
+  | { type: 'undoOrder' }
   | { type: 'clear' }
-  | { type: 'setTemplate'; template: ArcTemplate }
-  | { type: 'load'; state: PlaylistState }
+  | { type: 'setArc'; arc: Arc }
+  | { type: 'setPlayFraction'; playFraction: number }
+  | { type: 'load'; state: LoadableState }
   | { type: 'enrich'; id: string; fields: Partial<Track> }
   | { type: 'resolveStart'; id: string }
   | { type: 'resolved'; id: string; track: Track }
   | { type: 'resolveFailed'; id: string; reason: IncompleteReason }
-  | { type: 'override'; id: string; fields: Partial<Pick<Track, (typeof ESSENTIALS)[number]>> };
+  | { type: 'override'; id: string; fields: Partial<Pick<Track, (typeof ESSENTIALS)[number] | 'durationMs'>> };
 
-export const initialPlaylistState: PlaylistState = { tracks: [], template: '60min' };
-
-/** ~15 tracks per hour (mixing rulebook §3). */
-export function plannedLengthFor(template: ArcTemplate): number {
-  return template === '120min' ? 30 : 15;
-}
-
-const isTemplate = (v: unknown): v is ArcTemplate => v === '60min' || v === '120min';
+export const initialPlaylistState: PlaylistState = { tracks: [], arc: DEFAULT_ARC, playFraction: DEFAULT_PLAY_FRACTION };
 
 /** Fills fields the track doesn't have yet; never overwrites known values or the id (except a danceability prior, which a real value replaces). */
 export function enrichTrack(track: Track, fields: Partial<Track>): Track {
@@ -63,6 +67,22 @@ export function applyResolved(track: Track, resolved: Track): Track {
 
 const without = (ids: string[] | undefined, id: string) => (ids ?? []).filter((x) => x !== id);
 
+/** The set's tracks in `ids` order, or null unless `ids` names every current track exactly once. */
+function permute(tracks: Track[], ids: string[]): Track[] | null {
+  if (ids.length !== tracks.length) return null;
+  const byId = new Map(tracks.map((t) => [t.id, t]));
+  if (byId.size !== tracks.length || new Set(ids).size !== ids.length) return null;
+  const out = ids.map((id) => byId.get(id));
+  return out.every((t): t is Track => t !== undefined) ? out : null;
+}
+
+/** A change to the set's membership or order makes the stored undo order stale. */
+function withTracks(state: PlaylistState, tracks: Track[]): PlaylistState {
+  const { orderUndo: _stale, ...rest } = state;
+  void _stale;
+  return { ...rest, tracks };
+}
+
 function updateTrack(state: PlaylistState, id: string, fn: (t: Track) => Track): PlaylistState {
   const i = state.tracks.findIndex((t) => t.id === id);
   if (i < 0) return state;
@@ -76,10 +96,10 @@ export function playlistReducer(state: PlaylistState, action: PlaylistAction): P
     case 'add': {
       const existing = new Set(state.tracks.flatMap(recordingKeys));
       if (isInSet(existing, action.track)) return state;
-      return { ...state, tracks: [...state.tracks, action.track] };
+      return withTracks(state, [...state.tracks, action.track]);
     }
     case 'remove':
-      return { ...state, tracks: state.tracks.filter((t) => t.id !== action.id) };
+      return withTracks(state, state.tracks.filter((t) => t.id !== action.id));
     case 'reorder': {
       const { from, to } = action;
       const n = state.tracks.length;
@@ -87,12 +107,24 @@ export function playlistReducer(state: PlaylistState, action: PlaylistAction): P
       const tracks = [...state.tracks];
       const [moved] = tracks.splice(from, 1);
       tracks.splice(to, 0, moved);
-      return { ...state, tracks };
+      return withTracks(state, tracks);
+    }
+    case 'applyOrder': {
+      // never drops, duplicates or swaps a track: anything but a permutation of the current ids is ignored
+      const tracks = permute(state.tracks, action.ids);
+      if (!tracks || tracks.every((t, i) => t === state.tracks[i])) return state; // unchanged order: nothing to undo
+      return { ...state, tracks, orderUndo: state.tracks.map((t) => t.id) };
+    }
+    case 'undoOrder': {
+      const tracks = state.orderUndo && permute(state.tracks, state.orderUndo);
+      return tracks ? withTracks(state, tracks) : state;
     }
     case 'clear':
-      return { ...state, tracks: [] };
-    case 'setTemplate':
-      return { ...state, template: action.template };
+      return withTracks(state, []);
+    case 'setArc':
+      return { ...state, arc: toArc(action.arc) };
+    case 'setPlayFraction':
+      return { ...state, playFraction: clampPlayFraction(action.playFraction) };
     case 'enrich': {
       const i = state.tracks.findIndex((t) => t.id === action.id);
       if (i < 0) return state;
@@ -112,7 +144,7 @@ export function playlistReducer(state: PlaylistState, action: PlaylistAction): P
     case 'override':
       return updateTrack(state, action.id, (t) => {
         const out: Track = { ...t, sources: { ...t.sources } };
-        for (const f of ESSENTIALS) {
+        for (const f of [...ESSENTIALS, 'durationMs'] as const) {
           const v = action.fields[f];
           if (v === undefined) continue;
           (out as unknown as Record<string, unknown>)[f] = v;
@@ -122,10 +154,13 @@ export function playlistReducer(state: PlaylistState, action: PlaylistAction): P
         return settleTrack(withDanceabilityPrior(out), t.unresolved?.reason ?? 'not-found', t.unresolved?.retryAt);
       });
     case 'load': {
-      const s = action.state as Partial<PlaylistState> | null;
+      // `template` is the pre-minute-arc field ('60min' / '120min') of old localStorage and saved sets.
+      const s = action.state as (Partial<PlaylistState> & { template?: unknown }) | null;
       if (!s || typeof s !== 'object' || !Array.isArray(s.tracks)) return initialPlaylistState;
       return {
-        template: isTemplate(s.template) ? s.template : initialPlaylistState.template,
+        arc: toArc(s.arc ?? s.template),
+        // a saved set carries no fraction: it keeps the DJ's current setting
+        playFraction: s.playFraction === undefined ? state.playFraction : clampPlayFraction(s.playFraction),
         tracks: s.tracks.map(sanitizeTrack).filter((t): t is Track => t !== null),
       };
     }

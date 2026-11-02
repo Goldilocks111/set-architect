@@ -3,7 +3,7 @@ import { byComplianceThenScore } from '@/engine/suggest';
 import { isComplete } from '@/lib/completeness';
 import { demoTracks, isDemoMode } from '@/lib/demo';
 import { STYLES_RECHECK_MS } from '@/lib/metadataCache';
-import { trackKeyOf, type AdjacencyLookup, type ArcTemplate, type Suggestion, type Track } from '@/types/track';
+import { trackKeyOf, type AdjacencyLookup, type Arc, type Suggestion, type Track } from '@/types/track';
 
 type DisplayName = { artist: string; title: string };
 
@@ -89,8 +89,9 @@ export const SUGGEST_CALL_TIMEOUT_MS = 2500;
 
 export interface SuggestInput {
   playlist: Track[];
-  template: ArcTemplate;
-  plannedLength: number;
+  arc: Arc;
+  /** Share of each track played (0.5-1); the engine defaults to 0.75. */
+  playFraction?: number;
   /** The DJ's own tracks (already sanitised); the primary candidate pool. */
   crate?: Track[];
 }
@@ -413,8 +414,8 @@ export async function assembleSuggestions(
   const ranked = suggest({
     playlist,
     candidates,
-    template: input.template,
-    plannedLength: input.plannedLength,
+    arc: input.arc,
+    playFraction: input.playFraction,
     adjacency,
     similarity,
     limit: Infinity,

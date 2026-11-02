@@ -3,12 +3,15 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { isComplete, RETRYABLE_REASONS, withDanceabilityPrior } from '@/lib/completeness';
 import type { OverrideFields } from '@/lib/overrideValidation';
+import { pairViolations, plannedTrackCount } from '@/engine';
 import type { Track } from '@/types/track';
-import ArcTemplatePicker from './ArcTemplatePicker';
+import ArcPicker from './ArcPicker';
+import AutoOrderPanel from './AutoOrderPanel';
 import BillingActions from './BillingActions';
 import CratePanel from './CratePanel';
 import { addToCrate, clearCrate, loadCrate, mergeCrateKnown, removeFromCrate, type CrateKnownItem, type CrateTrack } from './crate';
 import DemoBanner from './DemoBanner';
+import { overrunText, setTiming, timingHeaderText } from './curveData';
 import EnergyCurve from './EnergyCurve';
 import MikImport from './MikImport';
 import SavedSets from './SavedSets';
@@ -18,10 +21,9 @@ import SetList from './SetList';
 import SpotifyConnect from './SpotifyConnect';
 import SuggestionBox from './SuggestionBox';
 import { loadLocal, saveLocal } from './persistence';
-import { initialPlaylistState, plannedLengthFor, playlistReducer, type PlaylistAction, type PlaylistState } from './playlistReducer';
+import { initialPlaylistState, playlistReducer, type LoadableState, type PlaylistAction } from './playlistReducer';
 import { fetchResolved, needsMetadata } from './trackFormat';
 
-const MINUTES_PER_TRACK = 4;
 /** Counted from enqueue: a track not answered by now is shown as incomplete ('timeout'); the server retries on its own. */
 export const RESOLVE_CAP_MS = 60_000;
 const MAX_IN_FLIGHT = 2;
@@ -49,8 +51,10 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
   const [hydrated, setHydrated] = useState(false);
   const [crate, setCrate] = useState<CrateTrack[]>([]);
   const [crateOpen, setCrateOpen] = useState(false);
-  const { tracks, template } = state;
-  const plannedLength = plannedLengthFor(template);
+  const [ordering, setOrdering] = useState(false);
+  const suggestRef = useRef<HTMLButtonElement>(null);
+  const { tracks, arc, playFraction } = state;
+  const plannedCount = plannedTrackCount(arc, playFraction);
   const inSet = useMemo(() => new Set(tracks.flatMap(recordingKeys)), [tracks]);
 
   // Bumped on unmount so late answers from a previous mount are dropped.
@@ -274,31 +278,76 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
   );
 
   const loadSet = useCallback(
-    (p: PlaylistState) => {
+    (p: LoadableState) => {
       dispatch({ type: 'load', state: p });
       requeue(playlistReducer(initialPlaylistState, { type: 'load', state: p }).tracks);
     },
     [requeue, dispatch]
   );
-  const minutes = tracks.length * MINUTES_PER_TRACK;
+  // played time from real durations (estimates when missing) at the chosen play fraction
+  const timing = useMemo(() => setTiming(tracks, arc, playFraction), [tracks, arc, playFraction]);
+  const over = overrunText(timing);
+  const rough = useMemo(() => pairViolations(tracks), [tracks]);
+  const scrollToRough = () => {
+    const first = rough[0] && tracks[rough[0].index];
+    const el = document.getElementById(`transition-${first?.id}`);
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el?.focus({ preventScroll: true });
+  };
 
   return (
     <div className="flex min-h-screen flex-col bg-[#12141C] font-[family-name:var(--font-body)] text-[#E8E4DA]">
       {demo && <DemoBanner />}
 
       <header className="mx-auto flex w-full max-w-[1280px] flex-wrap items-center justify-between gap-x-6 gap-y-3 px-4 pt-6 pb-4 sm:px-6">
-        <div className="flex items-baseline gap-4">
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
           <h1 className="font-[family-name:var(--font-display)] text-[28px] leading-none font-semibold tracking-tight">Set Architect</h1>
           <p className="text-[13px] text-[#8A8FA3] tabular-nums" aria-live="polite">
-            {tracks.length} of {plannedLength} tracks, about {minutes} min
+            <span title={timing.estimated ? 'Some track lengths are estimated' : undefined}>
+              {timingHeaderText(timing, tracks.length, plannedCount)}
+            </span>
+            {over && (
+              <span className="ml-2 rounded border border-[#EE8B7A]/50 px-1.5 text-[12px] text-[#EE8B7A]">{over}</span>
+            )}
           </p>
+          {rough.length > 0 && (
+            <button
+              type="button"
+              onClick={scrollToRough}
+              className="rounded-md border border-[#EE8B7A]/50 px-2 py-0.5 text-[12px] text-[#EE8B7A] hover:bg-[#EE8B7A]/10 focus-visible:outline-2 focus-visible:outline-[#F2B33D]"
+            >
+              {rough.length} rough {rough.length === 1 ? 'transition' : 'transitions'}
+            </button>
+          )}
+          {tracks.length >= 3 && (
+            <button
+              ref={suggestRef}
+              type="button"
+              onClick={() => setOrdering(true)}
+              className="rounded-md border border-[#2A2F3F] px-2 py-0.5 text-[12px] text-[#E8E4DA] hover:border-[#8A8FA3] focus-visible:outline-2 focus-visible:outline-[#F2B33D]"
+            >
+              Suggest order
+            </button>
+          )}
+          {state.orderUndo && (
+            <button
+              type="button"
+              onClick={() => {
+                dispatch({ type: 'undoOrder' });
+                suggestRef.current?.focus(); // this button unmounts: hand focus to "Suggest order"
+              }}
+              className="rounded-md px-2 py-0.5 text-[12px] text-[#8A8FA3] underline underline-offset-2 hover:text-[#E8E4DA] focus-visible:outline-2 focus-visible:outline-[#F2B33D]"
+            >
+              Undo reorder
+            </button>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <MikImport tracks={tracks} onApply={applyMik} onImported={mikImported} />
           <SpotifyConnect tracks={tracks} onAdd={add} onAddToCrate={(list) => addCrate(list, 'spotify')} />{/* spotify-connect */}
           {!demo && <BillingActions />}
           {!demo && (
-            <SavedSets tracks={tracks} template={template} onLoad={loadSet} />
+            <SavedSets tracks={tracks} arc={arc} onLoad={loadSet} />
           )}
           <button
             type="button"
@@ -307,7 +356,12 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
           >
             Crate: {crate.length} {crate.length === 1 ? 'track' : 'tracks'}
           </button>
-          <ArcTemplatePicker value={template} onChange={(t) => dispatch({ type: 'setTemplate', template: t })} />
+          <ArcPicker
+            value={arc}
+            onChange={(a) => dispatch({ type: 'setArc', arc: a })}
+            playFraction={playFraction}
+            onPlayFractionChange={(f) => dispatch({ type: 'setPlayFraction', playFraction: f })}
+          />
           <button
             type="button"
             disabled={tracks.length === 0}
@@ -323,7 +377,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
 
       <main className="mx-auto flex w-full max-w-[1280px] flex-1 flex-col gap-6 px-4 pb-10 sm:px-6">
         <section aria-label="Energy curve" className="rounded-xl border border-[#2A2F3F] bg-[#1A1D28] px-3 pt-4 pb-3 sm:px-5">
-          <EnergyCurve tracks={tracks} template={template} />
+          <EnergyCurve tracks={tracks} arc={arc} playFraction={playFraction} />
         </section>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
@@ -334,8 +388,8 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
             <SearchBar onAdd={add} inSet={inSet} />
             <SetList
               tracks={tracks}
-              template={template}
-              plannedLength={plannedLength}
+              arc={arc}
+              playFraction={playFraction}
               onRemove={(id) => dispatch({ type: 'remove', id })}
               onMove={(from, to) => dispatch({ type: 'reorder', from, to })}
               resolving={state.resolving}
@@ -344,10 +398,24 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
           </section>
 
           <aside className="min-w-0 rounded-xl border border-[#2A2F3F] bg-[#1A1D28] px-4 pt-4 pb-2 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
-            {hydrated && <SuggestionBox tracks={tracks} template={template} plannedLength={plannedLength} onAdd={add} busy={(state.resolving?.length ?? 0) > 0} crate={crate} onCrateKnown={crateKnown} />}
+            {hydrated && <SuggestionBox tracks={tracks} arc={arc} playFraction={playFraction} onAdd={add} busy={(state.resolving?.length ?? 0) > 0} crate={crate} onCrateKnown={crateKnown} />}
           </aside>
         </div>
       </main>
+
+      {ordering && (
+        <AutoOrderPanel
+          tracks={tracks}
+          arc={arc}
+          playFraction={playFraction}
+          onApply={(ids) => {
+            dispatch({ type: 'applyOrder', ids });
+            setOrdering(false);
+          }}
+          onCancel={() => setOrdering(false)}
+          returnFocus={suggestRef}
+        />
+      )}
 
       {crateOpen && (
         <CratePanel

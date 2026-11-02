@@ -15,6 +15,20 @@ import { trackKeyOf } from '@/types/track';
 
 const post = (body: unknown, headers: Record<string, string> = { 'content-type': 'application/json' }) =>
   POST(new Request('http://localhost/api/tracks/override', { method: 'POST', headers, body: typeof body === 'string' ? body : JSON.stringify(body) }));
+describe('durationMs override', () => {
+  it('validates durationMs as 1s..2h and accepts it alone', () => {
+    expect(validateOverride({ durationMs: 390000 })).toEqual({ ok: true, fields: { durationMs: 390000 } });
+    for (const bad of [0, 500, 8_000_000, NaN, '3:00']) expect(validateOverride({ durationMs: bad }).ok).toBe(false);
+  });
+  it('POST stores it as manual', async () => {
+    const res = await post({ artist: 'A', title: 'B', fields: { durationMs: 390000 } });
+    expect(res.status).toBe(200);
+    const e = getEntry(trackKeyOf('A', 'B'));
+    expect(e?.fields.durationMs).toBe(390000);
+    expect(e?.sources.durationMs).toBe('manual');
+  });
+});
+
 const ok = { bpm: 126, camelot: '8A', energy: 7, danceability: 0.8 };
 
 beforeEach(() => {

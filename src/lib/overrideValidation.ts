@@ -1,7 +1,7 @@
 // Pure: shared by the override route and the editor. Do not import node modules here.
 import type { Essential } from './completeness';
 
-export type OverrideFields = Partial<{ bpm: number; camelot: string; energy: number; danceability: number }>;
+export type OverrideFields = Partial<{ bpm: number; camelot: string; energy: number; danceability: number; durationMs: number }>;
 export type OverrideResult = { ok: true; fields: OverrideFields } | { ok: false; error: string };
 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -30,6 +30,10 @@ export function validateOverride(input: unknown): OverrideResult {
     if (!isNum(raw.danceability) || raw.danceability < 0 || raw.danceability > 1) return bad('danceability', 'a number from 0 to 1');
     fields.danceability = raw.danceability;
   }
-  if (Object.keys(fields).length === 0) return { ok: false, error: 'provide at least one of bpm, camelot, energy, danceability' };
+  if (raw.durationMs !== undefined) {
+    if (!isNum(raw.durationMs) || raw.durationMs < 1000 || raw.durationMs > 7_200_000) return { ok: false, error: 'durationMs must be a number from 1000 to 7200000' };
+    fields.durationMs = Math.round(raw.durationMs);
+  }
+  if (Object.keys(fields).length === 0) return { ok: false, error: 'provide at least one of bpm, camelot, energy, danceability, durationMs' };
   return { ok: true, fields };
 }

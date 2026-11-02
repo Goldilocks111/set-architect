@@ -136,7 +136,7 @@ async function main(): Promise<void> {
     await settleStyles(); // the set's own styles lookups land before the engine reads the cache
     const incomplete = playlist.filter((t) => t.unresolved).length;
     const { suggestions, crateKnown, compliantAvailable } = await assembleSuggestions(
-      { playlist, template: sc.template, plannedLength: sc.plannedLength, crate: (sc.crate ?? []).map(toCrate) },
+      { playlist, arc: sc.arc, crate: (sc.crate ?? []).map(toCrate) },
       deps,
     );
     await settleStyles(); // candidate lookups started by this scenario finish before the next one starts

@@ -1,16 +1,13 @@
 import type { TrackRow } from '@/lib/supabase/types';
-import type { ArcTemplate, Track } from '@/types/track';
+import type { Arc, Track } from '@/types/track';
 
 export interface SavedPlaylist {
   id: string;
   name: string;
-  template: ArcTemplate;
+  arc: Arc;
   createdAt: string;
   tracks: Track[];
 }
-
-export const toTemplate = (v: unknown): ArcTemplate => (v === '120min' ? '120min' : '60min');
-
 
 const num = (v: number | string | null) => (v === null || v === '' ? undefined : Number(v));
 
