@@ -6,6 +6,7 @@ import type { OverrideFields } from '@/lib/overrideValidation';
 import { pairViolations, plannedTrackCount, setPlayedMinutes } from '@/engine';
 import type { Track } from '@/types/track';
 import ArcPicker from './ArcPicker';
+import AutoOrderPanel from './AutoOrderPanel';
 import BillingActions from './BillingActions';
 import CratePanel from './CratePanel';
 import { addToCrate, clearCrate, loadCrate, mergeCrateKnown, removeFromCrate, type CrateKnownItem, type CrateTrack } from './crate';
@@ -49,6 +50,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
   const [hydrated, setHydrated] = useState(false);
   const [crate, setCrate] = useState<CrateTrack[]>([]);
   const [crateOpen, setCrateOpen] = useState(false);
+  const [ordering, setOrdering] = useState(false);
   const { tracks, arc, playFraction } = state;
   const plannedCount = plannedTrackCount(arc, playFraction);
   const inSet = useMemo(() => new Set(tracks.flatMap(recordingKeys)), [tracks]);
@@ -295,7 +297,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
       {demo && <DemoBanner />}
 
       <header className="mx-auto flex w-full max-w-[1280px] flex-wrap items-center justify-between gap-x-6 gap-y-3 px-4 pt-6 pb-4 sm:px-6">
-        <div className="flex items-baseline gap-4">
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
           <h1 className="font-[family-name:var(--font-display)] text-[28px] leading-none font-semibold tracking-tight">Set Architect</h1>
           <p className="text-[13px] text-[#8A8FA3] tabular-nums" aria-live="polite">
             {tracks.length} of ~{plannedCount} tracks, about {minutes} min
@@ -307,6 +309,24 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
               className="rounded-md border border-[#EE8B7A]/50 px-2 py-0.5 text-[12px] text-[#EE8B7A] hover:bg-[#EE8B7A]/10 focus-visible:outline-2 focus-visible:outline-[#F2B33D]"
             >
               {rough.length} rough {rough.length === 1 ? 'transition' : 'transitions'}
+            </button>
+          )}
+          {tracks.length >= 3 && (
+            <button
+              type="button"
+              onClick={() => setOrdering(true)}
+              className="rounded-md border border-[#2A2F3F] px-2 py-0.5 text-[12px] text-[#E8E4DA] hover:border-[#8A8FA3] focus-visible:outline-2 focus-visible:outline-[#F2B33D]"
+            >
+              Suggest order
+            </button>
+          )}
+          {state.orderUndo && (
+            <button
+              type="button"
+              onClick={() => dispatch({ type: 'undoOrder' })}
+              className="rounded-md px-2 py-0.5 text-[12px] text-[#8A8FA3] underline underline-offset-2 hover:text-[#E8E4DA] focus-visible:outline-2 focus-visible:outline-[#F2B33D]"
+            >
+              Undo reorder
             </button>
           )}
         </div>
@@ -370,6 +390,19 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
           </aside>
         </div>
       </main>
+
+      {ordering && (
+        <AutoOrderPanel
+          tracks={tracks}
+          arc={arc}
+          playFraction={playFraction}
+          onApply={(ids) => {
+            dispatch({ type: 'applyOrder', ids });
+            setOrdering(false);
+          }}
+          onCancel={() => setOrdering(false)}
+        />
+      )}
 
       {crateOpen && (
         <CratePanel

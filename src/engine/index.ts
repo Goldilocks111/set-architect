@@ -16,3 +16,5 @@ export {
 export { DEFAULT_WEIGHTS, suggestNext } from './suggest';
 export { pairCheck, pairViolations } from './pairs';
 export type { PairIssue, PairStatus } from './pairs';
+export { autoOrder, orderCost } from './autoOrder';
+export type { AutoOrderOptions, AutoOrderResult } from './autoOrder';

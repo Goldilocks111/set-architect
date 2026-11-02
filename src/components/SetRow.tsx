@@ -48,6 +48,7 @@ export default function SetRow({
   return (
     <li
       draggable={!editing}
+      data-track-id={track.id}
       data-quarantined={quarantined ? 'true' : 'false'}
       onDragStart={(e: DragEvent) => {
         e.dataTransfer.effectAllowed = 'move';
