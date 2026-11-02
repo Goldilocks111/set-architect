@@ -92,3 +92,30 @@ through subagents working off `docs/specs/build-plan.md`.
   key + shared secret rotated. RULE: never grep/print .env lines, even "masked" — check secrets
   only via `node --env-file=.env` printing presence/length. Also: the app reads
   LASTFM_API_KEY (not LASTFM_API); shared secret is not needed.
+- 2026-11-02 (V2 Phase 1 — essential data): plan docs/superpowers/plans/2026-11-02-v2-phase1-data.md,
+  built on branch v2-phase1 via parallel subagents in manual worktrees (../setarch-wt/*; the
+  Agent tool's isolation:worktree fails here because the harness resolves git from $HOME).
+  Shipped: in-house preview analysis (FFT/chroma key with Temperley profile, fitted energy/
+  danceability; no essentia.js — AGPL); completeness gate (complete | incomplete(reason)) +
+  persistent metadata cache (~/.setarchitect/index/metadata.json, negative cache, re-resolve
+  queue); engine excludes incomplete tracks; badges/quarantine/60 s resolving clock; manual
+  override editor + guarded override route (JSON + same-origin; user required outside demo);
+  Mixed In Key CSV import; missing danceability falls back to an 'estimate-prior' from energy;
+  1001TL background driver (`npm run ingest:live`, lock + growth.jsonl, 7-day halt after 3 hard
+  blocks); search follow-ups (stricter R15b scorer, MB discovery query). 895 tests.
+  U2 result (docs/research/data-yield-bench.md): providers alone complete 48% (recent 2%); with
+  local analysis 89% (recent 78%). Local key vs ReccoBeats held-out 56% exact+relative (target
+  60% missed) → SoundStat-for-key pending owner OK. Deezer terms: preview analysis OK for
+  personal non-commercial use only — a paid product needs Deezer's written approval.
+  Lessons:
+  - Accuracy benches must exclude values the pipeline itself produced (first U2 run compared
+    local analysis with itself). Report nested/held-out numbers; select features inside folds.
+  - The Mac sleeps: setTimeout pauses during sleep, so long-running drivers must sleep in short
+    wall-clock-checked chunks (driver sat 12 h in a "60 min" pause). Agents also die mid-reply
+    on sleep — run `caffeinate -i -s` for long sessions.
+  - Turbopack served a stale imported JSON (demo seed) after a merge → empty suggestions until
+    the dev server was restarted. Restart `npm run dev` after merges that change imported data.
+  - Benchmarks running in a temp data dir must still read/merge the REAL provider-cooldowns file,
+    and any provider in cooldown at start/end makes the run PARTIAL.
+  - Never exercise the override editor / MIK import against the real cache in browser checks:
+    manual values are permanent and beat every provider.
