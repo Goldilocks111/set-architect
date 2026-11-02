@@ -18,13 +18,14 @@ describe('suggestNext', () => {
   const last = t('last', { bpm: 128, camelot: '8A', energy: 5 });
 
   it('exports default weights', () => {
-    expect(DEFAULT_WEIGHTS).toEqual({ key: 0.3, bpm: 0.2, energy: 0.2, cooccurrence: 0.2, similarity: 0.1 });
+    expect(DEFAULT_WEIGHTS).toEqual({ key: 0.25, bpm: 0.15, energy: 0.2, cooccurrence: 0.15, similarity: 0.1, style: 0.15 });
   });
 
   it('composite = weighted sum of reason scores', () => {
     const c = t('c', { bpm: 128, camelot: '8A', energy: 5 });
     const [s] = suggestNext({ ...base, playlist: [t('a'), t('b'), last], candidates: [c] });
-    const sum = s.reasons.reduce((acc, r) => acc + r.score * DEFAULT_WEIGHTS[r.kind], 0);
+    // No lanes on either side: style scores a neutral 0.5 with no reason.
+    const sum = s.reasons.reduce((acc, r) => acc + r.score * DEFAULT_WEIGHTS[r.kind], 0) + 0.5 * DEFAULT_WEIGHTS.style;
     expect(s.score).toBeCloseTo(sum, 10);
   });
 
@@ -155,11 +156,147 @@ describe('suggestNext', () => {
       expect(res[0].reasons).toContainEqual(
         expect.objectContaining({ kind: 'energy', label: 'Set tracks still resolving — scored from arc start' })
       );
+      // no anchor to verify key/tempo against: compliance falls back to the opener rule (energy within 1 of target 4)
+      expect(res[0].compliant).toBe(true);
+      const off = suggestNext({ ...base, playlist: [t('i1', { bpm: 100 }), t('i2')], candidates: [t('o', { ...full, energy: 7 })] });
+      expect(off[0].compliant).toBe(false);
     });
 
     it('empty playlist keeps the plain arc-start wording', () => {
       const [s] = suggestNext({ ...base, playlist: [], candidates: [t('n', full)] });
       expect(reason(s, 'energy')?.label).not.toMatch(/resolving/);
+    });
+  });
+
+  describe('style (lane fit)', () => {
+    const full = { bpm: 128, camelot: '8A', energy: 5, danceability: 0.6 };
+
+    it('unknown style is neutral (scored 0.5, no penalty, no reason)', () => {
+      const set = [t('p', { ...full, styles: ['techno'] })];
+      const tagged = t('tagged', { ...full, styles: ['techno'] });
+      const untagged = t('untagged', full);
+      const offLane = t('off', { ...full, styles: ['drum-and-bass'] });
+      const res = suggestNext({ ...base, playlist: set, candidates: [tagged, untagged, offLane] });
+      const by = (id: string) => res.find((s) => s.track.id === id)!;
+      expect(reason(by('untagged'), 'style')).toBeUndefined();
+      const noStyle = by('untagged').reasons.reduce((a, r) => a + r.score * DEFAULT_WEIGHTS[r.kind], 0);
+      expect(by('untagged').score).toBeCloseTo(noStyle + 0.5 * DEFAULT_WEIGHTS.style, 10);
+      // neutral sits between an on-lane and an off-lane track, never below the off-lane one
+      expect(by('untagged').score).toBeLessThan(by('tagged').score);
+      expect(by('untagged').score).toBeGreaterThan(by('off').score);
+      // an untagged set is neutral for every candidate
+      const plain = suggestNext({ ...base, playlist: [t('p2', full)], candidates: [tagged, untagged] });
+      expect(plain[0].score).toBeCloseTo(plain[1].score, 10);
+      expect(plain.every((s) => !reason(s, 'style'))).toBe(true);
+    });
+
+    it('lane follows recency and shows a style reason', () => {
+      const set = [
+        ...Array.from({ length: 6 }, (_, i) => t(`m${i}`, { ...full, styles: ['melodic-techno'] })),
+        ...Array.from({ length: 3 }, (_, i) => t(`x${i}`, { ...full, styles: ['techno'] })),
+      ];
+      const res = suggestNext({
+        ...base,
+        playlist: set,
+        candidates: [t('mel', { ...full, styles: ['melodic-techno'] }), t('tec', { ...full, styles: ['techno'] })],
+      });
+      expect(res[0].track.id).toBe('tec');
+      expect(reason(res[0], 'style')?.label).toBe('Same lane: techno');
+      // the opener's lane only weighs .4 + .2 against the recent techno run
+      expect(reason(res[1], 'style')!.score).toBeLessThan(0.3);
+    });
+
+    it('custom weights accept a style weight', () => {
+      const set = [t('p', { ...full, styles: ['techno'] })];
+      const cands = [t('on', { ...full, camelot: '9A', styles: ['techno'] }), t('off', { ...full, styles: ['trance'] })];
+      expect(suggestNext({ ...base, playlist: set, candidates: cands })[0].track.id).toBe('on');
+      expect(suggestNext({ ...base, playlist: set, candidates: cands, weights: { ...DEFAULT_WEIGHTS, style: 0 } })[0].track.id).toBe('off');
+    });
+  });
+
+  describe('compliance-first ranking', () => {
+    const full = { bpm: 128, camelot: '8A', energy: 5, danceability: 0.6 };
+
+    it('sets `compliant` on every suggestion', () => {
+      const res = suggestNext({
+        ...base,
+        playlist: [t('p', full)],
+        candidates: [t('ok', full), t('far', { ...full, bpm: 140 })],
+      });
+      expect(res.find((s) => s.track.id === 'ok')!.compliant).toBe(true);
+      expect(res.find((s) => s.track.id === 'far')!.compliant).toBe(false);
+    });
+
+    it('ranks every compliant candidate above every non-compliant one, each tier by score', () => {
+      // Non-compliant but high-scoring: perfect key + tempo, strong co-occurrence and similarity, energy away from target.
+      const set = [t('p', { ...full, energy: 5 })];
+      const target = 4; // 60min, position 1 of 15
+      // ΔE +1 to 6 moves away from target 4 and lands 2 from it → non-compliant
+      const strong = Array.from({ length: 4 }, (_, i) => t(`n${i}`, { ...full, energy: 6 }));
+      const weak = Array.from({ length: 4 }, (_, i) => t(`c${i}`, { ...full, camelot: i % 2 ? '7A' : '9A', bpm: 131 + i, energy: 4 }));
+      const adjacency = new Map(strong.map((s) => [trackKeyOf(s.artist, s.title), 5]));
+      const similarity = new Map(strong.map((s) => [trackKeyOf(s.artist, s.title), 1]));
+      const res = suggestNext({ ...base, playlist: set, candidates: [...strong, ...weak], adjacency, similarity });
+      expect(target).toBe(4);
+      const flags = res.map((s) => s.compliant);
+      expect(flags).toEqual([true, true, true, true, false, false, false, false]);
+      // without the tiers the strong ones would win on score
+      expect(Math.min(...res.slice(4).map((s) => s.score))).toBeGreaterThan(Math.max(...res.slice(0, 4).map((s) => s.score)));
+      for (const tier of [res.slice(0, 4), res.slice(4)])
+        for (let i = 1; i < tier.length; i++) expect(tier[i - 1].score).toBeGreaterThanOrEqual(tier[i].score);
+    });
+
+    it('first track of a set: compliant = energy within 1 of the arc target', () => {
+      const res = suggestNext({
+        ...base,
+        playlist: [],
+        candidates: [t('on', { ...full, energy: 4 }), t('near', { ...full, energy: 5 }), t('off', { ...full, energy: 7 })],
+      });
+      const by = (id: string) => res.find((s) => s.track.id === id)!;
+      expect(by('on').compliant).toBe(true);
+      expect(by('near').compliant).toBe(true);
+      expect(by('off').compliant).toBe(false);
+    });
+
+    it('criterion 3 property: with ≥ 10 compliant candidates in the pool, the top-10 are all compliant', () => {
+      // Deterministic pseudo-random scenarios (mulberry32): random sets, random pools, random adjacency/similarity/lanes.
+      const rng = (seed: number) => () => {
+        seed |= 0;
+        seed = (seed + 0x6d2b79f5) | 0;
+        let x = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+        x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+        return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+      };
+      const lanes = ['techno', 'melodic-techno', 'house', 'tech-house', 'trance'];
+      let checked = 0;
+      for (let seed = 1; seed <= 200; seed++) {
+        const r = rng(seed);
+        const pick = <T,>(xs: T[]) => xs[Math.floor(r() * xs.length)];
+        const rand = (id: string): Track =>
+          t(id, {
+            bpm: 120 + Math.round(r() * 12),
+            camelot: `${1 + Math.floor(r() * 12)}${r() < 0.5 ? 'A' : 'B'}`,
+            energy: 1 + Math.floor(r() * 10),
+            danceability: 0.6,
+            ...(r() < 0.7 ? { styles: [pick(lanes)] } : {}),
+          });
+        const playlist = Array.from({ length: 1 + Math.floor(r() * 12) }, (_, i) => rand(`s${seed}-${i}`));
+        const candidates = Array.from({ length: 150 }, (_, i) => rand(`c${seed}-${i}`));
+        const adjacency = new Map<string, number>();
+        const similarity = new Map<string, number>();
+        for (const c of candidates) {
+          if (r() < 0.3) adjacency.set(trackKeyOf(c.artist, c.title), 1 + Math.floor(r() * 6));
+          if (r() < 0.3) similarity.set(trackKeyOf(c.artist, c.title), r());
+        }
+        const all = suggestNext({ ...base, plannedLength: 20, playlist, candidates, adjacency, similarity });
+        const pool = suggestNext({ ...base, plannedLength: 20, playlist, candidates, adjacency, similarity, limit: Infinity });
+        const poolCompliant = pool.filter((s) => s.compliant).length;
+        if (poolCompliant < 10) continue;
+        checked++;
+        expect(all).toHaveLength(10);
+        expect(all.filter((s) => s.compliant)).toHaveLength(10);
+      }
+      expect(checked).toBeGreaterThan(50);
     });
   });
 });

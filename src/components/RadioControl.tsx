@@ -8,13 +8,12 @@ import { displayTitle } from './trackFormat';
 export const RADIO_COUNTDOWN_S = 4;
 
 /**
- * The suggestion radio chains next. Once the engine marks suggestions `compliant` (Phase 3 Task 4) that flag is
- * authoritative: the first `compliant === true`. Until a suggestion carries it, fall back to the visible reasons:
+ * The suggestion radio chains next. The engine marks suggestions `compliant` (engine/compliance); that flag is
+ * authoritative: the first `compliant === true`. When no suggestion carries it, fall back to the visible reasons:
  * the first suggestion with no key 'Clash', no '(clash)' BPM label and no 'Big energy jump'.
  */
 export function radioPick(suggestions: Suggestion[]): Suggestion | undefined {
-  const flag = (s: Suggestion) => (s as Suggestion & { compliant?: boolean }).compliant;
-  if (suggestions.some((s) => flag(s) !== undefined)) return suggestions.find((s) => flag(s) === true);
+  if (suggestions.some((s) => s.compliant !== undefined)) return suggestions.find((s) => s.compliant === true);
   return suggestions.find(
     (s) =>
       !s.reasons.some(

@@ -33,7 +33,7 @@ describe('frozen contracts', () => {
     expect(trackKeyOf('CamelPhat', 'Cola (Original Mix)')).toBe(trackKeyOf('camelphat', 'cola'));
   });
 
-  it('suggestNext (stub) returns sorted suggestions with reasons, excluding set tracks', () => {
+  it('suggestNext returns compliance-tiered suggestions with reasons, excluding set tracks', () => {
     const tracks = demoTracks();
     const out = suggestNext({
       playlist: tracks.slice(0, 3),
@@ -46,7 +46,12 @@ describe('frozen contracts', () => {
     expect(out.length).toBeLessThanOrEqual(10);
     const ids = new Set(out.map((s) => s.track.id));
     expect(ids.has(tracks[0].id)).toBe(false);
-    for (let i = 1; i < out.length; i++) expect(out[i - 1].score).toBeGreaterThanOrEqual(out[i].score);
+    // Sorted compliant-first (criterion 3), then by score within each tier.
+    for (let i = 1; i < out.length; i++) {
+      const [a, b] = [out[i - 1], out[i]];
+      expect(Number(a.compliant)).toBeGreaterThanOrEqual(Number(b.compliant));
+      if (a.compliant === b.compliant) expect(a.score).toBeGreaterThanOrEqual(b.score);
+    }
     expect(out[0].reasons.map((r) => r.kind)).toContain('key');
   });
 });

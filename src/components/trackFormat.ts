@@ -38,6 +38,7 @@ export const REASON_KIND_LABEL: Record<SuggestionReason['kind'], string> = {
   energy: 'Energy',
   cooccurrence: 'In real sets',
   similarity: 'Similar',
+  style: 'Lane',
 };
 
 /** Energy 1..10 mapped onto a cool→warm ramp so the chip reads like a level meter. */

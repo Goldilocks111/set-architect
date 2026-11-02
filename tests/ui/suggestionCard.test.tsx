@@ -37,6 +37,14 @@ describe('<SuggestionCard />', () => {
     expect(screen.getByText('In real sets')).toBeInTheDocument();
   });
 
+  it('renders a style reason as a "Lane" chip', () => {
+    const s: Suggestion = { ...base, reasons: [...base.reasons, { kind: 'style', label: 'Same lane: melodic techno', score: 0.9 }] };
+    render(<SuggestionCard suggestion={s} onAdd={() => {}} />);
+    const chip = screen.getByText('Same lane: melodic techno').closest('li')!;
+    expect(chip).toHaveAttribute('data-kind', 'style');
+    expect(chip).toHaveTextContent('Lane');
+  });
+
   it('calls onAdd with the track', () => {
     const onAdd = vi.fn();
     render(<SuggestionCard suggestion={base} onAdd={onAdd} />);

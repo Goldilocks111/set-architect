@@ -4,13 +4,16 @@ import { isEnergyBoostKey, parseCamelot, scoreKeyTransition } from './camelot';
 import { scoreBpmTransition } from './bpm';
 import { isComplete } from '@/lib/completeness';
 import { energyTargetAt, scoreEnergyTransition } from './energy';
+import { isCompliant, isCompliantOpener } from './compliance';
+import { laneProfile, styleScore } from './style';
 
 export const DEFAULT_WEIGHTS: Weights = {
-  key: 0.3,
-  bpm: 0.2,
+  key: 0.25,
+  bpm: 0.15,
   energy: 0.2,
-  cooccurrence: 0.2,
+  cooccurrence: 0.15,
   similarity: 0.1,
+  style: 0.15,
 };
 
 const MAX_RESULTS = 10;
@@ -28,6 +31,8 @@ export function suggestNext(args: {
   weights?: Weights;
   adjacency?: Map<string, number>;
   similarity?: Map<string, number>;
+  /** Max suggestions returned (default 10). */
+  limit?: number;
 }): Suggestion[] {
   const w = args.weights ?? DEFAULT_WEIGHTS;
   const { playlist } = args;
@@ -39,6 +44,7 @@ export function suggestNext(args: {
   const target = energyTargetAt(args.template, playlist.length, args.plannedLength);
   const inSet = new Set(playlist.map((t) => t.id));
   const recent = scored.slice(-FLAT_RUN);
+  const lanes = laneProfile(scored);
 
   const out: Suggestion[] = [];
   for (const track of args.candidates) {
@@ -131,9 +137,26 @@ export function suggestNext(args: {
       reasons.push({ kind: 'similarity', label: `Similar sound (${Math.round(sim * 100)}% match)`, score: sim });
     }
 
+    // Style: lane fit against the recent set; untagged on either side is neutral and gives no reason.
+    const st = styleScore(lanes, track);
+    const style = st?.score ?? UNKNOWN_NEUTRAL;
+    if (st) reasons.push({ kind: 'style', label: st.label ?? 'Nearby lane', score: st.score });
+
     const score =
-      w.key * keyScore + w.bpm * bpmScore + w.energy * energy.score + w.cooccurrence * cooc + w.similarity * sim;
-    out.push({ track, score, reasons });
+      w.key * keyScore +
+      w.bpm * bpmScore +
+      w.energy * energy.score +
+      w.cooccurrence * cooc +
+      w.similarity * sim +
+      w.style * style;
+    const compliant = last ? isCompliant(last, track, target) : isCompliantOpener(track, target);
+    out.push({ track, score, reasons, compliant });
   }
-  return out.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS);
+  // Criterion 3: every compliant candidate ranks above every non-compliant one; each tier by score.
+  return out.sort(byComplianceThenScore).slice(0, args.limit ?? MAX_RESULTS);
+}
+
+/** Compliant first, then score; suggestions without the flag share the non-compliant tier. */
+export function byComplianceThenScore(a: Suggestion, b: Suggestion): number {
+  return Number(b.compliant === true) - Number(a.compliant === true) || b.score - a.score;
 }
