@@ -4,7 +4,7 @@ import { dataDir, dataRoot } from '../../src/lib/dataDir';
 import { activeCooldowns, degradedProviders, readCooldowns } from '../data/cooldowns';
 import { createFetchGuard } from '../data/guardFetch';
 import { RequestGate, dayKey, loadDailyCounts, saveDailyCounts } from '../search/guard';
-import { auditCrate, buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, isWarmEntry, selectWarmTargets, warmStylesMode, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
+import { BENCH_WITHOUT, RECS_BUDGET, auditCrate, buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, isWarmEntry, selectWarmTargets, warmStylesMode, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
 import type { Suggestion, Track } from '../../src/types/track';
 
 try {
@@ -19,8 +19,7 @@ const limitArg = process.argv.slice(2).find((a) => a.startsWith('--limit='));
 const WARM = process.argv.slice(2).includes('--warm');
 const LIMIT = limitArg ? Number(limitArg.split('=')[1]) : undefined;
 
-/** Hard per-provider request budgets (daily counts shared with the other benches). */
-const BUDGET: Record<string, number> = { spotify: 60, deezer: 300, lastfm: 400, musicbrainz: 200, reccobeats: 200 };
+const BUDGET = RECS_BUDGET;
 /** Minimum gap between requests per provider (ms). MusicBrainz is 1 req/s. */
 const GAP_MS: Record<string, number> = { spotify: 340, deezer: 340, lastfm: 250, musicbrainz: 1100, reccobeats: 340 };
 const gates = new Map<string, RequestGate>();
@@ -93,7 +92,7 @@ async function main(): Promise<void> {
     console.log(`warm: ${refs.length - todo.length}/${refs.length} warm, resolving ${todo.length}`);
     for (const [i, r] of todo.entries()) {
       if (guard.stopped.size || Object.keys(guard.refused).length) break; // a stopped or exhausted provider ends the run
-      const t = await resolveWithStatus(r.artist, r.title, { without: ['itunes'], retryWithout: ['itunes'] });
+      const t = await resolveWithStatus(r.artist, r.title, { without: BENCH_WITHOUT, retryWithout: BENCH_WITHOUT });
       if (i % 150 === 149) await settleStyles(); // keep the styles queue under its cap (200 waiting)
       if (i % 10 === 9) console.log(`  ${i + 1}/${todo.length}${t.unresolved ? ' (last: incomplete)' : ''}`);
     }
@@ -125,7 +124,7 @@ async function main(): Promise<void> {
   for (const [i, sc] of subset.entries()) {
     const t0 = Date.now();
     const playlist: Track[] = [];
-    for (const ref of sc.set) playlist.push(await resolveWithStatus(ref.artist, ref.title));
+    for (const ref of sc.set) playlist.push(await resolveWithStatus(ref.artist, ref.title, { without: BENCH_WITHOUT, retryWithout: BENCH_WITHOUT }));
     await settleStyles(); // the set's own styles lookups land before the engine reads the cache
     const incomplete = playlist.filter((t) => t.unresolved).length;
     const { suggestions, crateKnown } = await assembleSuggestions(

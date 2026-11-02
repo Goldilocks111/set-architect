@@ -7,6 +7,7 @@ export const HOSTS: Array<[RegExp, string]> = [
   [/(^|\.)musicbrainz\.org$/, 'musicbrainz'],
   [/(^|\.)reccobeats\.com$/, 'reccobeats'],
   [/(^|\.)audioscrobbler\.com$/, 'lastfm'],
+  [/(^|\.)googleapis\.com$/, 'youtube'], // YouTube Data API (shared 10k/day key): a bench budget of 0 refuses it
 ];
 
 /** Thrown (not an HttpError) so the app's persisted breaker never sees bench refusals. */

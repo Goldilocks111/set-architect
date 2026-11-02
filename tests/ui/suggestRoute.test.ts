@@ -692,7 +692,7 @@ describe('crate background fill and known report', () => {
     mocks.resolver.resolveWithStatus.mockResolvedValue({});
     const deps = await loadSuggestDeps();
     await deps.backgroundResolve!('A', 'B');
-    expect(mocks.resolver.resolveWithStatus).toHaveBeenCalledWith('A', 'B', { without: ['itunes'], retryWithout: ['itunes'] });
+    expect(mocks.resolver.resolveWithStatus).toHaveBeenCalledWith('A', 'B', { without: ['itunes', 'youtube'], retryWithout: ['itunes', 'youtube'] });
     mocks.resolver.resolveWithStatus.mockClear();
     for (let i = 0; i < 30; i++) breaker.takeBudget('spotify', { app: true }); // app quota spent
     await deps.backgroundResolve!('A', 'C');

@@ -446,18 +446,20 @@ export async function loadSuggestDeps(): Promise<SuggestDeps> {
     const resolver = await import('@/lib/resolver');
     // the cached resolver: candidates land in the metadata cache, so a later refresh costs no provider call
     deps.resolveTrack = async (artist, title, opts) => {
-      // Candidate work leaves at least half of Spotify's and iTunes' minute budget to the user's own resolves.
+      // Candidate work leaves at least half of Spotify's and iTunes' minute budget to the user's own resolves, and
+      // never spends YouTube search.list quota (100 units of a shared 10k/day key): the card builds a search link instead.
       const { budgetHeadroom, CANDIDATE_MIN_HEADROOM } = await import('@/lib/search/breaker');
-      const without = (['spotify', 'itunes'] as const).filter((n) => budgetHeadroom(n, { app: true }) < CANDIDATE_MIN_HEADROOM);
-      return resolver.resolveWithStatus(artist, title, { ...opts, ...(without.length ? { without } : {}) });
+      const without = ['youtube', ...(['spotify', 'itunes'] as const).filter((n) => budgetHeadroom(n, { app: true }) < CANDIDATE_MIN_HEADROOM)];
+      return resolver.resolveWithStatus(artist, title, { ...opts, without });
     };
     deps.getSimilarTracks = resolver.getSimilarTracks;
     deps.queueStyles = (t) => resolver.queueStyles(t);
     deps.backgroundResolve = async (artist, title) => {
-      // Only while Spotify and Deezer both have >= 50% budget headroom and no cooldown; iTunes is left out of this path entirely.
+      // Only while Spotify and Deezer both have >= 50% budget headroom and no cooldown; iTunes and YouTube are left out
+      // of this path entirely (retries included).
       const { budgetHeadroom, CANDIDATE_MIN_HEADROOM } = await import('@/lib/search/breaker');
       if (budgetHeadroom('spotify', { app: true }) < CANDIDATE_MIN_HEADROOM || budgetHeadroom('deezer', { app: true }) < CANDIDATE_MIN_HEADROOM) return;
-      await resolver.resolveWithStatus(artist, title, { without: ['itunes'], retryWithout: ['itunes'] });
+      await resolver.resolveWithStatus(artist, title, { without: ['itunes', 'youtube'], retryWithout: ['itunes', 'youtube'] });
     };
   } catch {
     // resolver unavailable: demo pool only

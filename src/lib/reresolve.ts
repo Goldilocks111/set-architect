@@ -41,8 +41,10 @@ const realDeps = (q: Queue): Deps => ({
     q.deps.resolve ??
     (async (artist, title, opts) => {
       const { resolveWithStatus } = await import('./resolver');
-      // the exclusion is intentional (crate fill): it must survive every hop of the retry chain
-      return resolveWithStatus(artist, title, { force: true, ...(opts?.without?.length ? { without: opts.without, retryWithout: opts.without } : {}) });
+      // a retry is automatic, so it never spends YouTube search.list quota; the caller's exclusion is intentional
+      // (crate fill) and must survive every hop of the retry chain
+      const without = [...new Set([...(opts?.without ?? []), 'youtube'])];
+      return resolveWithStatus(artist, title, { force: true, without, ...(opts?.without?.length ? { retryWithout: opts.without } : {}) });
     }),
 });
 

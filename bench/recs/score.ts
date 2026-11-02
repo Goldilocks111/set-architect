@@ -23,6 +23,11 @@ export const MIN_COMPLIANT = 8;
 export const MIN_CRATE_READY = 30;
 export const SHUFFLE_SEED = 20261102;
 
+/** Hard per-provider request budgets (daily counts shared with the other benches). YouTube is never automatic: 0. */
+export const RECS_BUDGET: Record<string, number> = { spotify: 60, deezer: 300, lastfm: 400, musicbrainz: 200, reccobeats: 200, youtube: 0 };
+/** Adapters every bench resolve leaves out: iTunes IP-blocks us; YouTube search.list spends a shared quota. */
+export const BENCH_WITHOUT = ['itunes', 'youtube'];
+
 export function validateScenarios(list: Scenario[]): string[] {
   const errors: string[] = [];
   const seen = new Set<string>();
