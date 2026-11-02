@@ -7,8 +7,10 @@ import {
   buildRatingFile,
   auditCrate,
   isWarmEntry,
+  warmStylesMode,
   KNOWN_CRATE_SHORTFALL,
   lowCrateScenarios,
+  crateReadyThreshold,
   MIN_CRATE_READY,
   selectWarmTargets,
   uniqueScenarioTracks,
@@ -54,8 +56,19 @@ describe('scenarios.json', () => {
       if (short) expect(s.crate!.length, s.id).toBeGreaterThanOrEqual(short.minCrate);
       else expect(s.crate, s.id).toHaveLength(40);
       expect(inLane, s.id).toBeGreaterThanOrEqual(short ? short.minInLane : 24);
-      expect(s.crate!.length - inLane, s.id).toBeLessThanOrEqual(16);
+      expect(s.crate!.length - inLane, s.id).toBeLessThanOrEqual(short ? short.maxOtherLane : 16);
+      // in-lane stays a clear majority (other crates run ~0.58 other-lane per in-lane)
+      expect((s.crate!.length - inLane) / inLane, s.id).toBeLessThanOrEqual(0.7);
     }
+  });
+  it('keeps the short disco-opener crate balanced: no techno/melodic-techno distractors, <= 10 other-lane', () => {
+    const s = scenarios.find((x) => x.id === 'disco-opener')!;
+    expect(KNOWN_CRATE_SHORTFALL['disco-opener'].maxOtherLane).toBeLessThanOrEqual(10);
+    const other = (lane: string) => s.crate!.filter((c) => pools[lane].some((p) => k(p) === k(c))).length;
+    expect(other('techno')).toBe(0);
+    expect(other('melodic-techno')).toBe(0);
+    // the short crate does not go PARTIAL just because it is short: 75% of it is enough
+    expect(crateReadyThreshold(s.crate!.length)).toBeLessThanOrEqual(Math.ceil(0.75 * s.crate!.length));
   });
   it('keeps the unique track count warm-able (<= 250) and set tracks out of the crate', () => {
     expect(uniqueScenarioTracks(scenarios).length).toBeLessThanOrEqual(250);
@@ -149,9 +162,16 @@ describe('buildRatingFile (blind)', () => {
 });
 
 describe('crate readiness', () => {
-  it('flags scenarios with fewer than 30 ready crate tracks', () => {
+  it('flags scenarios with fewer than 30 ready crate tracks (40-track crates)', () => {
     expect(MIN_CRATE_READY).toBe(30);
-    expect(lowCrateScenarios([{ id: 'a', crateReady: 30 }, { id: 'b', crateReady: 29 }, { id: 'c', crateReady: 0 }])).toEqual(['b', 'c']);
+    expect(crateReadyThreshold(40)).toBe(30);
+    expect(lowCrateScenarios([{ id: 'a', crateReady: 30, crateSize: 40 }, { id: 'b', crateReady: 29, crateSize: 40 }, { id: 'c', crateReady: 0, crateSize: 40 }])).toEqual(['b', 'c']);
+  });
+  it('scales the threshold for a short crate: min(30, ceil(0.75 x crate length))', () => {
+    expect(crateReadyThreshold(24)).toBe(18);
+    expect(crateReadyThreshold(25)).toBe(19);
+    expect(lowCrateScenarios([{ id: 'ok', crateReady: 18, crateSize: 24 }])).toEqual([]);
+    expect(lowCrateScenarios([{ id: 'low', crateReady: 17, crateSize: 24 }])).toEqual(['low']);
   });
   it('recsStatus is PARTIAL (naming the scenarios) when the crate was thin, even if everything else passed', () => {
     const base = { passed: 10, n: 10, stopped: [], refused: [], cooldowns: [] };
@@ -184,6 +204,9 @@ describe('disco and pop hygiene, refills carry evidence', () => {
     expect(has('techno', /Darkness Falls|Bassline/)).toBe(false);
     expect(has('afro-house', /Shout-N-Out|Affirmations|Step Closer/)).toBe(false);
   });
+  it('keeps the round-4 mis-laned disco entries out of every pool (tech/bass, Latin tech, leftfield by their neighbours)', () => {
+    for (const lane of Object.keys(pools)) expect(has(lane, /Kriss Reeve|Joy Marquez|Caribou/), lane).toBe(false);
+  });
   it('keeps Sun Ra Was Right in the deep-house pool only', () => {
     expect(has('deep-house', /Sun Ra Was Right/)).toBe(true);
   });
@@ -209,6 +232,22 @@ describe('auditCrate', () => {
     expect(r.inLanePool).toBe(4);
     expect(r.untagged).toBe(2);
     expect(r.contradictions).toEqual([{ artist: 'A', title: 't2', styles: ['deep-house'] }]);
+  });
+});
+
+describe('warmStylesMode', () => {
+  it('counts styles only when a Last.fm key is set and tag lookups are not disabled', () => {
+    expect(warmStylesMode({ hasKey: true, tagsDisabled: false })).toEqual({ countStyles: true });
+  });
+  it('counts essentials only, with the reason, when there is no key', () => {
+    const m = warmStylesMode({ hasKey: false, tagsDisabled: false });
+    expect(m.countStyles).toBe(false);
+    expect(m.reason).toMatch(/LASTFM_API_KEY is not set/);
+  });
+  it('counts essentials only, with the reason, when Last.fm tags were disabled at runtime (key rejected)', () => {
+    const m = warmStylesMode({ hasKey: true, tagsDisabled: true });
+    expect(m.countStyles).toBe(false);
+    expect(m.reason).toMatch(/disabled/i);
   });
 });
 

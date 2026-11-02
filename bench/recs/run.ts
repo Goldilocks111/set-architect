@@ -4,7 +4,7 @@ import { dataDir, dataRoot } from '../../src/lib/dataDir';
 import { activeCooldowns, degradedProviders, readCooldowns } from '../data/cooldowns';
 import { createFetchGuard } from '../data/guardFetch';
 import { RequestGate, dayKey, loadDailyCounts, saveDailyCounts } from '../search/guard';
-import { auditCrate, buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, isWarmEntry, selectWarmTargets, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
+import { auditCrate, buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, isWarmEntry, selectWarmTargets, warmStylesMode, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
 import type { Suggestion, Track } from '../../src/types/track';
 
 try {
@@ -75,12 +75,19 @@ async function main(): Promise<void> {
     const refs = uniqueScenarioTracks(subset);
     console.log(`warm: ${refs.length} unique tracks across ${subset.length} scenarios`);
     // warm = essentials complete AND styles settled; a complete track with unsettled styles is a free cache hit that re-queues its styles lookup
-    const stylesPossible = !!process.env.LASTFM_API_KEY?.trim();
-    if (!stylesPossible) console.log('warm: LASTFM_API_KEY is not set, so styles can never settle; counting essentials only (lane fit will be blind)');
+    const { lastfmTagsDisabled } = await import('../../src/lib/sources/lastfmTags');
+    const hasKey = !!process.env.LASTFM_API_KEY?.trim();
+    // re-read on every count: a rejected key disables tag lookups mid-run
+    const stylesMode = () => warmStylesMode({ hasKey, tagsDisabled: lastfmTagsDisabled() });
+    const sayWhy = () => {
+      const m = stylesMode();
+      if (!m.countStyles) console.log(`warm: ${m.reason}; counting essentials only (lane fit will be blind)`);
+    };
+    sayWhy();
     const isWarm = (r: { artist: string; title: string }) =>
       isWarmEntry(getEntry(trackKeyOf(r.artist, r.title)), {
         isComplete: (f) => isComplete({ id: 'w', artist: r.artist, title: r.title, sources: {}, ...f } as Track),
-        stylesSettled: (e) => !stylesPossible || stylesSettled(e),
+        stylesSettled: (e) => !stylesMode().countStyles || stylesSettled(e),
       });
     const { todo } = selectWarmTargets(refs, isWarm);
     console.log(`warm: ${refs.length - todo.length}/${refs.length} warm, resolving ${todo.length}`);
@@ -91,6 +98,7 @@ async function main(): Promise<void> {
       if (i % 10 === 9) console.log(`  ${i + 1}/${todo.length}${t.unresolved ? ' (last: incomplete)' : ''}`);
     }
     await settleStyles(); // the final count includes the styles lookups queued above
+    if (hasKey && lastfmTagsDisabled()) sayWhy(); // disabled during this run
     const left = selectWarmTargets(refs, isWarm);
     const stoppedW = [...guard.stopped.keys()];
     const refusedW = Object.keys(guard.refused);
@@ -111,7 +119,7 @@ async function main(): Promise<void> {
 
   const toCrate = (r: { artist: string; title: string }, i: number): Track => ({ id: `crate-${i}`, artist: r.artist, title: r.title, sources: {} });
   const results: Array<{ scenario: Scenario; suggestions: Suggestion[] }> = [];
-  const rows: Array<ScenarioScore & Record<string, unknown> & { id: string; crateReady: number }> = [];
+  const rows: Array<ScenarioScore & Record<string, unknown> & { id: string; crateReady: number; crateSize: number }> = [];
   for (const [i, sc] of subset.entries()) {
     const t0 = Date.now();
     const playlist: Track[] = [];
@@ -134,7 +142,7 @@ async function main(): Promise<void> {
     );
     results.push({ scenario: sc, suggestions });
     rows.push({
-      id: sc.id, lane: sc.lane, setSize: sc.set.length, incompleteInSet: incomplete, crateReady: crateKnown.length, ...score, audit, pass: criterion3Holds(score),
+      id: sc.id, lane: sc.lane, setSize: sc.set.length, incompleteInSet: incomplete, crateReady: crateKnown.length, crateSize: (sc.crate ?? []).length, ...score, audit, pass: criterion3Holds(score),
       top10: suggestions.slice(0, 10).map((s) => ({ artist: s.track.artist, title: s.track.title, score: s.score, compliant: s.compliant, reasons: s.reasons.map((r) => r.label) })),
       ms: Date.now() - t0,
     });

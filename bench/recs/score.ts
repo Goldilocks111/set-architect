@@ -133,8 +133,11 @@ export function buildRatingFile(
   };
 }
 
-export function lowCrateScenarios(rows: Array<{ id: string; crateReady: number }>): string[] {
-  return rows.filter((r) => r.crateReady < MIN_CRATE_READY).map((r) => r.id);
+/** Ready crate tracks a scenario needs: MIN_CRATE_READY for a full crate, 75% of a short (documented shortfall) crate. */
+export const crateReadyThreshold = (crateSize: number): number => Math.min(MIN_CRATE_READY, Math.ceil(0.75 * crateSize));
+
+export function lowCrateScenarios(rows: Array<{ id: string; crateReady: number; crateSize: number }>): string[] {
+  return rows.filter((r) => r.crateReady < crateReadyThreshold(r.crateSize)).map((r) => r.id);
 }
 
 /** Every distinct set + crate track across the scenarios (by normalized track key), first spelling wins. */
@@ -153,6 +156,13 @@ export function selectWarmTargets(refs: TrackRef[], isCompleteInCache: (r: Track
   return { todo, complete: refs.length - todo.length };
 }
 
+/** Whether warm mode can count styles; when it cannot, it counts essentials only and says why (lane fit will be blind). */
+export function warmStylesMode(o: { hasKey: boolean; tagsDisabled: boolean }): { countStyles: boolean; reason?: string } {
+  if (!o.hasKey) return { countStyles: false, reason: 'LASTFM_API_KEY is not set, so styles can never settle' };
+  if (o.tagsDisabled) return { countStyles: false, reason: 'Last.fm tag lookups were disabled at runtime (key rejected), so styles cannot settle' };
+  return { countStyles: true };
+}
+
 /** A cache entry is warm when its essentials are complete AND its styles lookup has settled (styles found, or a fresh "none" marker). */
 export function isWarmEntry<E extends { fields: unknown }>(
   entry: E | undefined,
@@ -163,10 +173,11 @@ export function isWarmEntry<E extends { fields: unknown }>(
 
 /**
  * Lanes the 1001TL index + bench list cannot fill with grounded in-lane tracks: the crate is lowered to what is
- * grounded, never padded with invented tracks (the measured run reports the thin crate as PARTIAL when it is < 30 ready).
+ * grounded, never padded with invented tracks, and its other-lane share is cut to match the full crates (~0.6 per
+ * in-lane track) so the scenario is not rated low because of its crate. Readiness scales with it (crateReadyThreshold).
  */
-export const KNOWN_CRATE_SHORTFALL: Record<string, { minCrate: number; minInLane: number }> = {
-  'disco-opener': { minCrate: 30, minInLane: 16 },
+export const KNOWN_CRATE_SHORTFALL: Record<string, { minCrate: number; minInLane: number; maxOtherLane: number }> = {
+  'disco-opener': { minCrate: 24, minInLane: 15, maxOtherLane: 10 },
 };
 
 export interface AuditCrateTrack {

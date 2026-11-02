@@ -968,11 +968,6 @@
    "source": "1001tl-index"
   },
   {
-   "artist": "Kriss Reeve",
-   "title": "Shake Your Body",
-   "source": "1001tl-index"
-  },
-  {
    "artist": "Dance Reaction",
    "title": "Disco Train ‘96",
    "source": "1001tl-index"
@@ -980,16 +975,6 @@
   {
    "artist": "Human 80s",
    "title": "Bit Of Funk",
-   "source": "1001tl-index"
-  },
-  {
-   "artist": "Joy Marquez",
-   "title": "Dance",
-   "source": "1001tl-index"
-  },
-  {
-   "artist": "Caribou",
-   "title": "Honey",
    "source": "1001tl-index"
   },
   {
@@ -1003,6 +988,12 @@
    "title": "All The People",
    "source": "1001tl-index",
    "note": "adjacent to Funkduster - Keep It Pumpin in 1001TL sets"
+  },
+  {
+   "artist": "Southside Spinners",
+   "title": "Luvstruck",
+   "source": "1001tl-index",
+   "note": "adjacent to Dance Reaction - Disco Train ‘96 in 1001TL sets"
   }
  ],
  "house": [
