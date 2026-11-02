@@ -78,7 +78,7 @@ describe('callback', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
   it('exchanges the code and stores an encrypted httpOnly cookie', async () => {
-    fetchMock.mockImplementation(() => json({ access_token: 'AT', refresh_token: 'RT', expires_in: 3600 }));
+    fetchMock.mockImplementation(() => json({ access_token: 'plain-access-token-7f3a', refresh_token: 'plain-refresh-token-9c1d', expires_in: 3600 }));
     const res = await callback(req('http://localhost:3001/api/spotify/callback?code=c&state=s', `${STATE_COOKIE}=s`));
     expect(res.status).toBe(302);
     expect(new URL(res.headers.get('location')!).pathname).toBe('/');
@@ -87,11 +87,13 @@ describe('callback', () => {
     const cookies = res.headers.getSetCookie();
     const session = cookies.find((c) => c.startsWith(SESSION_COOKIE))!;
     expect(session).toContain('HttpOnly');
-    expect(session).not.toContain('AT');
+    // distinctive tokens: a 2-letter probe like 'AT' appears by chance in ~5% of random base64url ciphertexts (the old flake)
+    expect(session).not.toContain('plain-access-token');
+    expect(session).not.toContain('plain-refresh-token');
     const value = session.split(';')[0].split('=')[1];
     expect(open<{ accessToken: string; refreshToken: string }>(value)).toMatchObject({
-      accessToken: 'AT',
-      refreshToken: 'RT',
+      accessToken: 'plain-access-token-7f3a',
+      refreshToken: 'plain-refresh-token-9c1d',
     });
   });
 });

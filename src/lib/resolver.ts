@@ -160,10 +160,11 @@ const NEGATIVE_CACHE_MS = 24 * 60 * 60_000;
  * previewUrl expires within minutes and is never persisted, so a complete cache hit still asks the
  * preview-supplying adapters (through the usual breaker/budget guards) for a fresh one. Essentials stay cached.
  */
-async function withFreshPreview(cached: Track, budgetMs: number): Promise<Track> {
+async function withFreshPreview(cached: Track, budgetMs: number, without?: string[]): Promise<Track> {
   const track: Track = { ...cached, sources: { ...cached.sources } };
   const run = newRun(Date.now() + budgetMs);
   run.only = new Set(['deezer', 'itunes']);
+  if (without?.length) run.without = new Set(without);
   try {
     await withTimeout(resolveInto(track, run), budgetMs, 'preview refresh');
   } catch {
@@ -174,6 +175,9 @@ async function withFreshPreview(cached: Track, budgetMs: number): Promise<Track>
 }
 
 /**
+ * `without` skips adapters for this call only (e.g. headroom-derived, re-evaluated at retry time); `retryWithout`
+ * is the intentional exclusion that also carries into the scheduled retry (crate fill never touches iTunes).
+ *
  * resolveTrack + the completeness gate: consults the persistent metadata cache (a complete entry costs zero
  * adapter calls), keeps manual overrides, and marks a still-incomplete track with `unresolved` and why.
  * A retryable verdict is scheduled on the re-resolve queue here, so every caller gets the same retry/negative-cache
@@ -183,7 +187,7 @@ async function withFreshPreview(cached: Track, budgetMs: number): Promise<Track>
 export async function resolveWithStatus(
   artist: string,
   title: string,
-  opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string }; signal?: AbortSignal; without?: string[] } = {}
+  opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string }; signal?: AbortSignal; without?: string[]; retryWithout?: string[] } = {}
 ): Promise<Track> {
   const track = await resolveCore(artist, title, opts);
   if (!track.unresolved && !opts.signal?.aborted) {
@@ -267,7 +271,7 @@ async function runStyles(key: string, track: Track): Promise<void> {
 async function resolveCore(
   artist: string,
   title: string,
-  opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string }; signal?: AbortSignal; without?: string[] }
+  opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string }; signal?: AbortSignal; without?: string[]; retryWithout?: string[] }
 ): Promise<Track> {
   const key = trackKeyOf(artist, title);
   const budgetMs = opts.budgetMs ?? RESOLVE_BUDGET_MS;
@@ -275,7 +279,7 @@ async function resolveCore(
   if (cached && !opts.force) {
     const fromCache: Track = { ...initialTrack(artist, title, {}), ...cached.fields, sources: { ...cached.sources } };
     const missingNow = missingEssentials(fromCache);
-    if (!missingNow.length) return withFreshPreview(fromCache, budgetMs);
+    if (!missingNow.length) return withFreshPreview(fromCache, budgetMs, opts.without);
     // Every incomplete entry is served from cache (zero adapter calls) until it is due: a retryable one until
     // its retryAt; an exhausted/permanent one for 24 h. Otherwise each request would re-run every adapter.
     if (cached.reason) {
@@ -286,8 +290,9 @@ async function resolveCore(
         const filled = retryable ? undefined : putPrior(key);
         const served = filled ? fromEntry(fromCache, filled) : fromCache;
         const missing = missingEssentials(served);
-        if (!missing.length) return withFreshPreview(served, budgetMs);
-        served.unresolved = { reason: cached.reason, missing, ...(cached.retryAt ? { retryAt: cached.retryAt } : {}) };
+        if (!missing.length) return withFreshPreview(served, budgetMs, opts.without);
+        const exhausted = RETRYABLE_REASONS.includes(cached.reason) && cached.retryAt === undefined;
+        served.unresolved = { reason: exhausted ? 'exhausted' : cached.reason, missing, ...(cached.retryAt ? { retryAt: cached.retryAt } : {}) };
         return served;
       }
     }
@@ -320,9 +325,11 @@ async function resolveCore(
   if (!missing.length) delete merged.unresolved;
   else if (merged.unresolved) {
     // after putResolved: the backoff step is picked from the entry's attempt count
-    const retryAt = scheduleRetry(artist, title, merged.unresolved.reason);
+    const retryAt = scheduleRetry(artist, title, merged.unresolved.reason, opts.retryWithout);
     if (retryAt !== undefined) merged.unresolved = { ...merged.unresolved, retryAt };
     else {
+      // a retryable verdict with nothing left to retry is no longer "retrying automatically"
+      if (RETRYABLE_REASONS.includes(merged.unresolved.reason)) merged.unresolved = { ...merged.unresolved, reason: 'exhausted' };
       // resolution is done: fill the danceability prior if energy is known
       const filled = putPrior(key);
       if (filled) {

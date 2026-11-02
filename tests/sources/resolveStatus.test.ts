@@ -196,7 +196,7 @@ describe('negative cache', () => {
     const fetchFn = mockFetch([]);
     const t = await resolveWithStatus('A', 'T');
     expect(fetchFn).not.toHaveBeenCalled();
-    expect(t.unresolved?.reason).toBe('timeout');
+    expect(t.unresolved?.reason).toBe('exhausted'); // retryable reason, no retries left
   });
   it('a retryable entry past its retryAt is re-resolved; force bypasses the cache', async () => {
     putResolved(KEY, incomplete('timeout'), Date.now() - 1000);

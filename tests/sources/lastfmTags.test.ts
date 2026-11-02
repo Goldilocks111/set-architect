@@ -87,11 +87,19 @@ describe('lastfmTopTags', () => {
   it('paces calls process-wide', async () => {
     vi.stubEnv('LASTFM_API_KEY', 'k');
     configureLastfmPacing(60);
-    const at: number[] = [];
-    mockFetch([['gettoptags', () => { at.push(Date.now()); return tags(['techno', 5], ['house', 4]); }]]);
-    await Promise.all([lastfmTopTags('A', 'T'), lastfmTopTags('B', 'U'), lastfmTopTags('C', 'V')]);
-    expect(at[1] - at[0]).toBeGreaterThanOrEqual(55);
-    expect(at[2] - at[1]).toBeGreaterThanOrEqual(55);
+    vi.useFakeTimers(); // virtual clock: no dependence on real timer jitter under a loaded machine
+    try {
+      const at: number[] = [];
+      mockFetch([['gettoptags', () => { at.push(Date.now()); return tags(['techno', 5], ['house', 4]); }]]);
+      const all = Promise.all([lastfmTopTags('A', 'T'), lastfmTopTags('B', 'U'), lastfmTopTags('C', 'V')]);
+      await vi.advanceTimersByTimeAsync(500);
+      await all;
+      expect(at).toHaveLength(3);
+      expect(at[1] - at[0]).toBeGreaterThanOrEqual(60);
+      expect(at[2] - at[1]).toBeGreaterThanOrEqual(60);
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it('an already-aborted lookup sends no request', async () => {
     vi.stubEnv('LASTFM_API_KEY', 'k');

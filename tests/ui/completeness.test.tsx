@@ -42,6 +42,7 @@ describe('<CompletenessBadge />', () => {
     ['analysis-failed', 'Couldn’t analyse the preview — set values by hand'],
     ['providers-unavailable', 'Providers busy — retrying automatically'],
     ['timeout', 'Still looking — retrying automatically'],
+    ['exhausted', 'Couldn’t find full data after several tries — set values by hand'],
   ] as const)('renders reason %s verbatim and lists missing fields', (reason, copy) => {
     const t = incomplete('a', { bpm: undefined, danceability: undefined, unresolved: { reason, missing: ['bpm', 'danceability'] } });
     render(<CompletenessBadge track={t} resolving={false} />);

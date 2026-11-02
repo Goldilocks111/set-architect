@@ -133,10 +133,21 @@ export function resetBudgets(): void {
 
 /** Like takeBudget but spends nothing: true when a call to `name` would be allowed right now. */
 export function budgetAvailable(name: Name, opts: { app?: boolean } = {}, now = Date.now()): boolean {
-  if (cooldownUntil(name, now)) return false;
-  const room = (key: string, limit: number) => (recentCalls.get(key) ?? []).filter((t) => now - t < 60_000).length < limit;
+  return budgetHeadroom(name, opts, now) > 0;
+}
+
+/** Candidate (background) work runs only while at least this fraction of a provider's minute budget is unspent. */
+export const CANDIDATE_MIN_HEADROOM = 0.5;
+
+/**
+ * Unspent fraction (0..1) of the tightest per-minute budget that applies to `name`; 0 on cooldown, 1 when the
+ * provider has no budget. Spends nothing. Candidate resolves require CANDIDATE_MIN_HEADROOM so the user's own
+ * resolves never starve behind them.
+ */
+export function budgetHeadroom(name: Name, opts: { app?: boolean } = {}, now = Date.now()): number {
+  if (cooldownUntil(name, now)) return 0;
+  const left = (key: string, limit: number) => Math.max(0, 1 - (recentCalls.get(key) ?? []).filter((t) => now - t < 60_000).length / limit);
   const limit = PER_MINUTE_BUDGET[name];
-  if (limit !== undefined && !room(name, limit)) return false;
   const appLimit = opts.app ? APP_PER_MINUTE_BUDGET[name] : undefined;
-  return appLimit === undefined || room(`app:${name}`, appLimit);
+  return Math.min(limit === undefined ? 1 : left(name, limit), appLimit === undefined ? 1 : left(`app:${name}`, appLimit));
 }

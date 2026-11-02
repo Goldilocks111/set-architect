@@ -46,6 +46,9 @@ export interface SuggestDeps {
 /** Incomplete crate items started in the background per suggest request, newest first. */
 export const MAX_CRATE_BACKGROUND_RESOLVES = 2;
 const NEGATIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** The cache already settled this incomplete entry: its retry is not due, or a permanent miss is inside its 24 h window. */
+const isSettled = (entry: CachedEntry | undefined): boolean =>
+  !!entry?.reason && (entry.retryAt !== undefined ? entry.retryAt > Date.now() : (entry.resolvedAt ?? 0) + NEGATIVE_WINDOW_MS > Date.now());
 const crateInflight = new Set<string>();
 export function resetCrateBackground(): void {
   crateInflight.clear();
@@ -204,8 +207,7 @@ export async function assembleSuggestions(
       return;
     }
     // Skip items the cache already settled (retry not due, or a permanent miss inside its 24 h window): they would hog the slots.
-    const settled = entry?.reason && (entry.retryAt !== undefined ? entry.retryAt > Date.now() : (entry.resolvedAt ?? 0) + NEGATIVE_WINDOW_MS > Date.now());
-    if (!settled) toFill.push({ artist: c.artist, title: c.title, key: crateKeys[i] });
+    if (!isSettled(entry)) toFill.push({ artist: c.artist, title: c.title, key: crateKeys[i] });
   });
   // The client sends complete first, then newest first: the first incomplete ones are the newest. Not awaited.
   if (deps.backgroundResolve) {
@@ -286,7 +288,7 @@ export async function assembleSuggestions(
       sources: { ...entry.sources },
     };
     if (hit && isComplete(hit)) cached.push(hit);
-    else toResolve.push(e);
+    else if (!isSettled(entry)) toResolve.push(e); // not-due ones must not hog the per-refresh slice of MAX_CANDIDATE_RESOLVES
   }
   // Resolves that finish inside the budget are used; at the budget the signal stops the rest (what they found is
   // cached as 'timeout' and retried server-side, so a later refresh gets them from the cache).
@@ -373,13 +375,18 @@ export async function loadSuggestDeps(): Promise<SuggestDeps> {
   try {
     const resolver = await import('@/lib/resolver');
     // the cached resolver: candidates land in the metadata cache, so a later refresh costs no provider call
-    deps.resolveTrack = (artist, title, opts) => resolver.resolveWithStatus(artist, title, opts);
+    deps.resolveTrack = async (artist, title, opts) => {
+      // Candidate work leaves at least half of Spotify's and iTunes' minute budget to the user's own resolves.
+      const { budgetHeadroom, CANDIDATE_MIN_HEADROOM } = await import('@/lib/search/breaker');
+      const without = (['spotify', 'itunes'] as const).filter((n) => budgetHeadroom(n, { app: true }) < CANDIDATE_MIN_HEADROOM);
+      return resolver.resolveWithStatus(artist, title, { ...opts, ...(without.length ? { without } : {}) });
+    };
     deps.getSimilarTracks = resolver.getSimilarTracks;
     deps.backgroundResolve = async (artist, title) => {
-      // Only while Spotify and Deezer both have budget and no cooldown; iTunes is left out of this path entirely.
-      const { budgetAvailable } = await import('@/lib/search/breaker');
-      if (!budgetAvailable('spotify', { app: true }) || !budgetAvailable('deezer', { app: true })) return;
-      await resolver.resolveWithStatus(artist, title, { without: ['itunes'] });
+      // Only while Spotify and Deezer both have >= 50% budget headroom and no cooldown; iTunes is left out of this path entirely.
+      const { budgetHeadroom, CANDIDATE_MIN_HEADROOM } = await import('@/lib/search/breaker');
+      if (budgetHeadroom('spotify', { app: true }) < CANDIDATE_MIN_HEADROOM || budgetHeadroom('deezer', { app: true }) < CANDIDATE_MIN_HEADROOM) return;
+      await resolver.resolveWithStatus(artist, title, { without: ['itunes'], retryWithout: ['itunes'] });
     };
   } catch {
     // resolver unavailable: demo pool only
