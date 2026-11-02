@@ -19,6 +19,7 @@ const fieldsOf = (r: MikRow): OverrideFields => ({
   ...(r.bpm !== undefined ? { bpm: r.bpm } : {}),
   ...(r.camelot ? { camelot: r.camelot } : {}),
   ...(r.energy !== undefined ? { energy: r.energy } : {}),
+  ...(r.durationMs !== undefined ? { durationMs: r.durationMs } : {}),
 });
 
 function readText(file: File): Promise<string> {

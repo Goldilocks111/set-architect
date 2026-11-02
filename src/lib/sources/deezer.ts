@@ -1,5 +1,6 @@
 import type { Track } from '@/types/track';
 import { titleMatches } from './match';
+import { lengthAgrees } from '../duration';
 import { fetchJson } from '../http';
 import type { SourceAdapter } from './types';
 
@@ -11,6 +12,7 @@ interface DeezerTrack {
   rank?: number;
   preview?: string;
   isrc?: string;
+  duration?: number; // seconds
   release_date?: string;
   artist?: { name: string };
   album?: { cover_medium?: string; cover_big?: string };
@@ -27,6 +29,7 @@ function mapTrack(t: DeezerTrack): Partial<Track> {
   if (pop !== undefined) out.popularity = pop;
   if (t.preview) out.previewUrl = t.preview;
   if (t.isrc) out.isrc = t.isrc;
+  if (typeof t.duration === 'number' && t.duration > 0) out.durationMs = Math.round(t.duration * 1000);
   const art = t.album?.cover_big ?? t.album?.cover_medium;
   if (art) out.artworkUrl = art;
   const year = t.release_date ? parseInt(t.release_date.slice(0, 4), 10) : NaN;
@@ -91,12 +94,15 @@ export const deezerAdapter: SourceAdapter = {
     const hit = await findHit(partial);
     if (!hit) return {};
     const out = mapTrack(hit);
+    if (!lengthAgrees(partial.title, hit.title)) delete out.durationMs;
     // the provider's own spelling: the resolver keeps it as the display name (it never replaces the caller's artist/title)
     if (hit.artist?.name && hit.title) Object.assign(out, { artist: hit.artist.name, title: hit.title });
     try {
       // Search results omit release_date; the track endpoint has it.
       const detail = await fetchJson<DeezerTrack>(`${BASE}/track/${hit.id}`);
-      Object.assign(out, mapTrack({ ...hit, ...detail }));
+      const more = mapTrack({ ...hit, ...detail });
+      if (!lengthAgrees(partial.title, detail.title ?? hit.title)) delete more.durationMs;
+      Object.assign(out, more);
     } catch {
       // detail is best-effort
     }

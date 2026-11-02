@@ -6,6 +6,7 @@ export interface MikRow {
   bpm?: number;
   camelot?: string;
   energy?: number;
+  durationMs?: number;
 }
 
 // Camelot number for each tonic. B = major (outer wheel), A = minor (inner wheel).
@@ -86,6 +87,7 @@ const HEADERS: Record<string, string[]> = {
   key: ['key', 'key result', 'initial key', 'camelot', 'camelot key'],
   bpm: ['bpm', 'tempo'],
   energy: ['energy', 'energy level', 'energy rating'],
+  duration: ['time', 'duration', 'length'],
   comment: ['comment', 'comments'],
   file: ['file name', 'filename', 'file', 'file path'],
 };
@@ -95,6 +97,14 @@ const num = (s: string | undefined): number | undefined => {
   const v = Number(s.trim().replace(',', '.'));
   return Number.isFinite(v) && v > 0 ? v : undefined;
 };
+
+/** "m:ss" or "h:mm:ss" (MIK's Time column) to ms; undefined for anything else, including 0:00. */
+function parseClock(s: string | undefined): number | undefined {
+  const m = /^(?:(\d{1,2}):)?(\d{1,3}):([0-5]\d)(?:\.\d+)?$/.exec((s ?? '').trim());
+  if (!m) return undefined;
+  const ms = ((Number(m[1] ?? 0) * 60 + Number(m[2])) * 60 + Number(m[3])) * 1000;
+  return ms > 0 ? ms : undefined;
+}
 
 function fromFileName(f: string): { artist: string; title: string } | undefined {
   const base = (f.split(/[\\/]/).pop() ?? '').replace(/\.[A-Za-z0-9]{2,4}$/, '');
@@ -146,7 +156,9 @@ export function parseMikCsv(text: string): { rows: MikRow[]; skipped: number } {
       if (e) energy = Number(e[1]);
     }
     if (energy !== undefined) row.energy = energy;
+    const durationMs = parseClock(get('duration'));
     if (row.bpm === undefined && !row.camelot && row.energy === undefined) { skipped++; continue; }
+    if (durationMs !== undefined) row.durationMs = durationMs;
     rows.push(row);
   }
   return { rows, skipped };

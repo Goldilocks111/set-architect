@@ -18,6 +18,17 @@ describe('musicalKeyToCamelot', () => {
 });
 
 describe('parseMikCsv', () => {
+  it.each([['Time', '6:30', 390000], ['Duration', '3:05', 185000], ['Length', '1:02:03', 3723000], ['Time', '07:15', 435000]])(
+    'reads a %s column (%s)', (header, cell, ms) => {
+      const r = parseMikCsv(`Artist,Title,Key,${header}\nA,B,8A,${cell}`);
+      expect(r.rows[0].durationMs).toBe(ms);
+    }
+  );
+  it('leaves durationMs off for a missing or malformed duration cell', () => {
+    expect(parseMikCsv('Artist,Title,Key,Time\nA,B,8A,').rows[0]).not.toHaveProperty('durationMs');
+    expect(parseMikCsv('Artist,Title,Key,Time\nA,B,8A,abc').rows[0]).not.toHaveProperty('durationMs');
+    expect(parseMikCsv('Artist,Title,Key,Time\nA,B,8A,0:00').rows[0]).not.toHaveProperty('durationMs');
+  });
   it('reads case-insensitive headers (comma)', () => {
     const r = parseMikCsv('ARTIST,title,Key result,Tempo,ENERGY\nDaft Punk,One More Time,F#m,123.5,7\n');
     expect(r).toEqual({ rows: [{ artist: 'Daft Punk', title: 'One More Time', camelot: '11A', bpm: 123.5, energy: 7 }], skipped: 0 });
