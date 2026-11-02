@@ -15,13 +15,14 @@ export async function GET(request: Request) {
 
   let track: Track | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let isHung = false;
   try {
     const { resolveWithStatus } = await import('@/lib/resolver');
     const hung = new Promise<Track>((resolve) => {
-      timer = setTimeout(
-        () => resolve({ id: trackKeyOf(artist, title), artist, title, sources: {}, unresolved: { reason: 'timeout', missing: [...ESSENTIALS] } }),
-        BUDGET_MS + GRACE_MS
-      );
+      timer = setTimeout(() => {
+        isHung = true;
+        resolve({ id: trackKeyOf(artist, title), artist, title, sources: {}, unresolved: { reason: 'timeout', missing: [...ESSENTIALS] } });
+      }, BUDGET_MS + GRACE_MS);
     });
     track = await Promise.race([resolveWithStatus(artist, title, { budgetMs: BUDGET_MS }), hung]);
   } catch {
@@ -38,7 +39,8 @@ export async function GET(request: Request) {
     if (missing.length) {
       const { reason } = track.unresolved;
       let retryAt = track.unresolved.retryAt;
-      if (RETRYABLE_REASONS.includes(reason) && retryAt === undefined) {
+      // resolveWithStatus schedules its own retries; only a hung resolver never got that far
+      if (isHung && RETRYABLE_REASONS.includes(reason) && retryAt === undefined) {
         const { scheduleRetry } = await import('@/lib/reresolve');
         retryAt = scheduleRetry(artist, title, reason);
       }

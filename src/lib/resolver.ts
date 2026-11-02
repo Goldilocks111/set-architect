@@ -1,6 +1,7 @@
 import { trackKeyOf, type Track } from '@/types/track';
 import { ESSENTIALS, RETRYABLE_REASONS, missingEssentials, type IncompleteReason } from './completeness';
 import { getEntry, putResolved } from './metadataCache';
+import { scheduleRetry } from './reresolve';
 import { searchDemoTracks } from './demo';
 import { withTimeout } from './http';
 import { analysePreview, ANALYSIS_TIMEOUT_MS } from './analysis/previewAnalysis';
@@ -167,12 +168,14 @@ async function withFreshPreview(cached: Track, budgetMs: number): Promise<Track>
 /**
  * resolveTrack + the completeness gate: consults the persistent metadata cache (a complete entry costs zero
  * adapter calls), keeps manual overrides, and marks a still-incomplete track with `unresolved` and why.
- * `force` skips the cache short-circuit (used by the re-resolve queue).
+ * A retryable verdict is scheduled on the re-resolve queue here, so every caller gets the same retry/negative-cache
+ * semantics. `force` skips the cache short-circuit (used by the re-resolve queue); `signal` stops the adapter chain
+ * early (the suggest budget), and what was found so far is cached as 'timeout'.
  */
 export async function resolveWithStatus(
   artist: string,
   title: string,
-  opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string } } = {}
+  opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string }; signal?: AbortSignal } = {}
 ): Promise<Track> {
   const key = trackKeyOf(artist, title);
   const budgetMs = opts.budgetMs ?? RESOLVE_BUDGET_MS;
@@ -195,8 +198,14 @@ export async function resolveWithStatus(
 
   const track = initialTrack(artist, title, opts.hints ?? {});
   const run = newRun(Date.now() + budgetMs);
+  const { signal } = opts;
+  const stopped = new Promise<never>((_, reject) => {
+    if (signal?.aborted) reject(new Error('aborted'));
+    signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+  });
+  stopped.catch(() => {}); // only observed through the race below
   try {
-    await withTimeout(resolveInto(track, run), budgetMs, 'resolve');
+    await Promise.race([withTimeout(resolveInto(track, run), budgetMs, 'resolve'), stopped]);
   } catch {
     run.timedOut = true;
   }
@@ -211,6 +220,11 @@ export async function resolveWithStatus(
   const entry = putResolved(key, result);
   const merged: Track = { ...result, ...entry.fields, sources: { ...result.sources, ...entry.sources } };
   if (!missing.length) delete merged.unresolved;
+  else if (merged.unresolved) {
+    // after putResolved: the backoff step is picked from the entry's attempt count
+    const retryAt = scheduleRetry(artist, title, merged.unresolved.reason);
+    if (retryAt !== undefined) merged.unresolved = { ...merged.unresolved, retryAt };
+  }
   return merged;
 }
 

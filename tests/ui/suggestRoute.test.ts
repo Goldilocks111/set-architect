@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   resolver: {
     searchTracks: vi.fn(),
     resolveTrack: vi.fn(),
+    resolveWithStatus: vi.fn(),
     getSimilarTracks: vi.fn(),
   },
   adjacency: {
@@ -230,7 +231,7 @@ describe('neighbor display names (M1)', () => {
         suggestNext,
       }
     );
-    expect(resolveTrack).toHaveBeenCalledWith('Ben Böhmer', 'Breathing In');
+    expect(resolveTrack).toHaveBeenCalledWith('Ben Böhmer', 'Breathing In', expect.anything());
     const { candidates } = suggestNext.mock.calls[0][0] as { candidates: Track[] };
     expect(candidates[0]).toMatchObject({ id: 'r1', artist: 'Ben Böhmer', title: 'Breathing In' });
   });
@@ -242,7 +243,7 @@ describe('neighbor display names (M1)', () => {
       { playlist: [last], template: '60min', plannedLength: 15 },
       { loadAdjacency: async () => ({ getNeighbors: neighbors, pairCount: 1, trackCount: 2 }), resolveTrack }
     );
-    expect(resolveTrack).toHaveBeenCalledWith('Ben Bohmer', 'Breathing In');
+    expect(resolveTrack).toHaveBeenCalledWith('Ben Bohmer', 'Breathing In', expect.anything());
   });
 
   it("prefers the resolver's canonical names when it returns them", async () => {
@@ -328,7 +329,7 @@ describe('loadSuggestDeps demo-adjacency fallback (M3)', () => {
           ? { [demoOnlyKey]: { artist: 'Outside Artist', title: 'Not In Pool' } }
           : {},
     }));
-    mocks.resolver.resolveTrack.mockImplementation(async (artist: string, title: string) => ({
+    mocks.resolver.resolveWithStatus.mockImplementation(async (artist: string, title: string) => ({
       id: 'resolved-outside',
       artist,
       title,
@@ -352,7 +353,7 @@ describe('loadSuggestDeps demo-adjacency fallback (M3)', () => {
     await assembleSuggestions({ playlist: [last], template: '60min', plannedLength: 15 }, { ...deps, suggestNext });
     const args = suggestNext.mock.calls[0][0] as { candidates: Track[]; adjacency: Map<string, number> };
     expect(args.adjacency.get(demoOnlyKey)).toBe(4);
-    expect(mocks.resolver.resolveTrack).toHaveBeenCalledWith('Outside Artist', 'Not In Pool');
+    expect(mocks.resolver.resolveWithStatus).toHaveBeenCalledWith('Outside Artist', 'Not In Pool', expect.anything());
     expect(args.candidates.find((c) => c.id === 'resolved-outside')).toMatchObject({
       artist: 'Outside Artist',
       title: 'Not In Pool',
@@ -374,7 +375,7 @@ describe('loadSuggestDeps demo-adjacency fallback (M3)', () => {
     await assembleSuggestions({ playlist: [last], template: '60min', plannedLength: 15 }, { ...deps, suggestNext });
     const args = suggestNext.mock.calls[0][0] as { candidates: Track[]; adjacency: Map<string, number> };
     expect(args.adjacency.get(poolKey)).toBe(5);
-    expect(mocks.resolver.resolveTrack).not.toHaveBeenCalled();
+    expect(mocks.resolver.resolveWithStatus).not.toHaveBeenCalled();
     expect(args.candidates.some((c) => c.id === seed[1].id)).toBe(true);
   });
 });

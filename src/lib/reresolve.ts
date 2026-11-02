@@ -102,9 +102,10 @@ async function drain(q: Queue): Promise<void> {
       const entry = getEntry(job.key);
       if (entry && isComplete({ id: '', artist: '', title: '', sources: {}, ...entry.fields })) continue;
       try {
-        // resolveWithStatus honours breaker cooldowns and budgets, and updates the metadata cache
+        // resolveWithStatus honours breaker cooldowns and budgets, updates the metadata cache and schedules the
+        // next retry itself; this only covers an injected resolver that doesn't
         const t = await realDeps(q).resolve(job.artist, job.title);
-        if (t.unresolved) scheduleRetry(job.artist, job.title, t.unresolved.reason);
+        if (t.unresolved && t.unresolved.retryAt === undefined) scheduleRetry(job.artist, job.title, t.unresolved.reason);
       } catch {
         // a failed retry is dropped; the client's next request resolves afresh
       }
