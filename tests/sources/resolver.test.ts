@@ -26,6 +26,32 @@ afterEach(() => {
 });
 
 describe('resolveTrack', () => {
+  it('duration precedence: spotify, then deezer, then musicbrainz', async () => {
+    const dz = { ...deezerHit, duration: 300 };
+    const routes = (spotify: boolean): Array<[string, () => Response]> => [
+      ['accounts.spotify.com', () => json({ access_token: 't', expires_in: 3600 })],
+      ['api.spotify.com', () => json({ tracks: { items: spotify ? [{ id: 'S', name: 'T', duration_ms: 390000, artists: [{ name: 'A' }] }] : [] } })],
+      ['api.deezer.com/track', () => json(dz)],
+      ['api.deezer.com/search', () => json({ data: [dz] })],
+      ['itunes.apple.com', () => json({ results: [] })],
+      ['musicbrainz.org', () => json({ recordings: [{ id: 'mb', score: 100, title: 'T', length: 280000 }] })],
+    ];
+    vi.stubEnv('SPOTIFY_CLIENT_ID', 'id');
+    vi.stubEnv('SPOTIFY_CLIENT_SECRET', 'secret');
+    mockFetch(routes(true));
+    let t = await resolveTrack('A', 'T');
+    expect(t.durationMs).toBe(390000);
+    expect(t.sources.durationMs).toBe('spotify');
+    mockFetch(routes(false));
+    t = await resolveTrack('A', 'T');
+    expect(t.durationMs).toBe(300000);
+    expect(t.sources.durationMs).toBe('deezer');
+    mockFetch(routes(false).map(([k, f]) => (k === 'api.deezer.com/track' || k === 'api.deezer.com/search' ? [k, () => json({ data: [] })] : [k, f]) as [string, () => Response]));
+    t = await resolveTrack('A', 'T');
+    expect(t.durationMs).toBe(280000);
+    expect(t.sources.durationMs).toBe('musicbrainz');
+  });
+
   it('spotify supplies spotifyId in the same pass so reccobeats provides energy', async () => {
     vi.stubEnv('SPOTIFY_CLIENT_ID', 'id');
     vi.stubEnv('SPOTIFY_CLIENT_SECRET', 'secret');

@@ -26,6 +26,12 @@ afterEach(() => {
 });
 
 describe('spotify', () => {
+  it('maps duration_ms from the accepted hit only', async () => {
+    mockFetch([tokenRoute, ['api.spotify.com/v1/search', () => json({ tracks: { items: [{ ...hit, duration_ms: 391000 }] } })]]);
+    expect((await spotifyAdapter.enrich(base())).durationMs).toBe(391000);
+    mockFetch([tokenRoute, ['api.spotify.com/v1/search', () => json({ tracks: { items: [{ ...hit, name: 'Other Song', duration_ms: 1000 }] } })]]);
+    expect(await spotifyAdapter.enrich(base())).toEqual({});
+  });
   it('configured only with both credentials', () => {
     expect(spotifyAdapter.configured()).toBe(true);
     vi.stubEnv('SPOTIFY_CLIENT_SECRET', '');

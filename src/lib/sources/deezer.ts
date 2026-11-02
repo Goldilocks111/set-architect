@@ -11,6 +11,7 @@ interface DeezerTrack {
   rank?: number;
   preview?: string;
   isrc?: string;
+  duration?: number; // seconds
   release_date?: string;
   artist?: { name: string };
   album?: { cover_medium?: string; cover_big?: string };
@@ -27,6 +28,7 @@ function mapTrack(t: DeezerTrack): Partial<Track> {
   if (pop !== undefined) out.popularity = pop;
   if (t.preview) out.previewUrl = t.preview;
   if (t.isrc) out.isrc = t.isrc;
+  if (typeof t.duration === 'number' && t.duration > 0) out.durationMs = Math.round(t.duration * 1000);
   const art = t.album?.cover_big ?? t.album?.cover_medium;
   if (art) out.artworkUrl = art;
   const year = t.release_date ? parseInt(t.release_date.slice(0, 4), 10) : NaN;

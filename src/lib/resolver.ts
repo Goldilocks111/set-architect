@@ -48,8 +48,8 @@ const ADAPTERS: SourceAdapter[] = [
 
 // Fields where a given adapter may replace an earlier source's value: SoundStat's analysis beats earlier
 // bpm/key estimates, and iTunes is the preferred previewUrl (Deezer's expires in ~15 min and is only a fallback).
-// previewUrl must not be persisted long-term.
-const OVERRIDES: Record<string, Array<keyof Track>> = { soundstat: ['bpm', 'camelot'], itunes: ['previewUrl'] };
+// previewUrl must not be persisted long-term. Spotify's durationMs beats Deezer's (it is per exact version); MusicBrainz runs last and only fills.
+const OVERRIDES: Record<string, Array<keyof Track>> = { soundstat: ['bpm', 'camelot'], itunes: ['previewUrl'], spotify: ['durationMs'] };
 
 /** Facts about one resolve pass, collected inside the loop so the reason is never guessed afterwards. */
 interface ResolveRun {

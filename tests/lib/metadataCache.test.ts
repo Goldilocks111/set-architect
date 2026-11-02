@@ -16,6 +16,15 @@ beforeEach(() => {
 });
 
 describe('putManualMany', () => {
+  it('persists durationMs and never overwrites a manual value', () => {
+    putResolved('a|d', t({ id: 'a|d', durationMs: 390000, sources: { durationMs: 'spotify' } }));
+    expect(getEntry('a|d')?.fields.durationMs).toBe(390000);
+    expect(getEntry('a|d')?.sources.durationMs).toBe('spotify');
+    const key = 'a|m';
+    putResolved(key, t({ id: key, durationMs: 100000, sources: { durationMs: 'manual' } }));
+    putResolved(key, t({ id: key, durationMs: 200000, sources: { durationMs: 'deezer' } }));
+    expect(getEntry(key)?.fields.durationMs).toBe(100000);
+  });
   it('writes the file once for the whole batch, marks fields manual, and last item wins', () => {
     const spy = vi.spyOn(fs, 'writeFileSync');
     const entries = putManualMany([

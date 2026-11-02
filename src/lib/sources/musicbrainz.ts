@@ -1,5 +1,6 @@
 import type { Track } from '@/types/track';
 import { fetchJson } from '../http';
+import { titleMatches } from './match';
 import type { SourceAdapter } from './types';
 
 const BASE = 'https://musicbrainz.org/ws/2';
@@ -40,17 +41,36 @@ export async function mbGet<T>(path: string): Promise<T> {
 
 export const escapeLucene = (s: string) => s.replace(/(["\\])/g, '\\$1');
 
-async function byIsrc(isrc: string): Promise<string | undefined> {
-  const res = await mbGet<{ recordings?: Array<{ id?: string }> }>(`/isrc/${encodeURIComponent(isrc)}?fmt=json`);
-  return res.recordings?.find((r) => r.id)?.id;
+interface MbRecording {
+  id?: string;
+  title?: string;
+  score?: number;
+  length?: number;
 }
 
-async function bySearch(artist: string, title: string): Promise<string | undefined> {
+/** The accepted recording's id, plus its length when the recording is the wanted song (not just a high-scoring neighbour). */
+interface MbMatch {
+  mbid: string;
+  durationMs?: number;
+}
+
+function accept(r: MbRecording, wantedTitle: string, artist: string): MbMatch | undefined {
+  if (!r.id) return undefined;
+  const ok = typeof r.length === 'number' && r.length > 0 && (!r.title || titleMatches(wantedTitle, r.title, artist));
+  return ok ? { mbid: r.id, durationMs: r.length } : { mbid: r.id };
+}
+
+async function byIsrc(isrc: string, partial: Track): Promise<MbMatch | undefined> {
+  const res = await mbGet<{ recordings?: MbRecording[] }>(`/isrc/${encodeURIComponent(isrc)}?fmt=json`);
+  const r = res.recordings?.find((x) => x.id);
+  return r && accept(r, partial.title, partial.artist);
+}
+
+async function bySearch(artist: string, title: string): Promise<MbMatch | undefined> {
   const q = `artist:"${escapeLucene(artist)}" AND recording:"${escapeLucene(title)}"`;
-  const res = await mbGet<{ recordings?: Array<{ id?: string; score?: number }> }>(
-    `/recording?fmt=json&limit=5&query=${encodeURIComponent(q)}`
-  );
-  return res.recordings?.find((r) => r.id && (r.score ?? 0) >= MIN_SCORE)?.id;
+  const res = await mbGet<{ recordings?: MbRecording[] }>(`/recording?fmt=json&limit=5&query=${encodeURIComponent(q)}`);
+  const r = res.recordings?.find((x) => x.id && (x.score ?? 0) >= MIN_SCORE);
+  return r && accept(r, title, artist);
 }
 
 export const musicbrainzAdapter: SourceAdapter = {
@@ -59,15 +79,16 @@ export const musicbrainzAdapter: SourceAdapter = {
   configured: () => true,
   async enrich(partial: Track) {
     if (partial.mbid) return {};
-    let mbid: string | undefined;
+    let found: MbMatch | undefined;
     if (partial.isrc) {
       try {
-        mbid = await byIsrc(partial.isrc);
+        found = await byIsrc(partial.isrc, partial);
       } catch {
         // unknown ISRC is a 404: fall through to text search
       }
     }
-    if (!mbid) mbid = await bySearch(partial.artist, partial.title);
-    return mbid ? { mbid } : {};
+    if (!found) found = await bySearch(partial.artist, partial.title);
+    if (!found) return {};
+    return found.durationMs !== undefined ? { mbid: found.mbid, durationMs: found.durationMs } : { mbid: found.mbid };
   },
 };
