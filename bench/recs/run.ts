@@ -4,7 +4,7 @@ import { dataDir, dataRoot } from '../../src/lib/dataDir';
 import { activeCooldowns, degradedProviders, readCooldowns } from '../data/cooldowns';
 import { createFetchGuard } from '../data/guardFetch';
 import { RequestGate, dayKey, loadDailyCounts, saveDailyCounts } from '../search/guard';
-import { buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, selectWarmTargets, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
+import { buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, isWarmEntry, selectWarmTargets, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
 import type { Suggestion, Track } from '../../src/types/track';
 
 try {
@@ -66,32 +66,33 @@ async function main(): Promise<void> {
 
   const guard = createFetchGuard({ real: globalThis.fetch, gates, gapMs: GAP_MS });
   globalThis.fetch = guard.fetch;
-  const { resolveWithStatus } = await import('../../src/lib/resolver');
+  const { resolveWithStatus, settleStyles } = await import('../../src/lib/resolver');
   if (WARM) {
-    const { getEntry } = await import('../../src/lib/metadataCache');
+    const { getEntry, stylesSettled } = await import('../../src/lib/metadataCache');
     const { isComplete } = await import('../../src/lib/completeness');
     const { trackKeyOf } = await import('../../src/types/track');
     const refs = uniqueScenarioTracks(subset);
     console.log(`warm: ${refs.length} unique tracks across ${subset.length} scenarios`);
-    const { todo } = selectWarmTargets(refs, (r) => {
-      const e = getEntry(trackKeyOf(r.artist, r.title));
-      return !!e && isComplete({ id: 'w', artist: r.artist, title: r.title, sources: {}, ...e.fields } as Track);
-    });
-    console.log(`warm: ${refs.length - todo.length}/${refs.length} complete, resolving ${todo.length}`);
+    // warm = essentials complete AND styles settled; a complete track with unsettled styles is a free cache hit that re-queues its styles lookup
+    const isWarm = (r: { artist: string; title: string }) =>
+      isWarmEntry(getEntry(trackKeyOf(r.artist, r.title)), {
+        isComplete: (f) => isComplete({ id: 'w', artist: r.artist, title: r.title, sources: {}, ...f } as Track),
+        stylesSettled,
+      });
+    const { todo } = selectWarmTargets(refs, isWarm);
+    console.log(`warm: ${refs.length - todo.length}/${refs.length} warm, resolving ${todo.length}`);
     for (const [i, r] of todo.entries()) {
       if (guard.stopped.size || Object.keys(guard.refused).length) break; // a stopped or exhausted provider ends the run
       const t = await resolveWithStatus(r.artist, r.title, { without: ['itunes'], retryWithout: ['itunes'] });
       if (i % 10 === 9) console.log(`  ${i + 1}/${todo.length}${t.unresolved ? ' (last: incomplete)' : ''}`);
     }
-    const left = selectWarmTargets(refs, (r) => {
-      const e = getEntry(trackKeyOf(r.artist, r.title));
-      return !!e && isComplete({ id: 'w', artist: r.artist, title: r.title, sources: {}, ...e.fields } as Track);
-    });
+    await settleStyles(); // the final count includes the styles lookups queued above
+    const left = selectWarmTargets(refs, isWarm);
     const stoppedW = [...guard.stopped.keys()];
     const refusedW = Object.keys(guard.refused);
     const cdW = degradedProviders(cooldownSeed, readCooldowns(realRoot));
     const partial = stoppedW.length || refusedW.length || cdW.length;
-    console.log(`warm: ${refs.length - left.todo.length}/${refs.length} complete${partial ? ` PARTIAL (stopped ${stoppedW.join(',') || '-'}; budget ${refusedW.join(',') || '-'}; cooldown ${cdW.join(',') || '-'})` : ''}`);
+    console.log(`warm: ${refs.length - left.todo.length}/${refs.length} warm (essentials + styles)${partial ? ` PARTIAL (stopped ${stoppedW.join(',') || '-'}; budget ${refusedW.join(',') || '-'}; cooldown ${cdW.join(',') || '-'})` : ''}`);
     console.log(`Requests: ${[...gates].map(([k, g]) => `${k} ${g.count}/${BUDGET[k]}`).join('  ')}`);
     return;
   }
@@ -101,7 +102,6 @@ async function main(): Promise<void> {
   deps.backgroundResolve = undefined;
   const { setReresolveDeps } = await import('../../src/lib/reresolve');
   setReresolveDeps({ setTimer: () => undefined });
-  const { settleStyles } = await import('../../src/lib/resolver');
 
   const toCrate = (r: { artist: string; title: string }, i: number): Track => ({ id: `crate-${i}`, artist: r.artist, title: r.title, sources: {} });
   const results: Array<{ scenario: Scenario; suggestions: Suggestion[] }> = [];

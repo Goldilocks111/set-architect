@@ -152,3 +152,11 @@ export function selectWarmTargets(refs: TrackRef[], isCompleteInCache: (r: Track
   const todo = refs.filter((r) => !isCompleteInCache(r));
   return { todo, complete: refs.length - todo.length };
 }
+
+/** A cache entry is warm when its essentials are complete AND its styles lookup has settled (styles found, or a fresh "none" marker). */
+export function isWarmEntry<E extends { fields: unknown }>(
+  entry: E | undefined,
+  deps: { isComplete: (fields: any) => boolean; stylesSettled: (e: E) => boolean },
+): boolean {
+  return !!entry && deps.isComplete(entry.fields) && deps.stylesSettled(entry);
+}

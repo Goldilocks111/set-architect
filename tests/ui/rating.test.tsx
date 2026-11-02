@@ -153,6 +153,20 @@ describe('RatingSession', () => {
     expect(screen.getByText('Different')).toBeInTheDocument();
   });
 
+  it('the replace prompt talks about notes when only notes are saved', async () => {
+    render(<RatingSession />);
+    await screen.findByLabelText('Rating file');
+    await upload(mkFile(2));
+    await screen.findByText('Scenario 0');
+    fireEvent.change(screen.getByLabelText('Note'), { target: { value: 'hm' } });
+    const other = mkFile(2);
+    other.scenarios[1].name = 'Changed';
+    await upload(other);
+    const dlg = await screen.findByRole('alertdialog');
+    expect(dlg).toHaveTextContent(/saved notes/i);
+    expect(dlg).not.toHaveTextContent(/\b0 ratings/);
+  });
+
   it('says how many candidates there really are', async () => {
     render(<RatingSession />);
     await screen.findByLabelText('Rating file');

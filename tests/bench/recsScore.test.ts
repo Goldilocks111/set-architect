@@ -5,6 +5,7 @@ import { LANES } from '@/lib/style/taxonomy';
 import type { Suggestion } from '@/types/track';
 import {
   buildRatingFile,
+  isWarmEntry,
   lowCrateScenarios,
   MIN_CRATE_READY,
   selectWarmTargets,
@@ -151,6 +152,31 @@ describe('crate readiness', () => {
     const base = { passed: 10, n: 10, stopped: [], refused: [], cooldowns: [] };
     expect(recsStatus({ ...base, lowCrate: [] })).toBe('PASS');
     expect(recsStatus({ ...base, lowCrate: ['b', 'c'] })).toMatch(/^PARTIAL.*crate.*b, c/);
+  });
+});
+
+describe('pool grounding', () => {
+  const pools: Record<string, Array<{ artist: string; title: string; source: string }>> = JSON.parse(readFileSync(join(__dirname, '../../bench/recs/pools.json'), 'utf8'));
+  const bench = new Set((JSON.parse(readFileSync(join(__dirname, '../../bench/search/tracks.json'), 'utf8')) as Array<{ artist: string; title: string }>).map((t) => `${t.artist}|${t.title}`));
+  it('every pool entry has a source; no entry is from memory in the afro, progressive, melodic-techno and deep-house lanes', () => {
+    for (const [lane, list] of Object.entries(pools)) for (const t of list) expect(['bench', '1001tl-index', 'memory'], `${lane} ${t.artist}`).toContain(t.source);
+    for (const lane of ['afro-house', 'progressive-house', 'melodic-techno', 'deep-house']) {
+      expect(pools[lane].filter((t) => t.source === 'memory').map((t) => `${t.artist} - ${t.title}`), lane).toEqual([]);
+      expect(pools[lane].length, lane).toBeGreaterThanOrEqual(28);
+    }
+  });
+  it("'bench' entries are really in bench/search/tracks.json", () => {
+    for (const list of Object.values(pools)) for (const t of list.filter((x) => x.source === 'bench')) expect(bench.has(`${t.artist}|${t.title}`), t.title).toBe(true);
+  });
+});
+
+describe('isWarmEntry', () => {
+  const deps = { isComplete: (f: any) => f.complete === true, stylesSettled: (e: any) => e.settled === true };
+  it('needs a cache entry with complete essentials AND settled styles', () => {
+    expect(isWarmEntry(undefined, deps)).toBe(false);
+    expect(isWarmEntry({ fields: { complete: false }, settled: true }, deps)).toBe(false);
+    expect(isWarmEntry({ fields: { complete: true }, settled: false }, deps)).toBe(false); // re-queued on the next warm run
+    expect(isWarmEntry({ fields: { complete: true }, settled: true }, deps)).toBe(true);
   });
 });
 

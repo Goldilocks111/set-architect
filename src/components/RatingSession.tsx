@@ -67,6 +67,16 @@ export function summarize(file: RatingFile, ratings: Record<string, Entry>) {
   return { rated, good, total: file.scenarios.length, pass: good >= PASS_SCENARIOS };
 }
 
+function savedWhat(ratings: Record<string, Entry>): string {
+  const all = Object.values(ratings);
+  const r = all.filter((e) => e.rating !== undefined).length;
+  const n = all.filter((e) => e.note).length;
+  const parts = [];
+  if (r) parts.push(`the ${r} rating${r === 1 ? '' : 's'}`);
+  if (n) parts.push(`${r ? '' : 'the '}${n} saved note${n === 1 ? '' : 's'}`);
+  return parts.join(' and ') || 'your progress';
+}
+
 const ring = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F2B33D]';
 const linkCls = `text-[12px] text-[#8A8FA3] underline-offset-2 hover:text-[#E8E4DA] hover:underline ${ring}`;
 const btn = `rounded-md border border-[#E8E4DA]/25 px-3 py-1.5 text-[13px] text-[#E8E4DA] hover:border-[#E8E4DA]/60 disabled:opacity-40 ${ring}`;
@@ -225,7 +235,7 @@ export default function RatingSession() {
 
       {pending && (
         <div role="alertdialog" aria-label="Replace ratings" className="flex flex-col gap-2 rounded-lg border border-[#F2B33D]/50 bg-[#1A1D28] p-3 text-[14px]">
-          <p>This is a different rating file. Replace it and delete the {sum.rated} rating{sum.rated === 1 ? '' : 's'} you have saved?</p>
+          <p>This is a different rating file. Replace it and delete {savedWhat(state.ratings)} you have saved?</p>
           <div className="flex gap-2">
             <button className={btn} onClick={() => setPending(null)}>Keep my ratings</button>
             <button className={`${btn} border-[#F2B33D]/60`} onClick={() => { update({ file: pending, ratings: {}, index: 0 }); setPending(null); }}>Replace and start over</button>
