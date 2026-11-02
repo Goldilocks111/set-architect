@@ -1,5 +1,5 @@
 import { LANES } from '../../src/lib/style/taxonomy';
-import type { ArcTemplate, Suggestion } from '../../src/types/track';
+import { trackKeyOf, type ArcTemplate, type Suggestion } from '../../src/types/track';
 
 export interface TrackRef {
   artist: string;
@@ -19,6 +19,8 @@ export interface Scenario {
 export const TOP_N = 10;
 /** Criterion 3: at least this many of the top 10 are compliant. */
 export const MIN_COMPLIANT = 8;
+/** Below this many scoring-ready crate tracks the suggest pool is padded with demo tracks (assemble DEMO_CRATE_MIN). */
+export const MIN_CRATE_READY = 30;
 export const SHUFFLE_SEED = 20261102;
 
 export function validateScenarios(list: Scenario[]): string[] {
@@ -64,8 +66,9 @@ export function summarizeRecs(rows: ScenarioScore[]): { n: number; passed: numbe
 }
 
 /** PARTIAL on any provider degrade: a run that lost a provider says nothing about recommendation quality. */
-export function recsStatus(o: { passed: number; n: number; stopped: string[]; refused: string[]; cooldowns: string[] }): string {
+export function recsStatus(o: { passed: number; n: number; stopped: string[]; refused: string[]; cooldowns: string[]; lowCrate?: string[] }): string {
   const parts: string[] = [];
+  if (o.lowCrate?.length) parts.push(`crate under ${MIN_CRATE_READY} ready tracks (demo-padded): ${o.lowCrate.join(', ')}`);
   if (o.stopped.length) parts.push(`rate-limited: ${o.stopped.join(', ')}`);
   if (o.refused.length) parts.push(`budget exhausted: ${o.refused.join(', ')}`);
   if (o.cooldowns.length) parts.push(`breaker cooldown: ${o.cooldowns.join(', ')}`);
@@ -128,4 +131,24 @@ export function buildRatingFile(
       }),
     })),
   };
+}
+
+export function lowCrateScenarios(rows: Array<{ id: string; crateReady: number }>): string[] {
+  return rows.filter((r) => r.crateReady < MIN_CRATE_READY).map((r) => r.id);
+}
+
+/** Every distinct set + crate track across the scenarios (by normalized track key), first spelling wins. */
+export function uniqueScenarioTracks(list: Scenario[]): TrackRef[] {
+  const seen = new Map<string, TrackRef>();
+  for (const s of list) for (const t of [...s.set, ...(s.crate ?? [])]) {
+    const k = trackKeyOf(t.artist, t.title);
+    if (!seen.has(k)) seen.set(k, { artist: t.artist, title: t.title });
+  }
+  return [...seen.values()];
+}
+
+/** Warm mode resolves only what the cache does not already hold complete (resumable across days). */
+export function selectWarmTargets(refs: TrackRef[], isCompleteInCache: (r: TrackRef) => boolean): { todo: TrackRef[]; complete: number } {
+  const todo = refs.filter((r) => !isCompleteInCache(r));
+  return { todo, complete: refs.length - todo.length };
 }

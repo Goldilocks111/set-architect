@@ -5,6 +5,10 @@ import { LANES } from '@/lib/style/taxonomy';
 import type { Suggestion } from '@/types/track';
 import {
   buildRatingFile,
+  lowCrateScenarios,
+  MIN_CRATE_READY,
+  selectWarmTargets,
+  uniqueScenarioTracks,
   criterion3Holds,
   recsStatus,
   scoreScenario,
@@ -118,5 +122,34 @@ describe('buildRatingFile (blind)', () => {
     const order = (f: ReturnType<typeof buildRatingFile>) => f.scenarios[0].tracks.map((t) => t.title);
     expect(order(buildRatingFile(results, 7))).toEqual(order(buildRatingFile(results, 7)));
     expect(order(buildRatingFile(results, 7))).not.toEqual(results[0].suggestions.map((s) => s.track.title));
+  });
+});
+
+describe('crate readiness', () => {
+  it('flags scenarios with fewer than 30 ready crate tracks', () => {
+    expect(MIN_CRATE_READY).toBe(30);
+    expect(lowCrateScenarios([{ id: 'a', crateReady: 30 }, { id: 'b', crateReady: 29 }, { id: 'c', crateReady: 0 }])).toEqual(['b', 'c']);
+  });
+  it('recsStatus is PARTIAL (naming the scenarios) when the crate was thin, even if everything else passed', () => {
+    const base = { passed: 10, n: 10, stopped: [], refused: [], cooldowns: [] };
+    expect(recsStatus({ ...base, lowCrate: [] })).toBe('PASS');
+    expect(recsStatus({ ...base, lowCrate: ['b', 'c'] })).toMatch(/^PARTIAL.*crate.*b, c/);
+  });
+});
+
+describe('warm mode selection', () => {
+  it('dedupes set + crate tracks across scenarios by track key', () => {
+    const u = uniqueScenarioTracks(scenarios);
+    const keys = u.map((t) => `${t.artist}|${t.title}`);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(u.length).toBeLessThan(scenarios.reduce((n, s) => n + s.set.length + (s.crate?.length ?? 0), 0));
+    for (const s of scenarios) for (const t of s.set) expect(keys).toContain(`${t.artist}|${t.title}`);
+  });
+  it('skips tracks the cache already holds complete, so a warm run is resumable', () => {
+    const refs = [{ artist: 'A', title: 'one' }, { artist: 'B', title: 'two' }, { artist: 'C', title: 'three' }];
+    const done = new Set(['b|two']);
+    const { todo, complete } = selectWarmTargets(refs, (r) => done.has(`${r.artist.toLowerCase()}|${r.title}`));
+    expect(todo.map((t) => t.title)).toEqual(['one', 'three']);
+    expect(complete).toBe(1);
   });
 });

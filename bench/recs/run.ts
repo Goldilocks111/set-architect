@@ -4,7 +4,7 @@ import { dataDir, dataRoot } from '../../src/lib/dataDir';
 import { activeCooldowns, degradedProviders, readCooldowns } from '../data/cooldowns';
 import { createFetchGuard } from '../data/guardFetch';
 import { RequestGate, dayKey, loadDailyCounts, saveDailyCounts } from '../search/guard';
-import { buildRatingFile, criterion3Holds, recsStatus, scoreScenario, summarizeRecs, validateScenarios, type Scenario } from './score';
+import { buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, selectWarmTargets, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario } from './score';
 import type { Suggestion, Track } from '../../src/types/track';
 
 try {
@@ -15,6 +15,7 @@ try {
 
 const here = __dirname;
 const limitArg = process.argv.slice(2).find((a) => a.startsWith('--limit='));
+const WARM = process.argv.slice(2).includes('--warm');
 const LIMIT = limitArg ? Number(limitArg.split('=')[1]) : undefined;
 
 /** Hard per-provider request budgets (daily counts shared with the other benches). */
@@ -66,6 +67,33 @@ async function main(): Promise<void> {
   const guard = createFetchGuard({ real: globalThis.fetch, gates, gapMs: GAP_MS });
   globalThis.fetch = guard.fetch;
   const { resolveWithStatus } = await import('../../src/lib/resolver');
+  if (WARM) {
+    const { getEntry } = await import('../../src/lib/metadataCache');
+    const { isComplete } = await import('../../src/lib/completeness');
+    const { trackKeyOf } = await import('../../src/types/track');
+    const refs = uniqueScenarioTracks(subset);
+    const { todo } = selectWarmTargets(refs, (r) => {
+      const e = getEntry(trackKeyOf(r.artist, r.title));
+      return !!e && isComplete({ id: 'w', artist: r.artist, title: r.title, sources: {}, ...e.fields } as Track);
+    });
+    console.log(`warm: ${refs.length - todo.length}/${refs.length} complete, resolving ${todo.length}`);
+    for (const [i, r] of todo.entries()) {
+      if (guard.stopped.size || Object.keys(guard.refused).length) break; // a stopped or exhausted provider ends the run
+      const t = await resolveWithStatus(r.artist, r.title, { without: ['itunes'], retryWithout: ['itunes'] });
+      if (i % 10 === 9) console.log(`  ${i + 1}/${todo.length}${t.unresolved ? ' (last: incomplete)' : ''}`);
+    }
+    const left = selectWarmTargets(refs, (r) => {
+      const e = getEntry(trackKeyOf(r.artist, r.title));
+      return !!e && isComplete({ id: 'w', artist: r.artist, title: r.title, sources: {}, ...e.fields } as Track);
+    });
+    const stoppedW = [...guard.stopped.keys()];
+    const refusedW = Object.keys(guard.refused);
+    const cdW = degradedProviders(cooldownSeed, readCooldowns(realRoot));
+    const partial = stoppedW.length || refusedW.length || cdW.length;
+    console.log(`warm: ${refs.length - left.todo.length}/${refs.length} complete${partial ? ` PARTIAL (stopped ${stoppedW.join(',') || '-'}; budget ${refusedW.join(',') || '-'}; cooldown ${cdW.join(',') || '-'})` : ''}`);
+    console.log(`Requests: ${[...gates].map(([k, g]) => `${k} ${g.count}/${BUDGET[k]}`).join('  ')}`);
+    return;
+  }
   const { assembleSuggestions, loadSuggestDeps } = await import('../../src/app/api/suggest/assemble');
   const deps = await loadSuggestDeps();
 
@@ -77,25 +105,27 @@ async function main(): Promise<void> {
     const playlist: Track[] = [];
     for (const ref of sc.set) playlist.push(await resolveWithStatus(ref.artist, ref.title));
     const incomplete = playlist.filter((t) => t.unresolved).length;
-    const { suggestions } = await assembleSuggestions(
+    const { suggestions, crateKnown } = await assembleSuggestions(
       { playlist, template: sc.template, plannedLength: sc.plannedLength, crate: (sc.crate ?? []).map(toCrate) },
       deps,
     );
     const score = scoreScenario(sc, suggestions);
     results.push({ scenario: sc, suggestions });
     rows.push({
-      id: sc.id, lane: sc.lane, setSize: sc.set.length, incompleteInSet: incomplete, ...score, pass: criterion3Holds(score),
+      id: sc.id, lane: sc.lane, setSize: sc.set.length, incompleteInSet: incomplete, crateReady: crateKnown.length, ...score, pass: criterion3Holds(score),
       top10: suggestions.slice(0, 10).map((s) => ({ artist: s.track.artist, title: s.track.title, score: s.score, compliant: s.compliant, reasons: s.reasons.map((r) => r.label) })),
       ms: Date.now() - t0,
     });
-    console.log(`[${i + 1}/${subset.length}] ${sc.id}: ${score.compliant}/${score.n} compliant, reasons ${score.reasonsOnAll ? 'all' : 'MISSING'}, lane ${fmt(score.laneHitRate)}  ${criterion3Holds(score) ? 'ok' : 'FAIL'}`);
+    console.log(`[${i + 1}/${subset.length}] ${sc.id}: ${score.compliant}/${score.n} compliant, reasons ${score.reasonsOnAll ? 'all' : 'MISSING'}, lane ${fmt(score.laneHitRate)}  ${criterion3Holds(score) ? 'ok' : 'FAIL'}  crateReady ${crateKnown.length}/${(sc.crate ?? []).length}`);
   }
 
   const sum = summarizeRecs(rows as any);
   const stopped = [...guard.stopped.keys()];
   const refused = Object.keys(guard.refused);
   const cooldowns = degradedProviders(cooldownSeed, readCooldowns(realRoot));
-  let status = recsStatus({ passed: sum.passed, n: sum.n, stopped, refused, cooldowns });
+  const lowCrate = lowCrateScenarios(rows as any);
+  let status = recsStatus({ passed: sum.passed, n: sum.n, stopped, refused, cooldowns, lowCrate });
+  if (lowCrate.length) console.log(`Thin crate (run npm run bench:recs -- --warm first): ${lowCrate.join(', ')}`);
   if (LIMIT !== undefined && !status.startsWith('PARTIAL')) status = status === 'PASS' ? 'SMOKE' : 'SMOKE (FAIL)';
   console.log(`\nSTATUS: ${status}  criterion 3 holds on ${sum.passed}/${sum.n}; mean lane-hit ${fmt(sum.meanLaneHitRate)}`);
   console.log(`Requests: ${[...gates].map(([k, g]) => `${k} ${g.count}/${BUDGET[k]}`).join('  ')}`);
