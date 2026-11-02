@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { isComplete, RETRYABLE_REASONS, withDanceabilityPrior } from '@/lib/completeness';
 import type { OverrideFields } from '@/lib/overrideValidation';
-import { plannedTrackCount, setPlayedMinutes } from '@/engine';
+import { pairViolations, plannedTrackCount, setPlayedMinutes } from '@/engine';
 import type { Track } from '@/types/track';
 import ArcPicker from './ArcPicker';
 import BillingActions from './BillingActions';
@@ -282,6 +282,11 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
   );
   // played minutes from real durations (estimates when missing) at the chosen play fraction
   const minutes = Math.round(setPlayedMinutes(tracks, playFraction));
+  const rough = useMemo(() => pairViolations(tracks, arc), [tracks, arc]);
+  const scrollToRough = () => {
+    const first = rough[0] && tracks[rough[0].index];
+    document.getElementById(`transition-${first?.id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  };
 
   return (
     <div className="flex min-h-screen flex-col bg-[#12141C] font-[family-name:var(--font-body)] text-[#E8E4DA]">
@@ -293,6 +298,15 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
           <p className="text-[13px] text-[#8A8FA3] tabular-nums" aria-live="polite">
             {tracks.length} of ~{plannedCount} tracks, about {minutes} min
           </p>
+          {rough.length > 0 && (
+            <button
+              type="button"
+              onClick={scrollToRough}
+              className="rounded-md border border-[#EE8B7A]/50 px-2 py-0.5 text-[12px] text-[#EE8B7A] hover:bg-[#EE8B7A]/10 focus-visible:outline-2 focus-visible:outline-[#F2B33D]"
+            >
+              {rough.length} rough {rough.length === 1 ? 'transition' : 'transitions'}
+            </button>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <MikImport tracks={tracks} onApply={applyMik} onImported={mikImported} />

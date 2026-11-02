@@ -14,3 +14,5 @@ export {
   trackTargets,
 } from './energy';
 export { DEFAULT_WEIGHTS, suggestNext } from './suggest';
+export { pairCheck, pairViolations } from './pairs';
+export type { PairIssue, PairStatus } from './pairs';

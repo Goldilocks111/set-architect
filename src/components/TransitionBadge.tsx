@@ -1,4 +1,4 @@
-import { scoreBpmTransition, scoreEnergyTransition, scoreKeyTransition } from '@/engine';
+import { pairCheck, scoreBpmTransition, scoreEnergyTransition, scoreKeyTransition } from '@/engine';
 import type { Track } from '@/types/track';
 import { QUALITY_CLASSES, quality } from './trackFormat';
 
@@ -55,17 +55,36 @@ export function transitionParts({ from, to, target }: Props): Part[] {
 export default function TransitionBadge(props: Props) {
   const parts = transitionParts(props);
   const summary = parts.map((p) => `${p.name}: ${p.detail}`).join('; ');
+  const { issues } = pairCheck(props.from, props.to);
+  const bad = new Set(issues.map((i) => i.kind));
+  const rough = issues.length > 0;
   return (
-    <div className="flex items-center gap-2 py-1 pl-[52px]" aria-label={`Transition: ${summary}`} title={summary}>
+    <div
+      id={`transition-${props.to.id}`}
+      data-violation={rough ? 'true' : undefined}
+      className={`flex flex-wrap items-center gap-x-2 gap-y-0.5 py-1 pl-[52px] ${rough ? 'border-l-2 border-[#EE8B7A] bg-[#EE8B7A]/5' : ''}`}
+      aria-label={`Transition: ${summary}${rough ? `. Rough transition: ${issues.map((i) => i.label).join(', ')}` : ''}`}
+      title={summary}
+    >
       <span aria-hidden className="h-3 w-px bg-[#2A2F3F]" />
       {parts.map((p) => (
         <span
           key={p.name}
-          className={`rounded border px-1.5 text-[10.5px] leading-[18px] tabular-nums ${QUALITY_CLASSES[quality(p.score)]}`}
+          className={`rounded border px-1.5 text-[10.5px] leading-[18px] tabular-nums ${
+            bad.has(p.name.toLowerCase() as 'key' | 'tempo' | 'energy')
+              ? 'border-[#EE8B7A]/60 bg-[#EE8B7A]/15 text-[#EE8B7A]'
+              : QUALITY_CLASSES[quality(p.score)]
+          }`}
         >
           {p.text}
         </span>
       ))}
+      {rough && (
+        <span className="text-[11px] text-[#EE8B7A]">
+          <span aria-hidden>⚠ </span>
+          {issues.map((i) => i.label).join(' · ')}
+        </span>
+      )}
     </div>
   );
 }
