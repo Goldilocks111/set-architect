@@ -78,6 +78,20 @@ describe('<SuggestionBox /> sends the crate', () => {
     expect(body.crate.map((c: CrateTrack) => c.id)).toEqual(['c2', 'c1']);
   });
 
+  it('hands the server-known crate values to onCrateKnown', async () => {
+    const known = [{ key: 'ca 1|ct 1', bpm: 124, camelot: '8A', energy: 6, danceability: 0.7 }];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ suggestions: [], crateKnown: known }))));
+    const onCrateKnown = vi.fn();
+    render(<SuggestionBox tracks={[]} template="60min" plannedLength={15} onAdd={vi.fn()} crate={[item(1)]} onCrateKnown={onCrateKnown} />);
+    await waitFor(() => expect(onCrateKnown).toHaveBeenCalledWith(known), { timeout: 2000 });
+  });
+
+  it('shows how many imported tracks are ready while the crate fills in', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ suggestions: [] }))));
+    render(<SuggestionBox tracks={[]} template="60min" plannedLength={15} onAdd={vi.fn()} crate={[item(1, full), item(2), item(3)]} />);
+    expect(screen.getByText('Imported tracks get analysed a few at a time as you build \u2014 1 of 3 ready.')).toBeInTheDocument();
+  });
+
   it('hints how to fill the crate while it is small', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ suggestions: [] }))));
     render(<SuggestionBox tracks={[]} template="60min" plannedLength={15} onAdd={vi.fn()} crate={[]} />);

@@ -1,6 +1,8 @@
 import { isComplete } from '@/lib/completeness';
 import { trackKeyOf, type Track } from '@/types/track';
 
+export const EMPTY_CRATE_COPY = 'Import a Spotify playlist or a Mixed In Key CSV to fill your crate \u2014 suggestions come from it first.';
+
 /** The DJ's own candidate pool: everything they imported or added, kept in this browser. */
 export const CRATE_KEY = 'setarch:crate:v1';
 export const CRATE_MAX = 2000;
@@ -89,4 +91,34 @@ export function crateForRequest(crate: CrateTrack[], set: Track[]): CrateTrack[]
     .sort((a, b) => Number(b.complete) - Number(a.complete) || b.c.addedAt - a.c.addedAt)
     .slice(0, CRATE_SEND_MAX)
     .map((x) => x.c);
+}
+
+export interface CrateKnownItem {
+  key: string;
+  bpm: number;
+  camelot: string;
+  energy: number;
+  danceability: number;
+  styles?: string[];
+}
+
+/**
+ * Folds what the server's cache knows about crate items into the stored crate (cache values win: manual > provider).
+ * Returns the same array when nothing changed, so a repeat answer never re-renders or re-triggers a refresh.
+ */
+export function mergeCrateKnown(known: CrateKnownItem[], current: CrateTrack[] = loadCrate()): CrateTrack[] {
+  if (!known.length) return current;
+  const byKey = new Map(known.map((k) => [k.key, k]));
+  let changed = false;
+  const next = current.map((c) => {
+    const k = byKey.get(keyOf(c));
+    if (!k) return c;
+    const merged: CrateTrack = { ...c, bpm: k.bpm, camelot: k.camelot, energy: k.energy, danceability: k.danceability, ...(k.styles?.length ? { styles: k.styles } : {}) };
+    if (JSON.stringify(merged) === JSON.stringify(c)) return c;
+    changed = true;
+    return merged;
+  });
+  if (!changed) return current;
+  saveCrate(next);
+  return next;
 }

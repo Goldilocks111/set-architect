@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { addToCrate, clearCrate, CRATE_KEY, CRATE_MAX, CRATE_SEND_MAX, crateForRequest, loadCrate, removeFromCrate, type CrateTrack } from '@/components/crate';
+import { addToCrate, clearCrate, mergeCrateKnown, CRATE_KEY, CRATE_MAX, CRATE_SEND_MAX, crateForRequest, loadCrate, removeFromCrate, type CrateTrack } from '@/components/crate';
 import type { Track } from '@/types/track';
 
 const full = { bpm: 124, camelot: '8A', energy: 6, danceability: 0.7 };
@@ -85,5 +85,30 @@ describe('crateForRequest', () => {
     const out = crateForRequest(crate, []);
     expect(out).toHaveLength(CRATE_SEND_MAX);
     expect(out[0].id).toBe('t9001');
+  });
+});
+
+describe('mergeCrateKnown', () => {
+  const k = { key: 'artist 1|song 1', bpm: 128, camelot: '9A', energy: 7, danceability: 0.8 };
+
+  it('folds the server-known values into the stored crate; cache values win', () => {
+    addToCrate([t(1, { bpm: 100 }), t(2)], 'spotify');
+    const next = mergeCrateKnown([k]);
+    expect(next.find((c) => c.id === 't1')).toMatchObject({ bpm: 128, camelot: '9A', energy: 7, danceability: 0.8 });
+    expect(loadCrate().find((c) => c.id === 't1')).toMatchObject({ bpm: 128 });
+    expect(next.find((c) => c.id === 't2')!.bpm).toBeUndefined();
+  });
+
+  it('returns the very same array when nothing changes (no re-render, no refresh loop)', () => {
+    addToCrate([t(1)], 'spotify');
+    const once = mergeCrateKnown([k]);
+    expect(mergeCrateKnown([k], once)).toBe(once);
+    expect(mergeCrateKnown([], once)).toBe(once);
+  });
+
+  it('makes server-known items count as complete for request ordering', () => {
+    addToCrate([t(1), t(2, full)], 'spotify');
+    const next = mergeCrateKnown([k]);
+    expect(crateForRequest(next, []).map((c) => c.id).sort()).toEqual(['t1', 't2']);
   });
 });

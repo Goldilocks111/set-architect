@@ -183,7 +183,7 @@ export default function SpotifyImport({ inSet, onAdd, onAddToCrate, onClose, onD
           <div className="flex flex-col gap-2">
             {crated !== null && (
               <p role="status" className="text-[12px] text-[#8A8FA3]">
-                {crated} track{crated === 1 ? '' : 's'} added to your crate. They join suggestions once their BPM, key and energy are known.
+                {crated} track{crated === 1 ? '' : 's'} added to your crate. They get analysed a few at a time as you build.
               </p>
             )}
             <div className="flex gap-2">

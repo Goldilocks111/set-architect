@@ -7,7 +7,7 @@ import type { Track } from '@/types/track';
 import ArcTemplatePicker from './ArcTemplatePicker';
 import BillingActions from './BillingActions';
 import CratePanel from './CratePanel';
-import { addToCrate, clearCrate, loadCrate, removeFromCrate, type CrateTrack } from './crate';
+import { addToCrate, clearCrate, loadCrate, mergeCrateKnown, removeFromCrate, type CrateKnownItem, type CrateTrack } from './crate';
 import DemoBanner from './DemoBanner';
 import EnergyCurve from './EnergyCurve';
 import MikImport from './MikImport';
@@ -214,6 +214,8 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
     if (hydrated && tracks.length) setCrate(addToCrate(tracks, 'set'));
   }, [tracks, hydrated]);
 
+  const crateKnown = useCallback((known: CrateKnownItem[]) => setCrate((cur) => mergeCrateKnown(known, cur)), []);
+
   const addCrate = useCallback((list: Track[], from: CrateTrack['from']) => setCrate(addToCrate(list, from)), []);
 
   const mikImported = useCallback(
@@ -342,7 +344,7 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
           </section>
 
           <aside className="min-w-0 rounded-xl border border-[#2A2F3F] bg-[#1A1D28] px-4 pt-4 pb-2 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
-            {hydrated && <SuggestionBox tracks={tracks} template={template} plannedLength={plannedLength} onAdd={add} crate={crate} />}
+            {hydrated && <SuggestionBox tracks={tracks} template={template} plannedLength={plannedLength} onAdd={add} crate={crate} onCrateKnown={crateKnown} />}
           </aside>
         </div>
       </main>

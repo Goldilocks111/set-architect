@@ -22,12 +22,18 @@ export type AdjacencyHandle = {
 export const PLAY_COUNT_MAX_BONUS = 0.05;
 export const playCountBonus = (n: number) => PLAY_COUNT_MAX_BONUS * Math.min(1, Math.log10(1 + n) / 3);
 
+type CachedEntry = { fields: Partial<Track>; sources?: Record<string, string>; reason?: string; retryAt?: number; resolvedAt?: number };
+
 /** Optional collaborators; anything missing, throwing or too slow degrades to the demo pool. */
 export interface SuggestDeps {
   /** Cached resolve (resolveWithStatus): writes the metadata cache; `signal` stops the adapter chain at the budget. */
   resolveTrack?: (artist: string, title: string, opts?: { budgetMs?: number; signal?: AbortSignal }) => Promise<Track>;
   /** Metadata-cache lookup by trackKey; a complete hit supplies a candidate without any provider call. */
-  getCachedEntry?: (key: string) => { fields: Partial<Track>; sources?: Record<string, string> } | undefined;
+  getCachedEntry?: (key: string) => CachedEntry | undefined;
+  /** One snapshot lookup for many keys (the crate): the cache file is parsed once, not once per key. */
+  getCachedEntries?: (keys: string[]) => Map<string, CachedEntry>;
+  /** Fire-and-forget fill of one crate item (spotify/deezer/musicbrainz only, never iTunes); gated by provider budgets. */
+  backgroundResolve?: (artist: string, title: string) => Promise<unknown>;
   getSimilarTracks?: (artist: string, title: string) => Promise<Array<{ artist: string; title: string; match: number }>>;
   loadAdjacency?: () => Promise<AdjacencyHandle>;
   suggestNext?: typeof engineSuggestNext;
@@ -35,6 +41,24 @@ export interface SuggestDeps {
   budgetMs?: number;
   /** Per-call cap for the adjacency and similarity lookups. */
   callTimeoutMs?: number;
+}
+
+/** Incomplete crate items started in the background per suggest request, newest first. */
+export const MAX_CRATE_BACKGROUND_RESOLVES = 2;
+const NEGATIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
+const crateInflight = new Set<string>();
+export function resetCrateBackground(): void {
+  crateInflight.clear();
+}
+
+/** What the cache knows for a crate item, as the client keeps it (merged into its stored crate). */
+export interface CrateKnown {
+  key: string;
+  bpm: number;
+  camelot: string;
+  energy: number;
+  danceability: number;
+  styles?: string[];
 }
 
 export const SUGGEST_BUDGET_MS = 5000;
@@ -154,16 +178,44 @@ export function displayFromKey(k: string): DisplayName {
 export async function assembleSuggestions(
   input: SuggestInput,
   deps: SuggestDeps
-): Promise<{ suggestions: Suggestion[] }> {
+): Promise<{ suggestions: Suggestion[]; crateKnown: CrateKnown[] }> {
   // Crate items are enriched from the metadata cache only (manual > provider, no provider calls); incomplete ones
   // stay out of scoring until the cache has them.
   const crateReady: Track[] = [];
-  for (const c of input.crate ?? []) {
-    const entry = await safe(deps.getCachedEntry && (async () => deps.getCachedEntry!(keyOf(c))), undefined);
+  const crateKnown: CrateKnown[] = [];
+  const crateItems = input.crate ?? [];
+  const crateKeys = crateItems.map(keyOf);
+  const entries = await safe(
+    async () =>
+      deps.getCachedEntries?.(crateKeys) ??
+      new Map(crateKeys.flatMap((k) => { const e = deps.getCachedEntry?.(k); return e ? [[k, e] as const] : []; })),
+    new Map<string, CachedEntry>()
+  );
+  const toFill: Array<{ artist: string; title: string; key: string }> = [];
+  crateItems.forEach((c, i) => {
+    const entry = entries.get(crateKeys[i]);
     const t: Track = entry ? { ...c, ...entry.fields, id: c.id, artist: c.artist, title: c.title, sources: { ...c.sources, ...entry.sources } } : c;
-    if (isComplete(t)) crateReady.push(t);
+    if (isComplete(t)) {
+      crateReady.push(t);
+      if (entry) {
+        const styles = (t as Track & { styles?: string[] }).styles;
+        crateKnown.push({ key: crateKeys[i], bpm: t.bpm!, camelot: t.camelot!, energy: t.energy!, danceability: t.danceability!, ...(styles?.length ? { styles } : {}) });
+      }
+      return;
+    }
+    // Skip items the cache already settled (retry not due, or a permanent miss inside its 24 h window): they would hog the slots.
+    const settled = entry?.reason && (entry.retryAt !== undefined ? entry.retryAt > Date.now() : (entry.resolvedAt ?? 0) + NEGATIVE_WINDOW_MS > Date.now());
+    if (!settled) toFill.push({ artist: c.artist, title: c.title, key: crateKeys[i] });
+  });
+  // The client sends complete first, then newest first: the first incomplete ones are the newest. Not awaited.
+  if (deps.backgroundResolve) {
+    for (const f of toFill.filter((x) => !crateInflight.has(x.key)).slice(0, MAX_CRATE_BACKGROUND_RESOLVES)) {
+      crateInflight.add(f.key);
+      void safe(() => deps.backgroundResolve!(f.artist, f.title), undefined).finally(() => crateInflight.delete(f.key));
+    }
   }
-  const pool = isDemoMode() && crateReady.length < DEMO_CRATE_MIN ? [...crateReady, ...demoTracks()] : crateReady;
+  // Below DEMO_CRATE_MIN ready tracks the demo crate is a starter crate, so Openers/Next up are never empty.
+  const pool = crateReady.length < DEMO_CRATE_MIN ? [...crateReady, ...demoTracks()] : crateReady;
   const poolByKey = new Map(pool.map((t) => [keyOf(t), t]));
   // Incomplete set tracks have no usable essentials, so they can't anchor neighbor/similarity lookups.
   const last = input.playlist.filter(isComplete).pop();
@@ -312,7 +364,7 @@ export async function assembleSuggestions(
     if (bonused) suggestions.sort((a, b) => b.score - a.score);
   }
 
-  return { suggestions };
+  return { suggestions, crateKnown };
 }
 
 /** Loads the resolver/adjacency modules when they are present; each is independently optional. */
@@ -323,11 +375,19 @@ export async function loadSuggestDeps(): Promise<SuggestDeps> {
     // the cached resolver: candidates land in the metadata cache, so a later refresh costs no provider call
     deps.resolveTrack = (artist, title, opts) => resolver.resolveWithStatus(artist, title, opts);
     deps.getSimilarTracks = resolver.getSimilarTracks;
+    deps.backgroundResolve = async (artist, title) => {
+      // Only while Spotify and Deezer both have budget and no cooldown; iTunes is left out of this path entirely.
+      const { budgetAvailable } = await import('@/lib/search/breaker');
+      if (!budgetAvailable('spotify', { app: true }) || !budgetAvailable('deezer', { app: true })) return;
+      await resolver.resolveWithStatus(artist, title, { without: ['itunes'] });
+    };
   } catch {
     // resolver unavailable: demo pool only
   }
   try {
-    deps.getCachedEntry = (await import('@/lib/metadataCache')).getEntry;
+    const cache = await import('@/lib/metadataCache');
+    deps.getCachedEntry = cache.getEntry;
+    deps.getCachedEntries = cache.getEntries;
   } catch {
     // no cache: every candidate goes through the resolver
   }

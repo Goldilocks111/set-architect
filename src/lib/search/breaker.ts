@@ -130,3 +130,13 @@ export function takeBudget(name: Name, opts: { app?: boolean } = {}, now = Date.
 export function resetBudgets(): void {
   recentCalls.clear();
 }
+
+/** Like takeBudget but spends nothing: true when a call to `name` would be allowed right now. */
+export function budgetAvailable(name: Name, opts: { app?: boolean } = {}, now = Date.now()): boolean {
+  if (cooldownUntil(name, now)) return false;
+  const room = (key: string, limit: number) => (recentCalls.get(key) ?? []).filter((t) => now - t < 60_000).length < limit;
+  const limit = PER_MINUTE_BUDGET[name];
+  if (limit !== undefined && !room(name, limit)) return false;
+  const appLimit = opts.app ? APP_PER_MINUTE_BUDGET[name] : undefined;
+  return appLimit === undefined || room(`app:${name}`, appLimit);
+}

@@ -3,7 +3,7 @@ import { sanitizeTrack } from '@/components/trackSanitize';
 import { isDemoMode } from '@/lib/demo';
 import type { ArcTemplate, Suggestion, Track } from '@/types/track';
 import { ensureNeighborsFor } from '@/lib/adjacency/live';
-import { assembleSuggestions, loadSuggestDeps } from './assemble';
+import { assembleSuggestions, loadSuggestDeps, type CrateKnown } from './assemble';
 
 const MAX_PLAYLIST = 200;
 /** Mirrors CRATE_SEND_MAX on the client: a bigger payload is truncated, not trusted. */
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const result: { suggestions: Suggestion[]; digging?: true } = await assembleSuggestions(
+  const result: { suggestions: Suggestion[]; crateKnown?: CrateKnown[]; digging?: true } = await assembleSuggestions(
     { playlist, template, plannedLength, crate },
     await loadSuggestDeps()
   );

@@ -2,8 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ArcTemplate, Suggestion, Track } from '@/types/track';
-import { crateForRequest, isCrateComplete, type CrateTrack } from './crate';
-import { EMPTY_CRATE_COPY } from './CratePanel';
+import { crateForRequest, EMPTY_CRATE_COPY, isCrateComplete, type CrateKnownItem, type CrateTrack } from './crate';
 import SuggestionCard from './SuggestionCard';
 import { displayTitle } from './trackFormat';
 
@@ -13,6 +12,8 @@ interface Props {
   plannedLength: number;
   onAdd: (track: Track) => void;
   crate?: CrateTrack[];
+  /** What the server's cache knows about crate items; the owner folds it into the stored crate. */
+  onCrateKnown?: (known: CrateKnownItem[]) => void;
 }
 
 type Status = 'loading' | 'done' | 'error' | 'limit';
@@ -30,7 +31,7 @@ const dataKeyOf = (tracks: Track[]) =>
 export const CRATE_HINT_BELOW = 30;
 const NO_CRATE: CrateTrack[] = [];
 
-export default function SuggestionBox({ tracks, template, plannedLength, onAdd, crate = NO_CRATE }: Props) {
+export default function SuggestionBox({ tracks, template, plannedLength, onAdd, crate = NO_CRATE, onCrateKnown }: Props) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [status, setStatus] = useState<Status>('loading');
   const [limitMessage, setLimitMessage] = useState('');
@@ -49,8 +50,10 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd, 
   const requestCrate = useMemo(() => crateForRequest(crate, tracks), [crate, tracks]);
   const readyCount = useMemo(() => requestCrate.filter(isCrateComplete).length, [requestCrate]);
   const latestCrate = useRef(requestCrate);
+  const knownHandler = useRef(onCrateKnown);
   useLayoutEffect(() => {
     latestCrate.current = requestCrate;
+    knownHandler.current = onCrateKnown;
   });
   // What the server can score from the crate; a refresh follows an import, not every re-sort or set add.
   const crateKey = useMemo(() => requestCrate.map((c) => `${c.id}${isCrateComplete(c) ? '+' : '-'}`).sort().join('\n'), [requestCrate]);
@@ -79,7 +82,8 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd, 
           return;
         }
         if (!res.ok) throw new Error(String(res.status));
-        const body = (await res.json()) as { suggestions: Suggestion[]; digging?: boolean };
+        const body = (await res.json()) as { suggestions: Suggestion[]; digging?: boolean; crateKnown?: CrateKnownItem[] };
+        if (body.crateKnown?.length) knownHandler.current?.(body.crateKnown);
         setSuggestions(body.suggestions ?? []);
         setStatus('done');
         setDigging(body.digging === true);
@@ -124,7 +128,9 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd, 
 
       {readyCount < CRATE_HINT_BELOW && (
         <p className="mb-2 text-xs text-[#8A8FA3]">
-          {readyCount === 0 ? EMPTY_CRATE_COPY : `${readyCount} crate track${readyCount === 1 ? ' is' : 's are'} ready to score. Import a Spotify playlist or a Mixed In Key CSV to suggest from more of your library.`}
+          {readyCount === 0 && requestCrate.length === 0
+            ? `${EMPTY_CRATE_COPY} Until then a starter crate fills in.`
+            : `Imported tracks get analysed a few at a time as you build — ${readyCount} of ${requestCrate.length} ready.`}
         </p>
       )}
 

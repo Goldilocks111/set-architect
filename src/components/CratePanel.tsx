@@ -1,9 +1,8 @@
 'use client';
 
 import type { CrateTrack } from './crate';
-import { isCrateComplete } from './crate';
+import { EMPTY_CRATE_COPY, isCrateComplete } from './crate';
 
-export const EMPTY_CRATE_COPY = 'Import a Spotify playlist or a Mixed In Key CSV to fill your crate \u2014 suggestions come from it first.';
 /** Rows drawn at once; a 2000-track crate stays responsive and the rest is one scroll of "more" away. */
 const SHOWN = 200;
 
@@ -48,8 +47,8 @@ export default function CratePanel({ crate, onRemove, onClear, onClose }: Props)
         ) : (
           <>
             <p className="text-[12px] text-[#8A8FA3] tabular-nums">
-              {ready} of {crate.length} ready to score. The rest join once their BPM, key and energy are known (add them to
-              the set, or import a Mixed In Key CSV).
+              {ready} of {crate.length} ready to score. Imported tracks get analysed a few at a time as you build, or add
+              them to the set / import a Mixed In Key CSV to complete them sooner.
             </p>
             <ul className="min-h-0 flex-1 overflow-y-auto">
               {newest.slice(0, SHOWN).map((c) => (
