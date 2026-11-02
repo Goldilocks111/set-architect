@@ -14,9 +14,18 @@ export function isKeyCompatible(from: string | undefined, to: string | undefined
   return scoreKeyTransition(from!, to!).score >= KEY_COMPATIBLE;
 }
 
+export type TempoRelation = 'direct' | 'double-time' | 'half-time';
+
+const RATIOS: Array<[number, TempoRelation]> = [[1, 'direct'], [2, 'double-time'], [0.5, 'half-time']];
+
+/** Which equivalent tempo lies within the ±6% cap (inclusive), or null for a clash or an unknown tempo. */
+export function tempoRelation(from: number | undefined, to: number | undefined): TempoRelation | null {
+  if (!known(from) || !known(to) || from <= 0 || to <= 0) return null;
+  return RATIOS.find(([r]) => Math.abs(to - from * r) <= from * r * BPM_CAP + EPS)?.[1] ?? null;
+}
+
 export function isTempoCompatible(from: number | undefined, to: number | undefined): boolean {
-  if (!known(from) || !known(to) || from <= 0 || to <= 0) return false;
-  return [1, 2, 0.5].some((r) => Math.abs(to - from * r) <= from * r * BPM_CAP + EPS);
+  return tempoRelation(from, to) !== null;
 }
 
 /** Energy that closes on the arc target, or already sits within one level of it. */

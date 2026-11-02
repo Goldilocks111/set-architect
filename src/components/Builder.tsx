@@ -282,10 +282,12 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
   );
   // played minutes from real durations (estimates when missing) at the chosen play fraction
   const minutes = Math.round(setPlayedMinutes(tracks, playFraction));
-  const rough = useMemo(() => pairViolations(tracks, arc), [tracks, arc]);
+  const rough = useMemo(() => pairViolations(tracks), [tracks]);
   const scrollToRough = () => {
     const first = rough[0] && tracks[rough[0].index];
-    document.getElementById(`transition-${first?.id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const el = document.getElementById(`transition-${first?.id}`);
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el?.focus({ preventScroll: true });
   };
 
   return (
