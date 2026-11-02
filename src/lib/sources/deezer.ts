@@ -90,6 +90,8 @@ export const deezerAdapter: SourceAdapter = {
     const hit = await findHit(partial);
     if (!hit) return {};
     const out = mapTrack(hit);
+    // the provider's own spelling: the resolver keeps it as the display name (it never replaces the caller's artist/title)
+    if (hit.artist?.name && hit.title) Object.assign(out, { artist: hit.artist.name, title: hit.title });
     try {
       // Search results omit release_date; the track endpoint has it.
       const detail = await fetchJson<DeezerTrack>(`${BASE}/track/${hit.id}`);

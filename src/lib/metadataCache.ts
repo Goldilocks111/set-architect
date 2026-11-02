@@ -13,6 +13,8 @@ export interface CacheEntry {
   retryAt?: number;
   /** When Last.fm last answered with no genre tags for this track: not asked again for STYLES_RECHECK_MS. */
   stylesCheckedAt?: number;
+  /** The first provider match's own spelling of artist/title (Deezer, else Spotify): the canonical name to show. */
+  display?: { artist: string; title: string };
 }
 
 const file = () => dataDir('index', 'metadata.json');
@@ -97,7 +99,7 @@ function settle(e: CacheEntry, reason?: IncompleteReason): void {
   } else if (reason) e.reason = reason;
 }
 
-export function putResolved(key: string, track: Track, now = Date.now()): CacheEntry {
+export function putResolved(key: string, track: Track, now = Date.now(), display?: { artist: string; title: string }): CacheEntry {
   const cache = read();
   const prev = cache[key];
   const entry: CacheEntry = {
@@ -108,6 +110,8 @@ export function putResolved(key: string, track: Track, now = Date.now()): CacheE
     reason: prev?.reason,
     retryAt: prev?.retryAt,
   };
+  const shown = prev?.display ?? display; // first provider match wins
+  if (shown) entry.display = shown;
   for (const [field, value] of Object.entries(track)) {
     if (SKIP.has(field) || value === undefined || value === null) continue;
     if (entry.sources[field] === 'manual') continue;
@@ -130,6 +134,7 @@ function applyManual(cache: Record<string, CacheEntry>, key: string, fields: Par
     attempts: prev?.attempts ?? 0,
     reason: prev?.reason,
     retryAt: prev?.retryAt,
+    ...(prev?.display ? { display: prev.display } : {}),
   };
   for (const f of ESSENTIALS) {
     const v = fields[f];
@@ -188,6 +193,15 @@ export function putStyles(key: string, styles: string[], now = Date.now()): Cach
   } else e.stylesCheckedAt = now;
   write(cache);
   return e;
+}
+
+/** Stores the provider's display name for an existing entry that has none (first match wins). */
+export function putDisplay(key: string, display: { artist: string; title: string }): void {
+  const cache = read();
+  const e = cache[key];
+  if (!e || e.display) return;
+  e.display = display;
+  write(cache);
 }
 
 /** Records (or clears) when the re-resolve queue will next try this track. */

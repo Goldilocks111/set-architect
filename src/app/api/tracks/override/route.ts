@@ -19,13 +19,13 @@ function trackFrom(key: string, artist: string, title: string, entry: ReturnType
 
 /**
  * Imported rows get their Last.fm styles in the background (paced, budgeted, deduped by the resolver queue). Stops at
- * the queue cap rather than evicting waiting lookups; never fails the import.
+ * the fill cap (or low Last.fm headroom) rather than evicting waiting lookups; never fails the import.
  */
 async function queueImportedStyles(tracks: Track[]): Promise<void> {
   try {
-    const { queueStyles, stylesQueueLength, STYLES_QUEUE_CAP } = await import('@/lib/resolver');
+    const { queueStyles, stylesFillOpen } = await import('@/lib/resolver');
     for (const t of tracks) {
-      if (stylesQueueLength() >= STYLES_QUEUE_CAP) break;
+      if (!stylesFillOpen()) break; // fill cap (50 waiting) or Last.fm under 50% headroom
       queueStyles(t);
     }
   } catch {

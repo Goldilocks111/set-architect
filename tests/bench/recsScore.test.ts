@@ -242,12 +242,12 @@ describe('baselinePicks (lane + tempo matched)', () => {
     expect(r.short).toBe(4);
     expect(r.picks.every((p) => tiny.has(k(p)))).toBe(true);
   });
-  it('reuses engine picks only when no other same-lane track is left', () => {
+  it('reuses in-tempo engine picks before drawing an off-tempo track', () => {
     const pool = new Set(crate.slice(10, 21).map(k)); // 11 lane tracks
     const eng = crate.slice(10, 13).map(({ artist, title }) => ({ artist, title }));
     const { picks } = baselinePicks({ ...args, lanePool: pool, engine: eng, lastBpm: 112 });
     expect(picks).toHaveLength(10);
-    expect(picks.filter((p) => eng.some((e) => e.title === p.title))).toHaveLength(2);
+    expect(picks.filter((p) => eng.some((e) => e.title === p.title))).toHaveLength(3); // in-tempo engine picks beat an off-tempo fresh track
   });
   it('without a last-track BPM it draws from the lane at any tempo', () => {
     const { picks } = baselinePicks({ ...args, lastBpm: undefined, engine: [] });
@@ -296,7 +296,7 @@ describe('rating validity (same names, trimmed lists, unique runs)', () => {
     const [a, b] = file.scenarios[0].lists;
     expect(a.tracks).toHaveLength(b.tracks.length);
     expect(a.tracks.length).toBeLessThan(10);
-    expect(short).toEqual([{ id: 's0', engine: 10, baseline: expect.any(Number), used: a.tracks.length }]);
+    expect(short).toEqual([{ id: 's0', engine: 10, baseline: expect.any(Number), offTempo: 0, used: a.tracks.length }]);
   });
 
   it('full lists report nothing short', () => {
@@ -312,6 +312,37 @@ describe('rating validity (same names, trimmed lists, unique runs)', () => {
     for (const t of baseline.tracks) expect(ok.has(trackKeyOf(t.artist, t.title))).toBe(true);
   });
   void pool;
+});
+
+describe('off-tempo baseline tracks (half/double-time count as in tempo)', () => {
+  const k = (t: { artist: string; title: string }) => trackKeyOf(t.artist, t.title);
+  const mkc = (n: number, bpm: (i: number) => number) => Array.from({ length: n }, (_, i) => ({ artist: `L ${i}`, title: `T${i}`, bpm: bpm(i) }));
+  const lane = (c: Array<{ artist: string; title: string }>) => new Set(c.map(k));
+
+  it('baselinePicks counts offTempo; a half/double-time track is in tempo', () => {
+    const c = mkc(14, (i) => (i < 6 ? 128 : i < 8 ? 64 : 90)); // last 64: 128 and 64 are in tempo, 90 is not
+    const r = baselinePicks({ crate: c, lane: 'techno', lanePool: lane(c), lastBpm: 64, engine: [], seed: 1 });
+    expect(r.picks).toHaveLength(10);
+    expect(r.offTempo).toBe(2); // 14 lane tracks, 8 in tempo, so 2 of the 6 off-tempo fill the rest
+  });
+
+  it('more than 2 off-tempo tracks trims BOTH lists further, equal lengths, and reports offTempo', () => {
+    const c = mkc(30, (i) => (i < 6 ? 124 : 160)); // only 6 in tempo with last 124
+    const crate = c;
+    const sugs = ten(() => ({}));
+    const { file, short } = buildRatingFile([{ scenario: { ...sc('s0'), crate }, suggestions: sugs, crate, lastBpm: 124 }], { fileId: 'r', lanePool: () => lane(c) });
+    const [a, b] = file.scenarios[0].lists;
+    expect(a.tracks).toHaveLength(8); // 6 in tempo + at most 2 off-tempo
+    expect(b.tracks).toHaveLength(8);
+    expect(short).toEqual([{ id: 's0', engine: 10, baseline: 10, offTempo: 4, used: 8 }]);
+  });
+
+  it('at most 2 off-tempo tracks leaves the lists at 10', () => {
+    const c = mkc(30, (i) => (i < 8 ? 124 : 160));
+    const { file, short } = buildRatingFile([{ scenario: { ...sc('s0'), crate: c }, suggestions: ten(() => ({})), crate: c, lastBpm: 124 }], { fileId: 'r', lanePool: () => lane(c) });
+    expect(file.scenarios[0].lists.map((l) => l.tracks.length)).toEqual([10, 10]);
+    expect(short).toEqual([]);
+  });
 });
 
 describe('run ids', () => {

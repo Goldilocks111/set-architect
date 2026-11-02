@@ -1,4 +1,5 @@
 import { LANES } from '../../src/lib/style/taxonomy';
+import { scoreBpmTransition } from '../../src/engine/bpm';
 import { trackKeyOf, type ArcTemplate, type Suggestion } from '../../src/types/track';
 
 export interface TrackRef {
@@ -169,6 +170,21 @@ export const BASELINE_BPM_TOLERANCE = 0.06;
 /** One display spelling for every name in the rating file: trimmed, inner whitespace collapsed, casing kept. */
 export const normalizeName = (s: string): string => s.trim().replace(/\s+/g, ' ');
 
+/** In tempo as the engine sees it: direct within ±6%, or half/double-time (engine/bpm.ts relation). */
+export const inTempo = (last: number | undefined, bpm: number | undefined): boolean =>
+  last === undefined || (bpm !== undefined && (scoreBpmTransition(last, bpm).relation !== 'clash' || Math.abs(bpm - last) / last <= BASELINE_BPM_TOLERANCE));
+
+/**
+ * The one spelling source for the rating file: the provider's display name stored in the cache, else the pool entry.
+ * Undefined when neither knows the track (the caller then keeps the given name, normalized). Same rule for every track.
+ */
+export function displayResolver(cacheDisplay: (key: string) => TrackRef | undefined, pool: ReadonlyMap<string, TrackRef>): (t: TrackRef) => TrackRef | undefined {
+  return (t) => {
+    const k = trackKeyOf(t.artist, t.title);
+    return cacheDisplay(k) ?? pool.get(k);
+  };
+}
+
 export type CrateRef = TrackRef & { bpm?: number; styles?: string[] };
 
 /**
@@ -177,30 +193,35 @@ export type CrateRef = TrackRef & { bpm?: number; styles?: string[] };
  * others exist. Short of TOP_N, it fills from the same lane at any tempo (nearest first), then reuses engine picks;
  * it never leaves the lane. `short` counts the places the lane could not fill. No last BPM: the lane at any tempo.
  */
-export function baselinePicks(o: { crate: CrateRef[]; lane: string; lanePool: ReadonlySet<string>; lastBpm?: number; engine: TrackRef[]; seed: number }): { picks: TrackRef[]; short: number } {
+export function baselinePicks(o: { crate: CrateRef[]; lane: string; lanePool: ReadonlySet<string>; lastBpm?: number; engine: TrackRef[]; seed: number }): { picks: TrackRef[]; short: number; offTempo: number } {
   const key = (t: TrackRef) => trackKeyOf(t.artist, t.title);
   const engine = new Set(o.engine.map(key));
   const last = o.lastBpm;
-  const near = (b?: number) => last === undefined || (b !== undefined && Math.abs(b - last) / last <= BASELINE_BPM_TOLERANCE);
+  const near = (b?: number) => inTempo(last, b);
   const lane = o.crate.filter((t) => o.lanePool.has(key(t)) || t.styles?.includes(o.lane));
   const nearest = (xs: CrateRef[]) => [...xs].sort((a, b) => Math.abs((a.bpm ?? Infinity) - last!) - Math.abs((b.bpm ?? Infinity) - last!));
   const fresh = lane.filter((t) => !engine.has(key(t)));
   const reused = lane.filter((t) => engine.has(key(t)));
   const tiers = [
     seededShuffle(fresh.filter((t) => near(t.bpm)), o.seed),
+    seededShuffle(reused.filter((t) => near(t.bpm)), o.seed + 1), // an in-tempo engine pick beats an off-tempo fresh one
     nearest(fresh.filter((t) => !near(t.bpm))),
-    seededShuffle(reused.filter((t) => near(t.bpm)), o.seed + 1),
     nearest(reused.filter((t) => !near(t.bpm))),
   ];
   const seen = new Set<string>();
   const picks: TrackRef[] = [];
+  let offTempo = 0;
   for (const t of tiers.flat()) {
     if (picks.length >= TOP_N || seen.has(key(t))) continue;
     seen.add(key(t));
+    if (!near(t.bpm)) offTempo++;
     picks.push({ artist: t.artist, title: t.title });
   }
-  return { picks, short: TOP_N - picks.length };
+  return { picks, short: TOP_N - picks.length, offTempo };
 }
+
+/** Off-tempo tracks the baseline may keep before both lists are trimmed further. */
+export const MAX_OFF_TEMPO = 2;
 
 /** `<day>-<HHMMss>-<rand4>`: unique per measured run; names the rating file and namespaces its A/B key. */
 export function makeRunId(day: string, now: Date, rand: () => number = Math.random): string {
@@ -229,10 +250,11 @@ export const writesRating = (limit?: number): boolean => limit === undefined;
 export function buildRatingFile(
   results: Array<{ scenario: Scenario; suggestions: Suggestion[]; crate: CrateRef[]; lastBpm?: number }>,
   opts: { seed?: number; fileId: string; lanePool: (lane: string) => ReadonlySet<string>; display?: (t: TrackRef) => TrackRef | undefined },
-): { file: RatingFile; key: RatingKey; short: Array<{ id: string; engine: number; baseline: number; used: number }> } {
+): { file: RatingFile; key: RatingKey; short: Array<{ id: string; engine: number; baseline: number; offTempo: number; used: number }>; offTempo: Record<string, number> } {
   const seed = opts.seed ?? seedFromRunId(opts.fileId);
   const key: RatingKey = {};
-  const short: Array<{ id: string; engine: number; baseline: number; used: number }> = [];
+  const short: Array<{ id: string; engine: number; baseline: number; offTempo: number; used: number }> = [];
+  const offTempoBy: Record<string, number> = {};
   const name = (t: TrackRef): TrackRef => {
     const d = opts.display?.(t) ?? t;
     return { artist: normalizeName(d.artist), title: normalizeName(d.title) };
@@ -240,9 +262,14 @@ export function buildRatingFile(
   const scenarios = results.map(({ scenario, suggestions, crate, lastBpm }, i) => {
     const s = seed + i * 7919;
     const engineAll = suggestions.slice(0, TOP_N).map(({ track: t }) => ({ artist: t.artist, title: t.title }));
-    const baselineAll = baselinePicks({ crate, lane: scenario.lane, lanePool: opts.lanePool(scenario.lane), lastBpm, engine: engineAll, seed: s + 1 }).picks;
+    const drawn = baselinePicks({ crate, lane: scenario.lane, lanePool: opts.lanePool(scenario.lane), lastBpm, engine: engineAll, seed: s + 1 });
+    offTempoBy[scenario.id] = drawn.offTempo;
+    // an off-tempo baseline track is an audible free win for the engine: keep at most MAX_OFF_TEMPO of them
+    const bpmOf = new Map(crate.map((c) => [trackKeyOf(c.artist, c.title), c.bpm] as const));
+    const onTempo = drawn.picks.filter((p) => inTempo(lastBpm, bpmOf.get(trackKeyOf(p.artist, p.title))));
+    const baselineAll = [...onTempo, ...drawn.picks.filter((p) => !onTempo.includes(p)).slice(0, MAX_OFF_TEMPO)];
     const used = Math.min(engineAll.length, baselineAll.length);
-    if (used < TOP_N) short.push({ id: scenario.id, engine: engineAll.length, baseline: baselineAll.length, used });
+    if (used < TOP_N) short.push({ id: scenario.id, engine: engineAll.length, baseline: drawn.picks.length, offTempo: drawn.offTempo, used });
     const engine = engineAll.slice(0, used).map(name);
     const baseline = baselineAll.slice(0, used).map(name);
     const engineFirst = rng(s + 2)() < 0.5;
@@ -259,7 +286,7 @@ export function buildRatingFile(
       ],
     };
   });
-  return { file: { version: 2, fileId: opts.fileId, scenarios }, key, short };
+  return { file: { version: 2, fileId: opts.fileId, scenarios }, key, short, offTempo: offTempoBy };
 }
 
 /** Acceptance: the engine list rated >= 7 on >= 8 scenarios AND rated above the baseline on >= 7. */

@@ -61,8 +61,6 @@ export const MAX_CRATE_BACKGROUND_RESOLVES = 2;
 export const MAX_STYLES_QUEUED_PER_REQUEST = 4;
 /** Fill mode: how many a request may queue while `stylesFillOpen` holds (the library's styles fill over a few sessions). */
 export const MAX_STYLES_FILL_PER_REQUEST = 25;
-/** Fill mode only while the styles queue holds fewer than this many waiting lookups. */
-export const STYLES_FILL_MAX_QUEUE = 50;
 const NEGATIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** The cache already settled this incomplete entry: its retry is not due, or a permanent miss is inside its 24 h window. */
 const isSettled = (entry: CachedEntry | undefined): boolean =>
@@ -466,10 +464,7 @@ export async function loadSuggestDeps(): Promise<SuggestDeps> {
     };
     deps.getSimilarTracks = resolver.getSimilarTracks;
     deps.queueStyles = (t) => resolver.queueStyles(t);
-    deps.stylesFillOpen = async () => {
-      const { budgetHeadroom, CANDIDATE_MIN_HEADROOM } = await import('@/lib/search/breaker');
-      return resolver.stylesQueueLength() < STYLES_FILL_MAX_QUEUE && budgetHeadroom('lastfm', { app: true }) >= CANDIDATE_MIN_HEADROOM;
-    };
+    deps.stylesFillOpen = () => resolver.stylesFillOpen();
     deps.backgroundResolve = async (artist, title) => {
       // Only while Spotify and Deezer both have >= 50% budget headroom and no cooldown; iTunes and YouTube are left out
       // of this path entirely (retries included).

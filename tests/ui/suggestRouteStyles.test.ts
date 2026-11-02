@@ -108,20 +108,13 @@ describe('C1: styles reach the engine in the real app', () => {
     expect(q3).toHaveBeenCalledTimes(4);
   });
 
-  it('loadSuggestDeps opens fill only while the styles queue < 50 and Last.fm headroom >= 50%', async () => {
-    const len = vi.fn(() => 10);
-    (mocks.resolver as Record<string, unknown>).stylesQueueLength = len;
-    const breaker = await import('@/lib/search/breaker');
-    const head = vi.spyOn(breaker, 'budgetHeadroom');
+  it('loadSuggestDeps hands the resolver\'s fill gate to the request', async () => {
+    const gate = vi.fn(() => true);
+    (mocks.resolver as Record<string, unknown>).stylesFillOpen = gate;
     const { loadSuggestDeps } = await import('@/app/api/suggest/assemble');
     const deps = await loadSuggestDeps();
-    head.mockReturnValue(0.8);
     expect(await deps.stylesFillOpen!()).toBe(true);
-    head.mockReturnValue(0.4);
+    gate.mockReturnValue(false);
     expect(await deps.stylesFillOpen!()).toBe(false);
-    head.mockReturnValue(0.8);
-    len.mockReturnValue(50);
-    expect(await deps.stylesFillOpen!()).toBe(false);
-    head.mockRestore();
   });
 });

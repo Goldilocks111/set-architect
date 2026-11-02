@@ -9,6 +9,7 @@ const SEARCH_URL = 'https://api.spotify.com/v1/search';
 
 interface SpotifyTrack {
   id: string;
+  name?: string;
   popularity?: number;
   external_urls?: { spotify?: string };
   external_ids?: { isrc?: string };
@@ -86,6 +87,7 @@ export const spotifyAdapter: SourceAdapter = {
     const hit = items.find((t) => t.artists?.some((a) => artistMatches(partial.artist, a.name)));
     if (!hit) return {};
     const out: Partial<Track> = { spotifyId: hit.id };
+    if (hit.name && hit.artists?.[0]?.name) Object.assign(out, { artist: hit.artists[0].name, title: hit.name }); // display name only
     if (hit.external_urls?.spotify) out.spotifyUrl = hit.external_urls.spotify;
     if (partial.popularity === undefined && typeof hit.popularity === 'number') out.popularity = hit.popularity;
     if (partial.isrc === undefined && hit.external_ids?.isrc) out.isrc = hit.external_ids.isrc;

@@ -4,7 +4,7 @@ import { dataDir, dataRoot } from '../../src/lib/dataDir';
 import { activeCooldowns, degradedProviders, readCooldowns } from '../data/cooldowns';
 import { createFetchGuard } from '../data/guardFetch';
 import { RequestGate, dayKey, loadDailyCounts, saveDailyCounts } from '../search/guard';
-import { TOP_N, makeRunId, writesRating, BENCH_WITHOUT, warmStep, RECS_BUDGET, poolLimitedScenarios, withCrates, auditCrate, buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, isWarmEntry, selectWarmTargets, warmStylesMode, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
+import { TOP_N, MAX_OFF_TEMPO, displayResolver, makeRunId, writesRating, BENCH_WITHOUT, warmStep, RECS_BUDGET, poolLimitedScenarios, withCrates, auditCrate, buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, isWarmEntry, selectWarmTargets, warmStylesMode, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
 import type { Suggestion, Track } from '../../src/types/track';
 
 try {
@@ -190,17 +190,26 @@ async function main(): Promise<void> {
   }
   // Lane membership for the baseline: the scenario lane's pool, or cached styles containing it (added in the crate rows).
   const poolKeys = Object.fromEntries(Object.entries(POOLS).map(([lane, list]) => [lane, new Set(list.map((t) => trackKeyOf(t.artist, t.title)))]));
-  // One spelling source for BOTH lists: the cache's display name, else the pool entry; never a key-derived title-case.
+  // One spelling source for BOTH lists and the set: the provider's display name in the cache, else the pool entry.
+  // Entries cached before names were kept get theirs from a Deezer-only preview refresh (a cache hit costs one search).
   const poolName = new Map(Object.values(POOLS).flat().map((t) => [trackKeyOf(t.artist, t.title), t] as const));
-  const display = (r: { artist: string; title: string }) => {
-    const k = trackKeyOf(r.artist, r.title);
-    const f = getEntry(k)?.fields;
-    return f?.artist?.trim() && f?.title?.trim() ? { artist: f.artist, title: f.title } : poolName.get(k);
-  };
+  const cacheDisplay = (k: string) => getEntry(k)?.display;
+  const wanted = new Map<string, { artist: string; title: string }>();
+  for (const r of results) for (const t of [...r.suggestions.slice(0, TOP_N).map((s) => s.track), ...r.scenario.set, ...r.crate]) wanted.set(trackKeyOf(t.artist, t.title), t);
+  const missingNames = [...wanted].filter(([k]) => !cacheDisplay(k));
+  console.log(`names: ${wanted.size - missingNames.length}/${wanted.size} have a provider display name; looking up ${missingNames.length}`);
+  for (const [, t] of missingNames) {
+    if (guard.stopped.has('deezer') || 'deezer' in guard.refused) break;
+    await resolveWithStatus(t.artist, t.title, { without: [...BENCH_WITHOUT, 'spotify', 'reccobeats', 'musicbrainz', 'getsongbpm', 'soundstat'] });
+  }
+  const unnamed = [...wanted].filter(([k]) => !cacheDisplay(k)).length;
+  if (unnamed) console.log(`WARNING: ${unnamed} tracks have no provider display name; they fall back to the pool spelling (a casing tell is possible for non-pool tracks)`);
+  const display = displayResolver(cacheDisplay, poolName);
   // The key (which list is the engine) lives here only; the rating file the owner sees has List A / List B.
   const rating = buildRatingFile(results, { fileId: runId, lanePool: (lane) => poolKeys[lane] ?? new Set(), display });
+  console.log(`baseline off-tempo tracks drawn: ${Object.entries(rating.offTempo).map(([id, n]) => `${id} ${n}`).join(', ')} (> ${MAX_OFF_TEMPO} trims both lists)`);
   for (const sh of rating.short) console.log(`baselineShort: ${sh.id}: engine ${sh.engine}, baseline ${sh.baseline} -> both lists trimmed to ${sh.used}`);
-  writeFileSync(out, JSON.stringify({ ...base, baselineShort: rating.short, ratingFileId: rating.file.fileId, ratingKey: rating.key }, null, 2));
+  writeFileSync(out, JSON.stringify({ ...base, baselineShort: rating.short, baselineOffTempo: rating.offTempo, unnamedTracks: unnamed, ratingFileId: rating.file.fileId, ratingKey: rating.key }, null, 2));
   const ratingOut = join(here, 'results', `${runId}-rating.json`);
   writeFileSync(ratingOut, JSON.stringify(rating.file, null, 2));
   console.log(`\nWrote ${out}\nWrote ${ratingOut} (blind: hand this to the owner, open /rate in dev; score the export with npm run bench:recs:ratings -- <export.json> ${out})`);

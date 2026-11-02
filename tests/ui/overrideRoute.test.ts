@@ -142,20 +142,23 @@ describe('POST /api/tracks/override batch', () => {
     expect(getEntry(trackKeyOf('Art 1', 'Tune 1'))).toBeUndefined();
   });
 
-  it('a batch import queues styles lookups for the imported rows, stopping at the queue cap', async () => {
+  it('a batch import queues styles lookups for the imported rows, stopping when the fill gate closes', async () => {
     const q = vi.spyOn(resolver, 'queueStyles').mockReturnValue(true);
-    const len = vi.spyOn(resolver, 'stylesQueueLength');
-    len.mockReturnValue(0);
+    const open = vi.spyOn(resolver, 'stylesFillOpen').mockReturnValue(true);
     const items = Array.from({ length: 5 }, (_, i) => ({ artist: `Art ${i}`, title: `Tit ${i}`, fields: ok }));
     expect((await post({ items })).status).toBe(200);
     expect(q).toHaveBeenCalledTimes(5);
     expect(q.mock.calls[0][0]).toMatchObject({ artist: 'Art 0', title: 'Tit 0' });
     q.mockClear();
-    len.mockReturnValue(resolver.STYLES_QUEUE_CAP);
+    open.mockImplementation(() => q.mock.calls.length < 2); // queue full (50) or Last.fm under 50% headroom mid-import
+    expect((await post({ items })).status).toBe(200);
+    expect(q).toHaveBeenCalledTimes(2);
+    q.mockClear();
+    open.mockReturnValue(false);
     expect((await post({ items })).status).toBe(200);
     expect(q).not.toHaveBeenCalled();
     q.mockRestore();
-    len.mockRestore();
+    open.mockRestore();
   });
   it('a styles queue failure never fails the import', async () => {
     const q = vi.spyOn(resolver, 'queueStyles').mockImplementation(() => { throw new Error('boom'); });
