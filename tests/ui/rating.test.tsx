@@ -128,6 +128,40 @@ describe('RatingSession', () => {
     URL.revokeObjectURL = orig.r;
   });
 
+  it('re-picking the same file keeps saved ratings; a different file asks before wiping them', async () => {
+    render(<RatingSession />);
+    await screen.findByLabelText('Rating file');
+    await upload(mkFile(3));
+    await screen.findByText('Scenario 0');
+    rate(8);
+    await upload(mkFile(3)); // identical content
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(screen.getByLabelText('Relevance rating')).toHaveValue('8');
+
+    const other = mkFile(3);
+    other.scenarios[0].tracks[1].title = 'Different';
+    await upload(other);
+    const dlg = await screen.findByRole('alertdialog');
+    expect(dlg).toHaveTextContent(/replace/i);
+    fireEvent.click(screen.getByRole('button', { name: 'Keep my ratings' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(screen.getByLabelText('Relevance rating')).toHaveValue('8');
+
+    await upload(other);
+    fireEvent.click(await screen.findByRole('button', { name: 'Replace and start over' }));
+    expect(screen.getByLabelText('Relevance rating')).toHaveValue('');
+    expect(screen.getByText('Different')).toBeInTheDocument();
+  });
+
+  it('says how many candidates there really are', async () => {
+    render(<RatingSession />);
+    await screen.findByLabelText('Rating file');
+    const f = mkFile(1);
+    f.scenarios[0].tracks = f.scenarios[0].tracks.slice(0, 6);
+    await upload(f);
+    expect(await screen.findByText(/6 next-track candidates/i)).toBeInTheDocument();
+  });
+
   it('summarize counts unrated as not good', () => {
     expect(summarize(parseRatingFile(JSON.stringify(mkFile(3)))!, { s0: { rating: 7 }, s1: { rating: 6 } })).toEqual({ rated: 2, good: 1, total: 3, pass: false });
     expect(RATING_STORAGE_KEY).toMatch(/rating/);

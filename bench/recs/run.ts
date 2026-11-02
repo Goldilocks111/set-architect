@@ -4,7 +4,7 @@ import { dataDir, dataRoot } from '../../src/lib/dataDir';
 import { activeCooldowns, degradedProviders, readCooldowns } from '../data/cooldowns';
 import { createFetchGuard } from '../data/guardFetch';
 import { RequestGate, dayKey, loadDailyCounts, saveDailyCounts } from '../search/guard';
-import { buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, selectWarmTargets, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario } from './score';
+import { buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, selectWarmTargets, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
 import type { Suggestion, Track } from '../../src/types/track';
 
 try {
@@ -72,6 +72,7 @@ async function main(): Promise<void> {
     const { isComplete } = await import('../../src/lib/completeness');
     const { trackKeyOf } = await import('../../src/types/track');
     const refs = uniqueScenarioTracks(subset);
+    console.log(`warm: ${refs.length} unique tracks across ${subset.length} scenarios`);
     const { todo } = selectWarmTargets(refs, (r) => {
       const e = getEntry(trackKeyOf(r.artist, r.title));
       return !!e && isComplete({ id: 'w', artist: r.artist, title: r.title, sources: {}, ...e.fields } as Track);
@@ -96,19 +97,26 @@ async function main(): Promise<void> {
   }
   const { assembleSuggestions, loadSuggestDeps } = await import('../../src/app/api/suggest/assemble');
   const deps = await loadSuggestDeps();
+  // Results must not depend on scenario order: no background crate fills, no scheduled retries; styles settle between scenarios.
+  deps.backgroundResolve = undefined;
+  const { setReresolveDeps } = await import('../../src/lib/reresolve');
+  setReresolveDeps({ setTimer: () => undefined });
+  const { settleStyles } = await import('../../src/lib/resolver');
 
   const toCrate = (r: { artist: string; title: string }, i: number): Track => ({ id: `crate-${i}`, artist: r.artist, title: r.title, sources: {} });
   const results: Array<{ scenario: Scenario; suggestions: Suggestion[] }> = [];
-  const rows: Array<Record<string, unknown>> = [];
+  const rows: Array<ScenarioScore & Record<string, unknown> & { id: string; crateReady: number }> = [];
   for (const [i, sc] of subset.entries()) {
     const t0 = Date.now();
     const playlist: Track[] = [];
     for (const ref of sc.set) playlist.push(await resolveWithStatus(ref.artist, ref.title));
+    await settleStyles(); // the set's own styles lookups land before the engine reads the cache
     const incomplete = playlist.filter((t) => t.unresolved).length;
     const { suggestions, crateKnown } = await assembleSuggestions(
       { playlist, template: sc.template, plannedLength: sc.plannedLength, crate: (sc.crate ?? []).map(toCrate) },
       deps,
     );
+    await settleStyles(); // candidate lookups started by this scenario finish before the next one starts
     const score = scoreScenario(sc, suggestions);
     results.push({ scenario: sc, suggestions });
     rows.push({
@@ -119,11 +127,11 @@ async function main(): Promise<void> {
     console.log(`[${i + 1}/${subset.length}] ${sc.id}: ${score.compliant}/${score.n} compliant, reasons ${score.reasonsOnAll ? 'all' : 'MISSING'}, lane ${fmt(score.laneHitRate)}  ${criterion3Holds(score) ? 'ok' : 'FAIL'}  crateReady ${crateKnown.length}/${(sc.crate ?? []).length}`);
   }
 
-  const sum = summarizeRecs(rows as any);
+  const sum = summarizeRecs(rows);
   const stopped = [...guard.stopped.keys()];
   const refused = Object.keys(guard.refused);
   const cooldowns = degradedProviders(cooldownSeed, readCooldowns(realRoot));
-  const lowCrate = lowCrateScenarios(rows as any);
+  const lowCrate = lowCrateScenarios(rows);
   let status = recsStatus({ passed: sum.passed, n: sum.n, stopped, refused, cooldowns, lowCrate });
   if (lowCrate.length) console.log(`Thin crate (run npm run bench:recs -- --warm first): ${lowCrate.join(', ')}`);
   if (LIMIT !== undefined && !status.startsWith('PARTIAL')) status = status === 'PASS' ? 'SMOKE' : 'SMOKE (FAIL)';

@@ -92,6 +92,7 @@ export default function RatingSession() {
   const [state, setState] = useState<Saved | null>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
+  const [pending, setPending] = useState<RatingFile | null>(null);
   const mounted = useRef(false);
 
   useEffect(() => {
@@ -112,6 +113,9 @@ export default function RatingSession() {
       const file = parseRatingFile(String(reader.result));
       if (!file) return setError('That is not a rating file from bench:recs.');
       setError('');
+      const hasRatings = !!state && Object.values(state.ratings).some((e) => e.rating !== undefined || e.note);
+      if (state && JSON.stringify(state.file) === JSON.stringify(file)) return; // same file: nothing to replace, keep the progress
+      if (hasRatings) return setPending(file); // a different file would wipe saved ratings: ask first
       update({ file, ratings: {}, index: 0 });
     };
     reader.onerror = () => setError('Could not read that file.');
@@ -177,7 +181,7 @@ export default function RatingSession() {
       </section>
 
       <section aria-label="Suggestions" className="flex flex-col gap-2">
-        <p className="text-[12px] tracking-wide text-[#8A8FA3] uppercase">Ten next-track candidates (shuffled)</p>
+        <p className="text-[12px] tracking-wide text-[#8A8FA3] uppercase">{sc.tracks.length} next-track candidates (shuffled)</p>
         <ul className="grid gap-2 sm:grid-cols-2">
           {sc.tracks.map((t, i) => <TrackRow key={i} t={t} />)}
         </ul>
@@ -218,6 +222,16 @@ export default function RatingSession() {
           {sum.pass ? 'PASS' : sum.rated === sum.total ? 'Not passing' : `${sum.total - sum.rated} still to rate`}
         </p>
       </section>
+
+      {pending && (
+        <div role="alertdialog" aria-label="Replace ratings" className="flex flex-col gap-2 rounded-lg border border-[#F2B33D]/50 bg-[#1A1D28] p-3 text-[14px]">
+          <p>This is a different rating file. Replace it and delete the {sum.rated} rating{sum.rated === 1 ? '' : 's'} you have saved?</p>
+          <div className="flex gap-2">
+            <button className={btn} onClick={() => setPending(null)}>Keep my ratings</button>
+            <button className={`${btn} border-[#F2B33D]/60`} onClick={() => { update({ file: pending, ratings: {}, index: 0 }); setPending(null); }}>Replace and start over</button>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-4 border-t border-[#E8E4DA]/10 pt-3">
         {picker}

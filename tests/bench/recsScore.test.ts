@@ -19,7 +19,6 @@ import {
 } from '../../bench/recs/score';
 
 const scenarios: Scenario[] = JSON.parse(readFileSync(join(__dirname, '../../bench/recs/scenarios.json'), 'utf8'));
-const tracks: Array<{ artist: string; title: string }> = JSON.parse(readFileSync(join(__dirname, '../../bench/search/tracks.json'), 'utf8'));
 
 const sug = (i: number, o: { compliant?: boolean; reasons?: number; styles?: string[] } = {}): Suggestion => ({
   track: {
@@ -39,12 +38,30 @@ describe('scenarios.json', () => {
     expect(validateScenarios(scenarios)).toEqual([]);
     for (const s of scenarios) expect(LANES).toContain(s.lane);
   });
-  it('gives each scenario a 40-track crate drawn from the bench list and a distinct id', () => {
-    const known = new Set(tracks.map((t) => `${t.artist}|${t.title}`));
+  const pools: Record<string, Array<{ artist: string; title: string }>> = JSON.parse(readFileSync(join(__dirname, '../../bench/recs/pools.json'), 'utf8'));
+  const k = (t: { artist: string; title: string }) => `${t.artist}|${t.title}`;
+  it('gives each scenario a 40-track crate: >= 24 in its lane, <= 16 from other lanes', () => {
     expect(new Set(scenarios.map((s) => s.id)).size).toBe(10);
     for (const s of scenarios) {
-      expect(s.crate).toHaveLength(40);
-      for (const c of s.crate!) expect(known.has(`${c.artist}|${c.title}`)).toBe(true);
+      const lane = new Set((pools[s.lane] ?? []).map(k));
+      expect(s.crate, s.id).toHaveLength(40);
+      expect(new Set(s.crate!.map(k)).size, s.id).toBe(40);
+      const inLane = s.crate!.filter((c) => lane.has(k(c))).length;
+      expect(inLane, s.id).toBeGreaterThanOrEqual(24);
+      expect(40 - inLane, s.id).toBeLessThanOrEqual(16);
+    }
+  });
+  it('keeps the unique track count warm-able (<= 250) and set tracks out of the crate', () => {
+    expect(uniqueScenarioTracks(scenarios).length).toBeLessThanOrEqual(250);
+    for (const s of scenarios) {
+      const crate = new Set(s.crate!.map(k));
+      for (const t of s.set) expect(crate.has(k(t)), `${s.id} ${k(t)}`).toBe(false);
+    }
+  });
+  it('uses in-lane set tracks (the lane change and the incomplete-track probe are exempt)', () => {
+    for (const s of scenarios.filter((x) => !['lane-change', 'incomplete-track'].includes(x.id))) {
+      const lane = new Set(pools[s.lane].map(k));
+      for (const t of s.set) expect(lane.has(k(t)), `${s.id} ${k(t)}`).toBe(true);
     }
   });
   it('covers the cold start (1 track) and set sizes 1-6', () => {
