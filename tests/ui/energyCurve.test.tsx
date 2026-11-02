@@ -16,71 +16,59 @@ const t = (id: string, extra: Partial<Track> = {}): Track => ({
   ...extra,
 });
 
-describe('buildCurveData', () => {
-  it('spans the planned minutes even with an empty set (5:00 slots at 75%), target from the arc at each slot middle', () => {
-    const rows = buildCurveData([], BUILD_60);
-    expect(rows).toHaveLength(16);
-    rows.forEach((r, i) => {
-      expect(r.position).toBe(i + 1);
-      expect(r.target).toBe(energyTargetAtMinute(BUILD_60, i * 3.75 + 1.875));
+describe('buildCurveData (by minute)', () => {
+  const samplesOf = (rows: ReturnType<typeof buildCurveData>['points']) => rows.filter((r) => r.position === null);
+
+  it('an empty set spans the planned minutes, target from the arc at each minute, no energy', () => {
+    const d = buildCurveData([], BUILD_60);
+    expect(d.points).toHaveLength(61);
+    d.points.forEach((r, i) => {
+      expect(r.minute).toBe(i);
+      expect(r.target).toBe(energyTargetAtMinute(BUILD_60, i));
       expect(r.energy).toBeNull();
       expect(r.bpm).toBeNull();
     });
   });
 
-  it('maps actual energy and bpm per set position', () => {
-    const rows = buildCurveData(
-      [t('1', { energy: 4, bpm: 122 }), t('2', { energy: 5, bpm: 124 })],
-      BUILD_60
-    );
-    expect(rows[0]).toMatchObject({ position: 1, energy: 4, bpm: 122, label: 'A1 – T1' });
-    expect(rows[1]).toMatchObject({ position: 2, energy: 5, bpm: 124 });
-    expect(rows[2].energy).toBeNull();
+  it('maps energy and bpm to the minutes each track plays (5:00 estimated at 75% = 3:45 each)', () => {
+    const d = buildCurveData([t('1', { energy: 4, bpm: 122 }), t('2', { energy: 5, bpm: 124 })], BUILD_60);
+    const at = (m: number) => d.points.find((p) => p.minute === m)!;
+    expect(at(1)).toMatchObject({ position: 1, energy: 4, bpm: 122, label: 'A1 – T1' });
+    expect(at(5)).toMatchObject({ position: 2, energy: 5, bpm: 124 });
+    expect(at(8)).toMatchObject({ position: null, energy: null });
   });
 
   it('undefined / NaN energy and bpm become null gaps, never NaN', () => {
-    const rows = buildCurveData(
+    const d = buildCurveData(
       [t('1', { energy: 4 }), t('2'), t('3', { energy: Number.NaN, bpm: Number.NaN }), t('4', { energy: 6 })],
       BUILD_60
     );
-    expect(rows.slice(0, 4).map((r) => r.energy)).toEqual([4, null, null, 6]);
-    expect(rows.slice(0, 4).map((r) => r.bpm)).toEqual([null, null, null, null]);
-    for (const r of rows) {
-      for (const v of [r.energy, r.bpm, r.target]) {
-        if (v !== null) expect(Number.isFinite(v)).toBe(true);
-      }
+    const energyOf = (pos: number) => [...new Set(d.points.filter((p) => p.position === pos).map((p) => p.energy))];
+    expect([1, 2, 3, 4].map(energyOf)).toEqual([[4], [null], [null], [6]]);
+    for (const r of d.points) {
+      for (const v of [r.energy, r.bpm, r.target]) if (v !== null) expect(Number.isFinite(v)).toBe(true);
     }
   });
 
-  it('extends past the planned minutes when the set is longer, targets still computed', () => {
-    const tracks = Array.from({ length: 18 }, (_, i) => t(String(i), { energy: 5 }));
-    const rows = buildCurveData(tracks, BUILD_60);
-    expect(rows).toHaveLength(18);
-    expect(rows[17].target).toBe(6);
-  });
-
-  it('uses the given arc; 30 tracks of 5:20 reproduce the rulebook 120-minute targets', () => {
-    expect(buildCurveData([], JOURNEY_120)).toHaveLength(32);
+  it('a longer set extends the x-axis; 120-minute journey targets come straight from the engine', () => {
     const tracks = Array.from({ length: 30 }, (_, i) => t(String(i), { durationMs: 320_000 }));
-    const rows = buildCurveData(tracks, JOURNEY_120);
-    expect(rows).toHaveLength(30);
-    expect(rows[20].target).toBe(9);
-    expect(rows[26].target).toBe(10);
+    const d = buildCurveData(tracks, JOURNEY_120);
+    expect(d.maxMin).toBe(120); // 30 x 4:00 played
+    expect(d.points.find((p) => p.minute === 105)!.target).toBe(energyTargetAtMinute(JOURNEY_120, 105));
   });
 
-  it('open slots continue at the set average length; the play fraction stretches the arc', () => {
-    // two 8:00 tracks at 75% = 6:00 each -> open slots of 6' until 60' : 10 rows
+  it('the play fraction moves the track starts', () => {
     const tracks = [t('1', { durationMs: 480_000 }), t('2', { durationMs: 480_000 })];
-    expect(buildCurveData(tracks, BUILD_60)).toHaveLength(10);
-    // at 50% each is 4:00 -> 15 rows
-    expect(buildCurveData(tracks, BUILD_60, 0.5)).toHaveLength(15);
+    const startOf2 = (pf: number) => buildCurveData(tracks, BUILD_60, pf).points.find((p) => p.position === 2)!.minute;
+    expect(startOf2(0.75)).toBe(6);
+    expect(startOf2(0.5)).toBe(4);
   });
 
-  it('a 4-hour set draws its slots; absurd tiny durations cannot explode the row count', () => {
-    expect(buildCurveData([], { minutes: 240, shape: 'peak-time' })).toHaveLength(64);
-    const rows = buildCurveData([t('1', { durationMs: 1 })], { minutes: 480, shape: 'build' });
-    expect(rows.length).toBeLessThanOrEqual(201);
-    for (const r of rows) expect(Number.isFinite(r.target)).toBe(true);
+  it('a 4-hour set samples 241 minutes; absurd tiny durations cannot explode the point count', () => {
+    expect(samplesOf(buildCurveData([], { minutes: 240, shape: 'peak-time' }).points)).toHaveLength(241);
+    const d = buildCurveData([t('1', { durationMs: 1 })], { minutes: 480, shape: 'build' });
+    expect(d.points.length).toBeLessThanOrEqual(485);
+    for (const r of d.points) if (r.target !== null) expect(Number.isFinite(r.target)).toBe(true);
   });
 });
 
@@ -98,6 +86,14 @@ describe('<EnergyCurve />', () => {
       <EnergyCurve tracks={[t('1', { energy: 4, bpm: 122 }), t('2'), t('3', { bpm: 125 })]} arc={BUILD_60} />
     );
     expect(getByRole('figure', { name: /energy curve/i })).toBeInTheDocument();
+  });
+
+  it('labels the overrun only when the set plays past the planned length', () => {
+    const long = Array.from({ length: 9 }, (_, i) => t(String(i), { durationMs: 240_000, energy: 5 }));
+    const { getByText, rerender, queryByText } = render(<EnergyCurve tracks={long} arc={{ minutes: 30, shape: 'build' }} playFraction={1} />);
+    expect(getByText('Past the planned length')).toBeInTheDocument();
+    rerender(<EnergyCurve tracks={long} arc={BUILD_60} playFraction={1} />);
+    expect(queryByText('Past the planned length')).toBeNull();
   });
 
   it('renders an empty set', () => {

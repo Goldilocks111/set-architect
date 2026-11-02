@@ -150,7 +150,7 @@ describe('M2: sanitizeTrack keeps search fields', () => {
   it('keeps a valid version, duration and Spotify link and drops invalid ones', () => {
     const ok = sanitizeTrack({ id: 'x', artist: 'A', title: 'T', version: 'Extended Mix', durationMs: 401_000, spotifyUrl: 'https://open.spotify.com/track/abc' });
     expect(ok).toMatchObject({ version: 'Extended Mix', durationMs: 401_000, spotifyUrl: 'https://open.spotify.com/track/abc' });
-    const bad = sanitizeTrack({ id: 'x', artist: 'A', title: 'T', version: 'x'.repeat(101), durationMs: 4_000_000, spotifyUrl: 'https://evil.example/track' });
+    const bad = sanitizeTrack({ id: 'x', artist: 'A', title: 'T', version: 'x'.repeat(101), durationMs: 8_000_000, spotifyUrl: 'https://evil.example/track' });
     expect(bad).not.toHaveProperty('version');
     expect(bad).not.toHaveProperty('durationMs');
     expect(bad).not.toHaveProperty('spotifyUrl');

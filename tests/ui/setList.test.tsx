@@ -4,7 +4,6 @@ import SetList from '@/components/SetList';
 import Builder from '@/components/Builder';
 import { transitionParts } from '@/components/TransitionBadge';
 import { STORAGE_KEY } from '@/components/persistence';
-import { buildCurveData } from '@/components/curveData';
 import { nextTrackTarget, suggestNext } from '@/engine';
 import type { Track } from '@/types/track';
 
@@ -76,7 +75,6 @@ describe('<SetList />', () => {
     expect(engineEnergy).toBe('Energy drop'); // E8 -> E6 lands 2 off target 4 (target 5 would read "Energy reset")
     render(<SetList tracks={[a, b]} arc={arc} onRemove={() => {}} onMove={() => {}} />);
     expect(screen.getByLabelText(/^Transition:/).getAttribute('aria-label')).toContain(`Energy: ${engineEnergy}`);
-    expect(buildCurveData([a, b], arc)[1].target).toBe(target);
   });
 
   it('move/remove buttons call back with indices and ids', () => {

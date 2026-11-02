@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { isComplete, RETRYABLE_REASONS, withDanceabilityPrior } from '@/lib/completeness';
 import type { OverrideFields } from '@/lib/overrideValidation';
-import { pairViolations, plannedTrackCount, setPlayedMinutes } from '@/engine';
+import { pairViolations, plannedTrackCount } from '@/engine';
 import type { Track } from '@/types/track';
 import ArcPicker from './ArcPicker';
 import AutoOrderPanel from './AutoOrderPanel';
@@ -11,6 +11,7 @@ import BillingActions from './BillingActions';
 import CratePanel from './CratePanel';
 import { addToCrate, clearCrate, loadCrate, mergeCrateKnown, removeFromCrate, type CrateKnownItem, type CrateTrack } from './crate';
 import DemoBanner from './DemoBanner';
+import { overrunText, setTiming, timingHeaderText } from './curveData';
 import EnergyCurve from './EnergyCurve';
 import MikImport from './MikImport';
 import SavedSets from './SavedSets';
@@ -283,8 +284,9 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
     },
     [requeue, dispatch]
   );
-  // played minutes from real durations (estimates when missing) at the chosen play fraction
-  const minutes = Math.round(setPlayedMinutes(tracks, playFraction));
+  // played time from real durations (estimates when missing) at the chosen play fraction
+  const timing = useMemo(() => setTiming(tracks, arc, playFraction), [tracks, arc, playFraction]);
+  const over = overrunText(timing);
   const rough = useMemo(() => pairViolations(tracks), [tracks]);
   const scrollToRough = () => {
     const first = rough[0] && tracks[rough[0].index];
@@ -301,7 +303,12 @@ export default function Builder({ demo, getSongBpmConfigured }: Props) {
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
           <h1 className="font-[family-name:var(--font-display)] text-[28px] leading-none font-semibold tracking-tight">Set Architect</h1>
           <p className="text-[13px] text-[#8A8FA3] tabular-nums" aria-live="polite">
-            {tracks.length} of ~{plannedCount} tracks, about {minutes} min
+            <span title={timing.estimated ? 'Some track lengths are estimated' : undefined}>
+              {timingHeaderText(timing, tracks.length, plannedCount)}
+            </span>
+            {over && (
+              <span className="ml-2 rounded border border-[#EE8B7A]/50 px-1.5 text-[12px] text-[#EE8B7A]">{over}</span>
+            )}
           </p>
           {rough.length > 0 && (
             <button
