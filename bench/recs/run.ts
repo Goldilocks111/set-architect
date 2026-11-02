@@ -4,7 +4,7 @@ import { dataDir, dataRoot } from '../../src/lib/dataDir';
 import { activeCooldowns, degradedProviders, readCooldowns } from '../data/cooldowns';
 import { createFetchGuard } from '../data/guardFetch';
 import { RequestGate, dayKey, loadDailyCounts, saveDailyCounts } from '../search/guard';
-import { TOP_N, BENCH_WITHOUT, RECS_BUDGET, poolLimitedScenarios, withCrates, auditCrate, buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, isWarmEntry, selectWarmTargets, warmStylesMode, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
+import { SHUFFLE_SEED, TOP_N, BENCH_WITHOUT, RECS_BUDGET, poolLimitedScenarios, withCrates, auditCrate, buildRatingFile, criterion3Holds, lowCrateScenarios, recsStatus, scoreScenario, isWarmEntry, selectWarmTargets, warmStylesMode, summarizeRecs, uniqueScenarioTracks, validateScenarios, type Scenario, type ScenarioScore } from './score';
 import type { Suggestion, Track } from '../../src/types/track';
 
 try {
@@ -121,7 +121,7 @@ async function main(): Promise<void> {
   setReresolveDeps({ setTimer: () => undefined });
 
   const toCrate = (r: { artist: string; title: string }, i: number): Track => ({ id: `crate-${i}`, artist: r.artist, title: r.title, sources: {} });
-  const results: Array<{ scenario: Scenario; suggestions: Suggestion[] }> = [];
+  const results: Array<{ scenario: Scenario; suggestions: Suggestion[]; crate: Array<{ artist: string; title: string; bpm?: number }>; lastBpm?: number }> = [];
   const rows: Array<ScenarioScore & Record<string, unknown> & { id: string; crateReady: number; crateSize: number; compliantAvailable: number }> = [];
   for (const [i, sc] of subset.entries()) {
     const t0 = Date.now();
@@ -143,7 +143,10 @@ async function main(): Promise<void> {
         styles: getEntry(trackKeyOf(c.artist, c.title))?.fields.styles,
       })),
     );
-    results.push({ scenario: sc, suggestions });
+    // the baseline list draws from the same crate, tempo-matched to the last set track that has a BPM
+    const lastBpm = [...playlist].reverse().find((t) => t.bpm !== undefined)?.bpm;
+    const crateBpm = (sc.crate ?? []).map((c) => ({ artist: c.artist, title: c.title, bpm: getEntry(trackKeyOf(c.artist, c.title))?.fields.bpm }));
+    results.push({ scenario: sc, suggestions, crate: crateBpm, lastBpm });
     rows.push({
       id: sc.id, lane: sc.lane, setSize: sc.set.length, incompleteInSet: incomplete, crateReady: crateKnown.length, crateSize: (sc.crate ?? []).length, compliantAvailable, poolLimited: compliantAvailable < TOP_N, ...score, audit, pass: criterion3Holds(score),
       top10: suggestions.slice(0, 10).map((s) => ({ artist: s.track.artist, title: s.track.title, score: s.score, compliant: s.compliant, reasons: s.reasons.map((r) => r.label) })),
@@ -169,10 +172,12 @@ async function main(): Promise<void> {
 
   const out = join(here, 'results', `${day}.json`);
   mkdirSync(dirname(out), { recursive: true });
-  writeFileSync(out, JSON.stringify({ day, status, stopped: Object.fromEntries(guard.stopped), refused: guard.refused, summary: sum, poolLimited, rows }, null, 2));
+  // The key (which list is the engine) lives here only; the rating file the owner sees has List A / List B.
+  const rating = buildRatingFile(results, { fileId: `${day}-${SHUFFLE_SEED}` });
+  writeFileSync(out, JSON.stringify({ day, status, stopped: Object.fromEntries(guard.stopped), refused: guard.refused, summary: sum, poolLimited, rows, ratingFileId: rating.file.fileId, ratingKey: rating.key }, null, 2));
   const ratingOut = join(here, 'results', `${day}-rating.json`);
-  writeFileSync(ratingOut, JSON.stringify(buildRatingFile(results), null, 2));
-  console.log(`\nWrote ${out}\nWrote ${ratingOut} (blind: hand this to the owner, open /rate in dev)`);
+  writeFileSync(ratingOut, JSON.stringify(rating.file, null, 2));
+  console.log(`\nWrote ${out}\nWrote ${ratingOut} (blind: hand this to the owner, open /rate in dev; score the export with npm run bench:recs:ratings -- <export.json> ${out})`);
 }
 
 main().catch((e) => {

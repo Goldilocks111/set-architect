@@ -148,37 +148,111 @@ export function seededShuffle<T>(xs: readonly T[], seed: number): T[] {
   return out;
 }
 
-export interface RatingTrack {
-  artist: string;
-  title: string;
-  previewUrl?: string;
-  youtubeUrl?: string;
+export interface RatingList {
+  label: 'A' | 'B';
+  /** Artist/title only: previews are found on demand in /rate, so no list stands out by carrying them. */
+  tracks: TrackRef[];
 }
 
+/** What the owner rates. Version 2: two unlabelled lists per scenario, engine and baseline in a seeded random order. */
 export interface RatingFile {
-  version: 1;
-  scenarios: Array<{ id: string; name: string; template: ArcTemplate; set: TrackRef[]; tracks: RatingTrack[] }>;
+  version: 2;
+  fileId: string;
+  scenarios: Array<{ id: string; name: string; template: ArcTemplate; set: TrackRef[]; lists: RatingList[] }>;
 }
 
-/** The blind file: the set and the top-10 tracks only (shuffled), never scores, reasons or compliance. */
+/** Which list is which, per scenario id: written to the results file only, never to the rating file. */
+export type RatingKey = Record<string, { engine: 'A' | 'B'; baseline: 'A' | 'B' }>;
+
+/** Baseline tracks are drawn from the crate within this tempo distance of the last set track. */
+export const BASELINE_BPM_TOLERANCE = 0.06;
+
+/**
+ * The control list: TOP_N seeded random crate tracks within ±6% BPM of the last set track, engine picks left out
+ * while enough others match; short of that, matched engine picks, then the nearest-tempo rest. No BPM: whole crate.
+ */
+export function baselinePicks(o: { crate: Array<TrackRef & { bpm?: number }>; lastBpm?: number; engine: TrackRef[]; seed: number }): TrackRef[] {
+  const key = (t: TrackRef) => trackKeyOf(t.artist, t.title);
+  const engine = new Set(o.engine.map(key));
+  const last = o.lastBpm;
+  const near = (b?: number) => last === undefined || (b !== undefined && Math.abs(b - last) / last <= BASELINE_BPM_TOLERANCE);
+  const matched = o.crate.filter((t) => near(t.bpm));
+  const tiers = [
+    seededShuffle(matched.filter((t) => !engine.has(key(t))), o.seed),
+    seededShuffle(matched.filter((t) => engine.has(key(t))), o.seed + 1),
+    o.crate.filter((t) => !near(t.bpm)).sort((a, b) => Math.abs((a.bpm ?? Infinity) - last!) - Math.abs((b.bpm ?? Infinity) - last!)),
+  ];
+  const seen = new Set<string>();
+  const out: TrackRef[] = [];
+  for (const t of tiers.flat()) {
+    if (out.length >= TOP_N || seen.has(key(t))) continue;
+    seen.add(key(t));
+    out.push({ artist: t.artist, title: t.title });
+  }
+  return out;
+}
+
+/**
+ * The blind file and its key. Per scenario: the engine's top 10 and the baseline, each shuffled, presented as
+ * List A / List B in a seeded random order. The file holds artist/title only; the key goes to the results file.
+ */
 export function buildRatingFile(
-  results: Array<{ scenario: Scenario; suggestions: Suggestion[] }>,
-  seed = SHUFFLE_SEED,
-): RatingFile {
-  return {
-    version: 1,
-    scenarios: results.map(({ scenario, suggestions }, i) => ({
+  results: Array<{ scenario: Scenario; suggestions: Suggestion[]; crate: Array<TrackRef & { bpm?: number }>; lastBpm?: number }>,
+  opts: { seed?: number; fileId: string },
+): { file: RatingFile; key: RatingKey } {
+  const seed = opts.seed ?? SHUFFLE_SEED;
+  const key: RatingKey = {};
+  const scenarios = results.map(({ scenario, suggestions, crate, lastBpm }, i) => {
+    const s = seed + i * 7919;
+    const engine = suggestions.slice(0, TOP_N).map(({ track: t }) => ({ artist: t.artist, title: t.title }));
+    const baseline = baselinePicks({ crate, lastBpm, engine, seed: s + 1 });
+    const engineFirst = rng(s + 2)() < 0.5;
+    key[scenario.id] = engineFirst ? { engine: 'A', baseline: 'B' } : { engine: 'B', baseline: 'A' };
+    const [a, b] = engineFirst ? [engine, baseline] : [baseline, engine];
+    return {
       id: scenario.id,
       name: scenario.name,
       template: scenario.template,
       set: scenario.set.map(({ artist, title }) => ({ artist, title })),
-      tracks: seededShuffle(suggestions.slice(0, TOP_N), seed + i).map(({ track: t }) => {
-        const out: RatingTrack = { artist: t.artist, title: t.title };
-        if (t.previewUrl) out.previewUrl = t.previewUrl;
-        if (t.youtubeUrl) out.youtubeUrl = t.youtubeUrl;
-        return out;
-      }),
-    })),
+      lists: [
+        { label: 'A' as const, tracks: seededShuffle(a, s + 3) },
+        { label: 'B' as const, tracks: seededShuffle(b, s + 4) },
+      ],
+    };
+  });
+  return { file: { version: 2, fileId: opts.fileId, scenarios }, key };
+}
+
+/** Acceptance: the engine list rated >= 7 on >= 8 scenarios AND rated above the baseline on >= 7. */
+export const RATING_PASS = 7;
+export const RATING_MIN_GOOD = 8;
+export const RATING_MIN_BEATS = 7;
+
+/** The /rate export, as far as scoring needs it: per scenario, the rating of List A and of List B. */
+export interface RatingExport {
+  fileId?: string;
+  ratings: Array<{ id: string; A?: number | null; B?: number | null }>;
+}
+
+/** Scores an export through the key (never shown during rating). Unrated counts as neither good nor beating. */
+export function summarizeRatings(exp: RatingExport, key: RatingKey) {
+  const rows = exp.ratings
+    .filter((r) => key[r.id])
+    .map((r) => {
+      const k = key[r.id];
+      const engine = r[k.engine] ?? undefined;
+      const baseline = r[k.baseline] ?? undefined;
+      return { id: r.id, engine, baseline };
+    });
+  const engineGood = rows.filter((r) => (r.engine ?? 0) >= RATING_PASS).length;
+  const engineBeatsBaseline = rows.filter((r) => r.engine !== undefined && r.baseline !== undefined && r.engine > r.baseline).length;
+  return {
+    total: Object.keys(key).length,
+    rated: rows.filter((r) => r.engine !== undefined).length,
+    engineGood,
+    engineBeatsBaseline,
+    pass: engineGood >= RATING_MIN_GOOD && engineBeatsBaseline >= RATING_MIN_BEATS,
+    rows,
   };
 }
 

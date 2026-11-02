@@ -5,6 +5,8 @@ import { LANES } from '@/lib/style/taxonomy';
 import { trackKeyOf, type Suggestion } from '@/types/track';
 import {
   buildRatingFile,
+  baselinePicks,
+  summarizeRatings,
   auditCrate,
   isWarmEntry,
   warmStylesMode,
@@ -149,24 +151,107 @@ describe('seededShuffle', () => {
   });
 });
 
-describe('buildRatingFile (blind)', () => {
-  const results = [
-    { scenario: { ...sc('s1'), crate: [{ artist: 'C', title: 'D' }] }, suggestions: ten((i) => ({ styles: ['techno'], compliant: i % 2 === 0 })) },
-    { scenario: sc('s2'), suggestions: ten() },
-  ];
-  it('keeps only set + artist/title/previewUrl/youtubeUrl: no scores, reasons or compliant flags', () => {
-    const file = buildRatingFile(results, 7);
+describe('buildRatingFile (blind, engine vs baseline)', () => {
+  const crate = Array.from({ length: 40 }, (_, i) => ({ artist: `Crate ${i}`, title: `C${i}`, bpm: 120 + (i % 20) }));
+  const results = Array.from({ length: 10 }, (_, i) => ({
+    scenario: { ...sc(`s${i}`), crate: crate.map(({ artist, title }) => ({ artist, title })) },
+    suggestions: ten((j) => ({ styles: ['techno'], compliant: j % 2 === 0 })),
+    crate,
+    lastBpm: 124,
+  }));
+  it('two unlabelled lists of 10 per scenario; tracks carry artist/title only; nothing identifies the engine', () => {
+    const { file } = buildRatingFile(results, { seed: 7, fileId: 'f1' });
     const text = JSON.stringify(file);
-    for (const banned of ['score', 'reason', 'compliant', 'Perfect match', 'styles', 'crate', 'plannedLength']) expect(text).not.toContain(banned);
-    expect(file.scenarios).toHaveLength(2);
-    expect(Object.keys(file.scenarios[0].tracks[0]).sort()).toEqual(['artist', 'previewUrl', 'title', 'youtubeUrl']);
-    expect(file.scenarios[0].tracks).toHaveLength(10);
+    for (const banned of ['score', 'reason', 'compliant', 'Perfect match', 'styles', 'crate', 'plannedLength', 'engine', 'baseline', 'previewUrl', 'youtubeUrl', 'bpm'])
+      expect(text, banned).not.toContain(banned);
+    expect(file).toMatchObject({ version: 2, fileId: 'f1' });
+    expect(file.scenarios).toHaveLength(10);
+    for (const s of file.scenarios) {
+      expect(s.lists.map((l) => l.label)).toEqual(['A', 'B']);
+      for (const l of s.lists) {
+        expect(l.tracks).toHaveLength(10);
+        for (const t of l.tracks) expect(Object.keys(t).sort()).toEqual(['artist', 'title']);
+      }
+    }
     expect(file.scenarios[0].set).toEqual([{ artist: 'A', title: 'B' }]);
   });
-  it('shuffles with a fixed seed: same seed same order, and not the engine rank order', () => {
-    const order = (f: ReturnType<typeof buildRatingFile>) => f.scenarios[0].tracks.map((t) => t.title);
-    expect(order(buildRatingFile(results, 7))).toEqual(order(buildRatingFile(results, 7)));
-    expect(order(buildRatingFile(results, 7))).not.toEqual(results[0].suggestions.map((s) => s.track.title));
+  it('the key (results file only) says which list is the engine; the engine list holds the top 10, shuffled', () => {
+    const { file, key } = buildRatingFile(results, { seed: 7, fileId: 'f1' });
+    for (const s of file.scenarios) {
+      const label = key[s.id].engine;
+      expect(['A', 'B']).toContain(label);
+      expect(key[s.id].baseline).toBe(label === 'A' ? 'B' : 'A');
+      const engine = s.lists.find((l) => l.label === label)!;
+      expect(engine.tracks.map((t) => t.title).sort()).toEqual(ten().map((x) => x.track.title).sort());
+      expect(engine.tracks.map((t) => t.title)).not.toEqual(ten().map((x) => x.track.title));
+    }
+  });
+  it('deterministic per seed; the A/B order is randomized per scenario', () => {
+    const a = buildRatingFile(results, { seed: 7, fileId: 'f1' });
+    expect(buildRatingFile(results, { seed: 7, fileId: 'f1' })).toEqual(a);
+    const labels = Object.values(a.key).map((k) => k.engine);
+    expect(new Set(labels)).toEqual(new Set(['A', 'B']));
+    expect(buildRatingFile(results, { seed: 8, fileId: 'f1' }).file).not.toEqual(a.file);
+  });
+});
+
+describe('baselinePicks', () => {
+  const crate = Array.from({ length: 60 }, (_, i) => ({ artist: `Crate ${i}`, title: `C${i}`, bpm: 100 + i }));
+  const engine = crate.filter((c) => c.bpm >= 120 && c.bpm <= 123).map(({ artist, title }) => ({ artist, title }));
+  it('10 seeded random crate tracks within ±6% BPM of the last set track, excluding engine picks', () => {
+    const picks = baselinePicks({ crate, lastBpm: 125, engine, seed: 3 });
+    expect(picks).toHaveLength(10);
+    expect(baselinePicks({ crate, lastBpm: 125, engine, seed: 3 })).toEqual(picks);
+    expect(baselinePicks({ crate, lastBpm: 125, engine, seed: 4 })).not.toEqual(picks);
+    const engineKeys = new Set(engine.map((t) => t.title));
+    for (const p of picks) {
+      const bpm = crate.find((c) => c.title === p.title)!.bpm;
+      expect(Math.abs(bpm - 125) / 125).toBeLessThanOrEqual(0.06);
+      expect(engineKeys.has(p.title)).toBe(false);
+    }
+  });
+  it('uses engine picks only when the tempo-matched crate runs short, then the nearest-tempo rest', () => {
+    const small = crate.slice(18, 27); // bpm 118..126: 9 tracks, all within 6% of 122
+    const eng = [{ artist: 'Crate 20', title: 'C20' }];
+    const picks = baselinePicks({ crate: [...small, ...crate.slice(0, 3)], lastBpm: 122, engine: eng, seed: 1 });
+    expect(picks).toHaveLength(10);
+    expect(picks.map((p) => p.title)).toContain('C20'); // only 8 non-engine matches, so the engine pick is reused
+    expect(picks.filter((p) => ['C0', 'C1', 'C2'].includes(p.title))).toHaveLength(1);
+    expect(picks.map((p) => p.title)).toContain('C2'); // nearest tempo (102) of the out-of-range rest
+  });
+  it('without a last-track BPM it draws from the whole crate', () => {
+    expect(baselinePicks({ crate, lastBpm: undefined, engine: [], seed: 1 })).toHaveLength(10);
+  });
+});
+
+describe('summarizeRatings (acceptance; never shown during rating)', () => {
+  const key = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`s${i}`, i % 2 ? { engine: 'A' as const, baseline: 'B' as const } : { engine: 'B' as const, baseline: 'A' as const }]));
+  const exp = (f: (i: number) => { engine?: number; baseline?: number }) => ({
+    fileId: 'f1',
+    ratings: Array.from({ length: 10 }, (_, i) => {
+      const r = f(i);
+      const k = key[`s${i}`];
+      return { id: `s${i}`, [k.engine]: r.engine ?? null, [k.baseline]: r.baseline ?? null };
+    }),
+  });
+  it('passes at engine >= 7 on >= 8 scenarios AND engine > baseline on >= 7', () => {
+    const r = summarizeRatings(exp((i) => ({ engine: i < 8 ? 8 : 5, baseline: i < 7 ? 6 : 9 })), key);
+    expect(r).toMatchObject({ total: 10, engineGood: 8, engineBeatsBaseline: 7, pass: true });
+  });
+  it('fails when the engine does not beat the baseline often enough, even with high ratings', () => {
+    const r = summarizeRatings(exp((i) => ({ engine: 9, baseline: i < 6 ? 8 : 9 })), key);
+    expect(r).toMatchObject({ engineGood: 10, engineBeatsBaseline: 6, pass: false });
+  });
+  it('fails at 7 good; unrated counts as neither good nor beating', () => {
+    expect(summarizeRatings(exp((i) => ({ engine: i < 7 ? 8 : 6, baseline: 1 })), key)).toMatchObject({ engineGood: 7, pass: false });
+    expect(summarizeRatings(exp((i) => (i < 9 ? { engine: 9, baseline: 1 } : {})), key)).toMatchObject({ engineGood: 9, engineBeatsBaseline: 9, rated: 9, pass: true });
+    expect(summarizeRatings(exp(() => ({ engine: 9 })), key)).toMatchObject({ engineBeatsBaseline: 0, pass: false });
+  });
+  it('maps A/B through the key: swapping the key swaps the verdict', () => {
+    const e = exp((i) => ({ engine: 9, baseline: 2 + (i % 2) }));
+    const swapped = Object.fromEntries(Object.entries(key).map(([id, k]) => [id, { engine: k.baseline, baseline: k.engine }]));
+    expect(summarizeRatings(e, key).pass).toBe(true);
+    expect(summarizeRatings(e, swapped).pass).toBe(false);
   });
 });
 
