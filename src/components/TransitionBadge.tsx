@@ -1,4 +1,5 @@
 import { pairCheck, scoreBpmTransition, scoreEnergyTransition, scoreKeyTransition } from '@/engine';
+import { tempoRelation } from '@/engine/compliance';
 import type { Track } from '@/types/track';
 import { QUALITY_CLASSES, quality } from './trackFormat';
 
@@ -31,12 +32,12 @@ export function transitionParts({ from, to, target }: Props): Part[] {
     finite(from.bpm) && finite(to.bpm)
       ? (() => {
           const b = scoreBpmTransition(from.bpm, to.bpm);
+          // the verdict comes from the same rule as the violation flag, so the two agree at exactly ±6%
+          const relation = tempoRelation(from.bpm, to.bpm);
           const delta = Math.round((to.bpm - from.bpm) * 10) / 10;
           const text =
-            b.relation === 'half-time' || b.relation === 'double-time'
-              ? b.relation
-              : `${delta > 0 ? '+' : ''}${delta} BPM`;
-          return { name: 'Tempo', text, detail: b.relation === 'clash' ? 'Tempo clash' : `${b.relation} mix`, score: b.score };
+            relation === 'half-time' || relation === 'double-time' ? relation : `${delta > 0 ? '+' : ''}${delta} BPM`;
+          return { name: 'Tempo', text, detail: relation ? `${relation} mix` : 'Tempo clash', score: b.score };
         })()
       : { name: 'Tempo', text: 'BPM ?', detail: 'BPM unknown' };
 
@@ -62,7 +63,8 @@ export default function TransitionBadge(props: Props) {
     <div
       id={`transition-${props.to.id}`}
       data-violation={rough ? 'true' : undefined}
-      className={`flex flex-wrap items-center gap-x-2 gap-y-0.5 py-1 pl-[52px] ${rough ? 'border-l-2 border-[#EE8B7A] bg-[#EE8B7A]/5' : ''}`}
+      tabIndex={rough ? -1 : undefined}
+      className={`flex flex-wrap items-center gap-x-2 gap-y-0.5 py-1 pl-[52px] ${rough ? 'border-l-2 border-[#EE8B7A] bg-[#EE8B7A]/5 focus-visible:outline-2 focus-visible:outline-[#F2B33D]' : ''}`}
       aria-label={`Transition: ${summary}${rough ? `. Rough transition: ${issues.map((i) => i.label).join(', ')}` : ''}`}
       title={summary}
     >

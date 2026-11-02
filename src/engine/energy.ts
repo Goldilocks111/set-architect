@@ -43,12 +43,17 @@ const SHAPE_POINTS: Record<Exclude<ArcShape, 'build'>, Array<[number, number]>> 
   ],
 };
 
+// Indexed access, no destructuring: this runs in auto-order's inner loop (hundreds of thousands of calls).
 function interpolate(points: Array<[number, number]>, x: number): number {
   if (x <= points[0][0]) return points[0][1];
   for (let i = 1; i < points.length; i++) {
-    const [x1, y1] = points[i];
-    const [x0, y0] = points[i - 1];
-    if (x <= x1) return x1 === x0 ? y1 : y0 + ((y1 - y0) * (x - x0)) / (x1 - x0);
+    const p1 = points[i];
+    const x1 = p1[0];
+    if (x <= x1) {
+      const p0 = points[i - 1];
+      const x0 = p0[0];
+      return x1 === x0 ? p1[1] : p0[1] + ((p1[1] - p0[1]) * (x - x0)) / (x1 - x0);
+    }
   }
   return points[points.length - 1][1];
 }

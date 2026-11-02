@@ -11,6 +11,8 @@ export interface PlaylistState {
   playFraction: number;
   /** ids with a resolve request in flight; client-only, never persisted. */
   resolving?: string[];
+  /** The order before the last applyOrder (one undo level); client-only, never persisted. */
+  orderUndo?: string[];
 }
 
 /** What a load accepts: a saved set carries tracks + arc only; missing fields fall back. */
@@ -20,6 +22,8 @@ export type PlaylistAction =
   | { type: 'add'; track: Track }
   | { type: 'remove'; id: string }
   | { type: 'reorder'; from: number; to: number }
+  | { type: 'applyOrder'; ids: string[] }
+  | { type: 'undoOrder' }
   | { type: 'clear' }
   | { type: 'setArc'; arc: Arc }
   | { type: 'setPlayFraction'; playFraction: number }
@@ -63,6 +67,22 @@ export function applyResolved(track: Track, resolved: Track): Track {
 
 const without = (ids: string[] | undefined, id: string) => (ids ?? []).filter((x) => x !== id);
 
+/** The set's tracks in `ids` order, or null unless `ids` names every current track exactly once. */
+function permute(tracks: Track[], ids: string[]): Track[] | null {
+  if (ids.length !== tracks.length) return null;
+  const byId = new Map(tracks.map((t) => [t.id, t]));
+  if (byId.size !== tracks.length || new Set(ids).size !== ids.length) return null;
+  const out = ids.map((id) => byId.get(id));
+  return out.every((t): t is Track => t !== undefined) ? out : null;
+}
+
+/** A change to the set's membership or order makes the stored undo order stale. */
+function withTracks(state: PlaylistState, tracks: Track[]): PlaylistState {
+  const { orderUndo: _stale, ...rest } = state;
+  void _stale;
+  return { ...rest, tracks };
+}
+
 function updateTrack(state: PlaylistState, id: string, fn: (t: Track) => Track): PlaylistState {
   const i = state.tracks.findIndex((t) => t.id === id);
   if (i < 0) return state;
@@ -76,10 +96,10 @@ export function playlistReducer(state: PlaylistState, action: PlaylistAction): P
     case 'add': {
       const existing = new Set(state.tracks.flatMap(recordingKeys));
       if (isInSet(existing, action.track)) return state;
-      return { ...state, tracks: [...state.tracks, action.track] };
+      return withTracks(state, [...state.tracks, action.track]);
     }
     case 'remove':
-      return { ...state, tracks: state.tracks.filter((t) => t.id !== action.id) };
+      return withTracks(state, state.tracks.filter((t) => t.id !== action.id));
     case 'reorder': {
       const { from, to } = action;
       const n = state.tracks.length;
@@ -87,10 +107,20 @@ export function playlistReducer(state: PlaylistState, action: PlaylistAction): P
       const tracks = [...state.tracks];
       const [moved] = tracks.splice(from, 1);
       tracks.splice(to, 0, moved);
-      return { ...state, tracks };
+      return withTracks(state, tracks);
+    }
+    case 'applyOrder': {
+      // never drops, duplicates or swaps a track: anything but a permutation of the current ids is ignored
+      const tracks = permute(state.tracks, action.ids);
+      if (!tracks || tracks.every((t, i) => t === state.tracks[i])) return state; // unchanged order: nothing to undo
+      return { ...state, tracks, orderUndo: state.tracks.map((t) => t.id) };
+    }
+    case 'undoOrder': {
+      const tracks = state.orderUndo && permute(state.tracks, state.orderUndo);
+      return tracks ? withTracks(state, tracks) : state;
     }
     case 'clear':
-      return { ...state, tracks: [] };
+      return withTracks(state, []);
     case 'setArc':
       return { ...state, arc: toArc(action.arc) };
     case 'setPlayFraction':

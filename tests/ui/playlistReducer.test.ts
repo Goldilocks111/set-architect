@@ -3,6 +3,7 @@ import {
   initialPlaylistState,
   playlistReducer,
   applyResolved,
+  type PlaylistAction,
   type PlaylistState,
 } from '@/components/playlistReducer';
 import type { Track } from '@/types/track';
@@ -123,5 +124,57 @@ describe('durationMs through the reducer', () => {
     );
     expect(s.tracks[0].durationMs).toBe(401000);
     expect(s.tracks[0].sources.durationMs).toBe('manual');
+  });
+});
+
+describe('applyOrder / undoOrder (Review Focus 3)', () => {
+  const ids = (s: PlaylistState) => s.tracks.map((x) => x.id);
+
+  it('applies a permutation by ids without changing any track object', () => {
+    const before = withTracks('a', 'b', 'c', 'd');
+    const s = playlistReducer(before, { type: 'applyOrder', ids: ['c', 'a', 'd', 'b'] });
+    expect(ids(s)).toEqual(['c', 'a', 'd', 'b']);
+    for (const tr of s.tracks) expect(tr).toBe(before.tracks.find((x) => x.id === tr.id));
+  });
+
+  it('applying the current order is a no-op and arms no undo', () => {
+    const before = withTracks('a', 'b', 'c');
+    const s = playlistReducer(before, { type: 'applyOrder', ids: ['a', 'b', 'c'] });
+    expect(s).toBe(before);
+    expect(s.orderUndo).toBeUndefined();
+  });
+
+  it('rejects anything that is not a permutation of the current ids', () => {
+    const before = withTracks('a', 'b', 'c');
+    for (const bad of [['a', 'b'], ['a', 'b', 'c', 'd'], ['a', 'a', 'b'], ['a', 'b', 'z'], []]) {
+      expect(playlistReducer(before, { type: 'applyOrder', ids: bad })).toBe(before);
+    }
+  });
+
+  it('undo restores the exact previous order (one level), keeping enrichments made since', () => {
+    const before = withTracks('a', 'b', 'c', 'd');
+    let s = playlistReducer(before, { type: 'applyOrder', ids: ['d', 'c', 'b', 'a'] });
+    s = playlistReducer(s, { type: 'enrich', id: 'b', fields: { bpm: 126 } });
+    s = playlistReducer(s, { type: 'undoOrder' });
+    expect(ids(s)).toEqual(['a', 'b', 'c', 'd']);
+    expect(s.tracks[1].bpm).toBe(126);
+    expect(s.orderUndo).toBeUndefined();
+    expect(playlistReducer(s, { type: 'undoOrder' })).toBe(s);
+  });
+
+  it('a later add / remove / move / clear / load drops the undo instead of restoring a stale order', () => {
+    const applied = playlistReducer(withTracks('a', 'b', 'c'), { type: 'applyOrder', ids: ['c', 'b', 'a'] });
+    expect(applied.orderUndo).toEqual(['a', 'b', 'c']);
+    for (const action of [
+      { type: 'add', track: t('z') },
+      { type: 'remove', id: 'b' },
+      { type: 'reorder', from: 0, to: 2 },
+      { type: 'clear' },
+      { type: 'load', state: { tracks: [t('q')] } },
+    ] satisfies PlaylistAction[]) {
+      const s = playlistReducer(applied, action);
+      expect(s.orderUndo, action.type).toBeUndefined();
+      expect(playlistReducer(s, { type: 'undoOrder' })).toBe(s);
+    }
   });
 });
