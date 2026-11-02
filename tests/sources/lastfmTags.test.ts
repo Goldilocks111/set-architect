@@ -1,7 +1,12 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { lastfmTopTags } from '@/lib/sources/lastfmTags';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { configureLastfmPacing, lastfmTagsDisabled, lastfmTopTags, resetLastfmTags } from '@/lib/sources/lastfmTags';
+import { HttpError } from '@/lib/http';
 import { json, mockFetch } from './helpers';
 
+beforeEach(() => {
+  resetLastfmTags();
+  configureLastfmPacing(0);
+});
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
@@ -48,10 +53,59 @@ describe('lastfmTopTags', () => {
     mockFetch([['gettoptags', () => json({}, 500)]]);
     await expect(lastfmTopTags('A', 'T')).rejects.toThrow();
   });
-  it('Last.fm error body (HTTP 200) throws', async () => {
+  it('rate-limit body (code 29) becomes an HttpError 429 so the breaker opens', async () => {
     vi.stubEnv('LASTFM_API_KEY', 'k');
     mockFetch([['gettoptags', () => json({ error: 29, message: 'Rate limit exceeded' })]]);
-    await expect(lastfmTopTags('A', 'T')).rejects.toThrow(/Rate limit/);
+    const err = await lastfmTopTags('A', 'T').catch((e) => e);
+    expect(err).toBeInstanceOf(HttpError);
+    expect(err.status).toBe(429);
+  });
+  it('key errors (10, 26) disable Last.fm tags for the process and are logged once', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const f = mockFetch([['gettoptags', () => json({ error: 10, message: 'Invalid API key' })]]);
+    await expect(lastfmTopTags('A', 'T')).rejects.toThrow();
+    expect(lastfmTagsDisabled()).toBe(true);
+    await expect(lastfmTopTags('A', 'T')).rejects.toThrow();
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+  it('artist not found (error 6) is an empty result, not a failure', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    mockFetch([['gettoptags', () => json({ error: 6, message: 'not found' })]]);
+    expect(await lastfmTopTags('A', 'T')).toEqual([]);
+  });
+  it('takes one budget unit per HTTP call and stops quietly when refused', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    const take = vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(false);
+    const f = mockFetch([['track.gettoptags', () => tags(['seen live', 5])], ['artist.gettoptags', () => tags(['techno', 5])]]);
+    await expect(lastfmTopTags('A', 'T', { take })).rejects.toThrow(/budget/);
+    expect(take).toHaveBeenCalledTimes(2);
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+  it('paces calls process-wide', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    configureLastfmPacing(60);
+    const at: number[] = [];
+    mockFetch([['gettoptags', () => { at.push(Date.now()); return tags(['techno', 5], ['house', 4]); }]]);
+    await Promise.all([lastfmTopTags('A', 'T'), lastfmTopTags('B', 'U'), lastfmTopTags('C', 'V')]);
+    expect(at[1] - at[0]).toBeGreaterThanOrEqual(55);
+    expect(at[2] - at[1]).toBeGreaterThanOrEqual(55);
+  });
+  it('mood tags do not count toward the 2-genre threshold', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    const f = mockFetch([
+      ['track.gettoptags', () => tags(['techno', 100], ['chill', 50], ['ambient', 40])],
+      ['artist.gettoptags', () => tags(['melodic techno', 80])],
+    ]);
+    await lastfmTopTags('A', 'T');
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+  it('Last.fm error body (HTTP 200) throws', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    mockFetch([['gettoptags', () => json({ error: 8, message: 'Operation failed' })]]);
+    await expect(lastfmTopTags('A', 'T')).rejects.toThrow(/Operation failed/);
   });
   it('track-not-found error (code 6) falls back to artist tags', async () => {
     vi.stubEnv('LASTFM_API_KEY', 'k');

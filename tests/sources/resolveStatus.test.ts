@@ -7,7 +7,8 @@ import { json, mockFetch } from './helpers';
 const analysePreview = vi.fn();
 vi.mock('@/lib/analysis/previewAnalysis', () => ({ analysePreview: (...a: unknown[]) => analysePreview(...a), ANALYSIS_TIMEOUT_MS: 5000 }));
 
-import { resolveWithStatus } from '@/lib/resolver';
+import { resolveWithStatus, settleStyles } from '@/lib/resolver';
+import { configureLastfmPacing, resetLastfmTags } from '@/lib/sources/lastfmTags';
 import { getEntry, putManual, putResolved } from '@/lib/metadataCache';
 import { dataDir } from '@/lib/dataDir';
 import { HttpError } from '@/lib/http';
@@ -31,6 +32,8 @@ beforeEach(() => {
   resetProviderBudgets();
   resetBreakers();
   resetBudgets();
+  resetLastfmTags();
+  configureLastfmPacing(0);
   configureMusicBrainzLimiter(0);
   analysePreview.mockReset();
   for (const k of ['SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET', 'GETSONGBPM_API_KEY', 'SOUNDSTAT_API_KEY', 'YOUTUBE_API_KEY', 'LASTFM_API_KEY'])
@@ -213,54 +216,80 @@ describe('styles (Last.fm tags → lanes)', () => {
   const complete = () =>
     putResolved(KEY, { id: KEY, artist: 'A', title: 'T', bpm: 124, camelot: '8A', energy: 7, danceability: 0, sources: { bpm: 'x' } });
   const lfmTags = (n: string) => json({ toptags: { tag: [{ name: n, count: 100 }, { name: 'deep house', count: 40 }] } });
-  const lfmRoutes = (calls: { n: number }): Array<[string, () => Response]> => [
+  const base = (): Array<[string, () => Response]> => [
     ['api.deezer.com', () => json({ data: [] })],
     ['itunes.apple.com', () => json({ results: [] })],
+  ];
+  const lfmRoutes = (calls: { n: number }): Array<[string, () => Response]> => [
+    ...base(),
     ['audioscrobbler', () => { calls.n++; return lfmTags('melodic techno'); }],
   ];
 
-  it('stores styles with source lastfm-tags and a cache hit then makes no Last.fm call', async () => {
+  it('the response does not wait for the lookup; the cache gets styles afterwards; the next call makes no Last.fm call', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    complete();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let n = 0;
+    mockFetch([...base(), ['audioscrobbler', async () => { n++; await gate; return lfmTags('melodic techno'); }]]);
+    const t = await resolveWithStatus('A', 'T'); // resolves although the lookup is still pending
+    expect(t.styles).toBeUndefined();
+    expect(getEntry(KEY)?.fields.styles).toBeUndefined();
+    release();
+    await settleStyles();
+    expect(getEntry(KEY)?.fields.styles).toEqual(['melodic-techno', 'deep-house']);
+    expect(getEntry(KEY)?.sources.styles).toBe('lastfm-tags');
+    const t2 = await resolveWithStatus('A', 'T');
+    await settleStyles();
+    expect(t2.styles).toEqual(['melodic-techno', 'deep-house']);
+    expect(t2.sources.styles).toBe('lastfm-tags');
+    expect(n).toBe(1);
+  });
+  it('at most one in-flight lookup per track', async () => {
     vi.stubEnv('LASTFM_API_KEY', 'k');
     complete();
     const calls = { n: 0 };
     mockFetch(lfmRoutes(calls));
-    const t = await resolveWithStatus('A', 'T');
-    expect(t.styles).toEqual(['melodic-techno', 'deep-house']);
-    expect(t.sources.styles).toBe('lastfm-tags');
-    expect(getEntry(KEY)?.fields.styles).toEqual(['melodic-techno', 'deep-house']);
-    expect(calls.n).toBe(1);
-    const t2 = await resolveWithStatus('A', 'T');
-    expect(t2.styles).toEqual(['melodic-techno', 'deep-house']);
+    await Promise.all([resolveWithStatus('A', 'T'), resolveWithStatus('A', 'T'), resolveWithStatus('A', 'T')]);
+    await settleStyles();
     expect(calls.n).toBe(1);
   });
   it('a track with no genre tags is marked and not re-queried for 7 days', async () => {
     vi.stubEnv('LASTFM_API_KEY', 'k');
     complete();
     let n = 0;
-    mockFetch([
-      ['api.deezer.com', () => json({ data: [] })],
-      ['itunes.apple.com', () => json({ results: [] })],
-      ['audioscrobbler', () => { n++; return json({ toptags: { tag: [] } }); }],
-    ]);
-    const t = await resolveWithStatus('A', 'T');
-    expect(t.styles).toBeUndefined();
+    mockFetch([...base(), ['audioscrobbler', () => { n++; return json({ toptags: { tag: [] } }); }]]);
+    await resolveWithStatus('A', 'T');
+    await settleStyles();
     expect(n).toBe(2); // track + artist lookup
     await resolveWithStatus('A', 'T');
+    await settleStyles();
     expect(n).toBe(2);
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(Date.now() + 8 * 24 * 3600_000);
     await resolveWithStatus('A', 'T');
+    await settleStyles();
     expect(n).toBe(4);
+  });
+  it('unknown artist and track (error 6 twice) writes the marker: no repeat calls', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    complete();
+    let n = 0;
+    mockFetch([...base(), ['audioscrobbler', () => { n++; return json({ error: 6, message: 'not found' }); }]]);
+    await resolveWithStatus('A', 'T');
+    await settleStyles();
+    expect(getEntry(KEY)?.stylesCheckedAt).toBeDefined();
+    const before = n;
+    await resolveWithStatus('A', 'T');
+    await settleStyles();
+    expect(n).toBe(before);
   });
   it('Last.fm failure never blocks completeness', async () => {
     vi.stubEnv('LASTFM_API_KEY', 'k');
     complete();
-    mockFetch([
-      ['api.deezer.com', () => json({ data: [] })],
-      ['itunes.apple.com', () => json({ results: [] })],
-      ['audioscrobbler', () => json({ error: 29, message: 'Rate limit exceeded' })],
-    ]);
+    mockFetch([...base(), ['audioscrobbler', () => json({ error: 8, message: 'Operation failed' })]]);
     const t = await resolveWithStatus('A', 'T');
+    await settleStyles();
     expect(t.unresolved).toBeUndefined();
     expect(t.bpm).toBe(124);
     expect(t.styles).toBeUndefined();
@@ -272,28 +301,39 @@ describe('styles (Last.fm tags → lanes)', () => {
     mockFetch(lfmRoutes(calls));
     for (let i = 0; i < 120; i++) takeBudget('lastfm', { app: true });
     const t = await resolveWithStatus('A', 'T');
+    await settleStyles();
     expect(calls.n).toBe(0);
     expect(t.unresolved).toBeUndefined();
-    expect(t.styles).toBeUndefined();
+    expect(getEntry(KEY)?.stylesCheckedAt).toBeUndefined();
   });
-  it('429 opens the lastfm breaker', async () => {
+  it('HTTP 429 opens the lastfm breaker', async () => {
     vi.stubEnv('LASTFM_API_KEY', 'k');
     complete();
     let n = 0;
-    mockFetch([
-      ['api.deezer.com', () => json({ data: [] })],
-      ['itunes.apple.com', () => json({ results: [] })],
-      ['audioscrobbler', () => { n++; return json({}, 429); }],
-    ]);
+    mockFetch([...base(), ['audioscrobbler', () => { n++; return json({}, 429); }]]);
     await resolveWithStatus('A', 'T');
+    await settleStyles();
     await resolveWithStatus('A', 'T');
+    await settleStyles();
     expect(n).toBe(1);
   });
-  it('is not an essential: an incomplete track stays unresolved and styles do not complete it', async () => {
+  it('a rate-limit body (code 29 on HTTP 200) opens the breaker: the next resolve makes no Last.fm call', async () => {
+    vi.stubEnv('LASTFM_API_KEY', 'k');
+    complete();
+    let n = 0;
+    mockFetch([...base(), ['audioscrobbler', () => { n++; return json({ error: 29, message: 'Rate limit exceeded' }); }]]);
+    await resolveWithStatus('A', 'T');
+    await settleStyles();
+    await resolveWithStatus('A', 'T');
+    await settleStyles();
+    expect(n).toBe(1);
+  });
+  it('is not an essential: an incomplete track stays unresolved and no lookup is made', async () => {
     vi.stubEnv('LASTFM_API_KEY', 'k');
     const calls = { n: 0 };
     mockFetch(lfmRoutes(calls).concat([['musicbrainz.org', () => json({ recordings: [] })]]));
     const t = await resolveWithStatus('A', 'T');
+    await settleStyles();
     expect(t.unresolved).toBeDefined();
     expect(calls.n).toBe(0);
   });

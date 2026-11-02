@@ -17,7 +17,7 @@ export const TAG_ALIASES: Record<string, Lane> = {
   'funky house': 'house', 'vocal house': 'house', 'jackin house': 'house', 'future house': 'house',
   'deep house': 'deep-house', 'deephouse': 'deep-house', 'soulful house': 'deep-house', 'lounge house': 'deep-house',
   'tech house': 'tech-house', techhouse: 'tech-house', 'minimal tech house': 'tech-house', 'groove house': 'tech-house',
-  'progressive house': 'progressive-house', 'prog house': 'progressive-house', 'progressive': 'progressive-house',
+  'progressive house': 'progressive-house', 'prog house': 'progressive-house',
   'melodic house': 'melodic-house', 'melodic house and techno': 'melodic-house', 'melodic deep house': 'melodic-house',
   'indie dance': 'melodic-house', 'indie dance nu disco': 'disco-nu-disco',
   'afro house': 'afro-house', afrohouse: 'afro-house', 'afro tech': 'afro-house', 'afro deep': 'afro-house',
@@ -32,20 +32,19 @@ export const TAG_ALIASES: Record<string, Lane> = {
   'melodic techno': 'melodic-techno', 'melodic progressive': 'melodic-techno', afterlife: 'melodic-techno',
   'melodic techno and progressive house': 'melodic-techno', 'progressive techno': 'melodic-techno',
   'hard techno': 'hard-techno', hardtechno: 'hard-techno', 'industrial techno': 'hard-techno', 'hard groove': 'hard-techno',
-  hardcore: 'hard-techno', 'industrial hard techno': 'hard-techno', schranz: 'hard-techno',
+  'industrial hard techno': 'hard-techno', schranz: 'hard-techno',
   minimal: 'minimal', 'minimal techno': 'minimal', 'minimal house': 'minimal', microhouse: 'minimal', 'micro house': 'minimal',
   'deep tech': 'minimal', 'minimal deep tech': 'minimal',
   // other lanes
   'uk garage': 'uk-garage', ukg: 'uk-garage', '2 step': 'uk-garage', 'speed garage': 'uk-garage', 'garage house': 'uk-garage',
-  garage: 'uk-garage', 'future garage': 'uk-garage',
+  'future garage': 'uk-garage',
   'drum and bass': 'drum-and-bass', 'drum n bass': 'drum-and-bass', dnb: 'drum-and-bass', 'd and b': 'drum-and-bass',
   drumandbass: 'drum-and-bass', liquid: 'drum-and-bass', 'liquid funk': 'drum-and-bass', jungle: 'drum-and-bass', neurofunk: 'drum-and-bass',
   trance: 'trance', 'progressive trance': 'trance', 'uplifting trance': 'trance', 'vocal trance': 'trance',
   psytrance: 'trance', 'psy trance': 'trance', 'goa trance': 'trance', 'tech trance': 'trance',
   electro: 'electro', 'electro house': 'electro', electroclash: 'electro', 'electro funk': 'electro', 'complextro': 'electro',
   breaks: 'breaks', breakbeat: 'breaks', 'break beat': 'breaks', 'nu skool breaks': 'breaks', 'big beat': 'breaks', 'uk breaks': 'breaks',
-  downtempo: 'downtempo', chillout: 'downtempo', 'chill out': 'downtempo', chill: 'downtempo', ambient: 'downtempo',
-  trip: 'downtempo', 'trip hop': 'downtempo', lounge: 'downtempo',
+  downtempo: 'downtempo', 'trip hop': 'downtempo',
 };
 
 const normalize = (tag: string): string =>
@@ -63,13 +62,28 @@ export function laneOfTag(name: string): Lane | undefined {
   return Object.hasOwn(TAG_ALIASES, n) ? TAG_ALIASES[n] : undefined;
 }
 
-/** Up to MAX_LANES lanes, ordered by summed tag weight (ties keep the LANES order). */
+/** Generic lanes and the specific lanes that refine them: the specific one always ranks first. */
+const SPECIFIC_OF: Partial<Record<Lane, Lane[]>> = {
+  house: ['deep-house', 'tech-house', 'progressive-house', 'melodic-house', 'afro-house', 'organic-house', 'bass-house'],
+  techno: ['melodic-techno', 'hard-techno'],
+};
+
+/**
+ * Up to MAX_LANES lanes, ordered by tag weight (ties keep the LANES order). Specific lanes sum their tags; a generic
+ * lane takes its single heaviest tag (so "techno" + "peak time techno" + "driving techno" is not three votes) and
+ * never outranks a specific lane that is also present.
+ */
 export function lanesFromTags(tags: Array<{ name: string; count: number }>): Lane[] {
   const weight = new Map<Lane, number>();
   for (const { name, count } of tags) {
     const lane = laneOfTag(name);
     if (!lane || !(count > 0)) continue;
-    weight.set(lane, (weight.get(lane) ?? 0) + count);
+    weight.set(lane, SPECIFIC_OF[lane] ? Math.max(weight.get(lane) ?? 0, count) : (weight.get(lane) ?? 0) + count);
+  }
+  for (const [generic, specifics] of Object.entries(SPECIFIC_OF) as Array<[Lane, Lane[]]>) {
+    const own = weight.get(generic);
+    const present = specifics.map((l) => weight.get(l)).filter((w): w is number => w !== undefined);
+    if (own !== undefined && present.length) weight.set(generic, Math.min(own, Math.min(...present) * 0.999));
   }
   return [...weight.entries()]
     .sort((a, b) => b[1] - a[1] || LANES.indexOf(a[0]) - LANES.indexOf(b[0]))

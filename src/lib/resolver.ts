@@ -9,7 +9,7 @@ import { acousticbrainzAdapter } from './sources/acousticbrainz';
 import { deezerAdapter } from './sources/deezer';
 import { getSongBpmAdapter } from './sources/getsongbpm';
 import { itunesAdapter } from './sources/itunes';
-import { lastfmTopTags } from './sources/lastfmTags';
+import { LastfmBudgetError, lastfmTagsDisabled, lastfmTopTags } from './sources/lastfmTags';
 import { lanesFromTags } from './style/taxonomy';
 import { lastfmConfigured, lastfmSimilar, type SimilarItem } from './sources/lastfm';
 import { listenbrainzSimilar } from './sources/listenbrainz';
@@ -184,28 +184,41 @@ export async function resolveWithStatus(
   opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string }; signal?: AbortSignal } = {}
 ): Promise<Track> {
   const track = await resolveCore(artist, title, opts);
-  return track.unresolved || opts.signal?.aborted ? track : withStyles(track);
+  if (!track.unresolved && !opts.signal?.aborted) queueStyles(track);
+  return track;
+}
+
+const stylesInFlight = new Map<string, Promise<void>>();
+
+/** Resolves when every queued styles lookup has settled (tests, shutdown). */
+export async function settleStyles(): Promise<void> {
+  while (stylesInFlight.size) await Promise.allSettled([...stylesInFlight.values()]);
 }
 
 /**
- * Style lanes from Last.fm tags, after the essentials. Never an essential: a cached entry (styles, or a recent
- * "no genre tags" marker) costs nothing, and a missing key, open breaker, spent budget or failure just skips the step.
+ * Style lanes from Last.fm tags, after the essentials and off the response path: the lookup runs in the background
+ * (own 4 s timeout, one per track at a time) and lands in the metadata cache, so the next request sees it. Never an
+ * essential: a cached entry (styles, or a recent "no genre tags" marker) costs nothing, and a missing key, open
+ * breaker, spent budget or failure just skips the step.
  */
-async function withStyles(track: Track): Promise<Track> {
+function queueStyles(track: Track): void {
   const key = trackKeyOf(track.artist, track.title);
+  if (stylesInFlight.has(key) || !lastfmConfigured() || lastfmTagsDisabled()) return;
   const entry = getEntry(key);
-  if (!entry || stylesSettled(entry) || !lastfmConfigured()) return track;
-  if (cooldownUntil(STYLES_PROVIDER) || !takeBudget(STYLES_PROVIDER, { app: true })) return track;
-  try {
-    const tags = await withTimeout(lastfmTopTags(track.artist, track.title), ADAPTER_TIMEOUT_MS, 'lastfm');
-    recordSuccess(STYLES_PROVIDER);
-    const styles = lanesFromTags(tags);
-    putStyles(key, styles);
-    return styles.length ? { ...track, styles, sources: { ...track.sources, styles: 'lastfm-tags' } } : track;
-  } catch (err) {
-    recordFailure(STYLES_PROVIDER, err);
-    return track;
-  }
+  if (!entry || stylesSettled(entry) || cooldownUntil(STYLES_PROVIDER)) return;
+  const take = () => !cooldownUntil(STYLES_PROVIDER) && takeBudget(STYLES_PROVIDER, { app: true });
+  const job = (async () => {
+    try {
+      const tags = await withTimeout(lastfmTopTags(track.artist, track.title, { take }), ADAPTER_TIMEOUT_MS, 'lastfm');
+      recordSuccess(STYLES_PROVIDER);
+      putStyles(key, lanesFromTags(tags));
+    } catch (err) {
+      if (!(err instanceof LastfmBudgetError)) recordFailure(STYLES_PROVIDER, err);
+    } finally {
+      stylesInFlight.delete(key);
+    }
+  })();
+  stylesInFlight.set(key, job);
 }
 
 async function resolveCore(

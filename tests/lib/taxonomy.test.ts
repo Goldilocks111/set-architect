@@ -58,7 +58,6 @@ describe('taxonomy aliases', () => {
     ['breaks', 'breaks'],
     ['breakbeat', 'breaks'],
     ['downtempo', 'downtempo'],
-    ['chillout', 'downtempo'],
     ['big room', 'big-room'],
     ['big room house', 'big-room'],
     ['bass house', 'bass-house'],
@@ -100,6 +99,22 @@ describe('lanesFromTags', () => {
       { name: 'deep-house', count: 30 },
     ]);
     expect(out).toEqual(['deep-house', 'house']);
+  });
+  it('drops non-DJ and mood tags', () => {
+    for (const t of ['hardcore', 'garage', 'progressive', 'chill', 'ambient', 'lounge', 'chillout']) expect([t, one(t)]).toEqual([t, []]);
+  });
+  it('a specific lane outranks its generic parent, whatever the weights', () => {
+    expect(lanesFromTags([{ name: 'house', count: 100 }, { name: 'tech house', count: 70 }])).toEqual(['tech-house', 'house']);
+    expect(lanesFromTags([{ name: 'techno', count: 100 }, { name: 'melodic techno', count: 20 }])).toEqual(['melodic-techno', 'techno']);
+    expect(lanesFromTags([{ name: 'techno', count: 100 }, { name: 'hard techno', count: 20 }])).toEqual(['hard-techno', 'techno']);
+  });
+  it('several aliases of a generic lane do not outweigh a specific one', () => {
+    const out = lanesFromTags([
+      { name: 'techno', count: 60 }, { name: 'peak time techno', count: 60 }, { name: 'driving techno', count: 60 },
+      { name: 'melodic techno', count: 50 }, { name: 'deep house', count: 55 },
+    ]);
+    expect(out[0]).toBe('deep-house');
+    expect(out.indexOf('melodic-techno')).toBeLessThan(out.indexOf('techno'));
   });
   it('handles empty input', () => {
     expect(lanesFromTags([])).toEqual([]);
