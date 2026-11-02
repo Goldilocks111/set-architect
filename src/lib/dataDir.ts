@@ -8,7 +8,7 @@ import fs from 'node:fs';
  * the repo triggers an endless rebuild/Fast Refresh loop in dev (see next.config.ts).
  * Override with SETARCHITECT_DATA_DIR (tests point this at a temp dir).
  */
-const dataRoot = () => process.env.SETARCHITECT_DATA_DIR ?? path.join(os.homedir(), '.setarchitect');
+export const dataRoot = () => process.env.SETARCHITECT_DATA_DIR ?? path.join(os.homedir(), '.setarchitect');
 
 /** True for paths inside the runtime data dir: the only place runtime code may write (never the repo). */
 export function isRuntimeDataPath(file: string): boolean {
