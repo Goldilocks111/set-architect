@@ -8,11 +8,18 @@ export interface LoudnessFeatures {
   onsetRate: number; // spectral-flux onsets per second
   centroidHz: number; // mean spectral centroid of non-silent frames
   pulseClarity: number; // 0..1 strength of the best periodicity of the onset envelope in 60-200 BPM
+  highRatio: number; // 0..1 share of spectral power above HIGH_HZ (hats, cymbals, noise: brightness)
 }
 
-// Placeholders: Task 3 fits these against labelled tracks.
-export const ENERGY_COEFFS = { intercept: 5.5, rmsDb: 0.12, onsetRate: 0.3, centroidHz: 0.0005 };
-export const DANCE_COEFFS = { intercept: 0.05, pulseClarity: 0.9, onsetRate: 0.01 };
+const HIGH_HZ = 5000;
+const HIGH_RATIO_CAP = 0.15;
+
+// Least-squares fits against ReccoBeats energy (1-10) / danceability on the U2 bench (n=48 club tracks, 2026-11-02;
+// bench/data/tune/fit.ts). MAE with the feature set chosen inside each leave-one-out fold: energy 1.02 (about the old
+// placeholder; the 1.0 target is not demonstrated), danceability 0.083. The reference danceability barely varies across
+// club tracks (0.5-1.0) and pulse clarity hardly predicts it, so the fit sits close to its mean: treat it as a weak signal.
+export const ENERGY_COEFFS = { intercept: 8.69, rmsDb: 0.1178, highRatio: 26.16 };
+export const DANCE_COEFFS = { intercept: 0.6372, pulseClarity: 0.05891, clubTempo: 0.04426 };
 
 export function extractFeatures(pcm: Float32Array, sampleRate: number): LoudnessFeatures {
   let sq = 0;
@@ -27,6 +34,8 @@ export function extractFeatures(pcm: Float32Array, sampleRate: number): Loudness
   let prev: Float64Array | undefined;
   let centroidSum = 0;
   let centroidFrames = 0;
+  let highPower = 0;
+  let totalPower = 0;
   const binHz = sampleRate / FRAME;
   for (let start = 0; start + FRAME <= pcm.length; start += HOP) {
     const mag = magnitudeFrame(pcm, start, window, re, im);
@@ -34,6 +43,11 @@ export function extractFeatures(pcm: Float32Array, sampleRate: number): Loudness
     let wsum = 0;
     let total = 0;
     for (let k = 0; k < mag.length; k++) {
+      if (k > 0) {
+        const p = mag[k] * mag[k];
+        totalPower += p;
+        if (k * binHz > HIGH_HZ) highPower += p;
+      }
       const m = Math.log1p(mag[k] * 10);
       if (prev) f += Math.max(0, m - prev[k]);
       mag[k] = m;
@@ -55,6 +69,7 @@ export function extractFeatures(pcm: Float32Array, sampleRate: number): Loudness
     onsetRate: seconds > 0 ? countOnsets(flux) / seconds : 0,
     centroidHz: centroidFrames ? centroidSum / centroidFrames : 0,
     pulseClarity: pulseClarity(flux, envRate),
+    highRatio: totalPower > 0 ? highPower / totalPower : 0,
   };
 }
 
@@ -97,14 +112,15 @@ function pulseClarity(flux: number[], envRate: number): number {
 
 export function energyFrom(f: LoudnessFeatures): number {
   const c = ENERGY_COEFFS;
-  const raw = c.intercept + c.rmsDb * f.rmsDb + c.onsetRate * f.onsetRate + c.centroidHz * f.centroidHz;
+  // highRatio is capped at the top of the fitted range (max 0.12 on real tracks): pure noise reaches ~0.5
+  const raw = c.intercept + c.rmsDb * f.rmsDb + c.highRatio * Math.min(f.highRatio, HIGH_RATIO_CAP);
   return Math.min(10, Math.max(1, Math.round(raw)));
 }
 
 /** 0..1, 2 decimals. A tempo inside the club range (95-150 BPM) adds a small bonus. */
 export function danceabilityFrom(f: LoudnessFeatures, bpm?: number): number {
   const c = DANCE_COEFFS;
-  const tempoBonus = bpm !== undefined && bpm >= 95 && bpm <= 150 ? 0.05 : 0;
-  const raw = c.intercept + c.pulseClarity * f.pulseClarity + c.onsetRate * Math.min(f.onsetRate, 8) + tempoBonus;
+  const club = bpm !== undefined && bpm >= 95 && bpm <= 150 ? 1 : 0;
+  const raw = c.intercept + c.pulseClarity * f.pulseClarity + c.clubTempo * club;
   return Math.round(Math.min(1, Math.max(0, raw)) * 100) / 100;
 }

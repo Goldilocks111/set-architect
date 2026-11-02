@@ -14,7 +14,7 @@ export interface DataRow {
     danceability?: number;
     ms: number;
     /** Raw inputs for fitting energy/danceability coefficients later. */
-    features?: { rmsDb: number; onsetRate: number; centroidHz: number; pulseClarity: number };
+    features?: { rmsDb: number; onsetRate: number; centroidHz: number; pulseClarity: number; highRatio?: number };
     keyConfidence?: number;
   };
 }

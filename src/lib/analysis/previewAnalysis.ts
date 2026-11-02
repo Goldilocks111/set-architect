@@ -18,7 +18,8 @@ export interface Analysis {
   camelot?: string;
   energy?: number;
   danceability?: number;
-  v: 2;
+  /** 3 = key/energy/danceability tuned on the U2 bench (2026-11-02); older entries are re-analysed. */
+  v: 3;
   /** Raw inputs of energy/danceability and the key estimate's confidence: set by analysePcm, for fitting (bench). Not cached. */
   features?: LoudnessFeatures;
   keyConfidence?: number;
@@ -88,7 +89,7 @@ export function analysePcm(pcm: Float32Array, sampleRate: number): Analysis | un
     camelot,
     energy: energyFrom(features),
     danceability: danceabilityFrom(features, bpm),
-    v: 2,
+    v: 3,
     features,
     keyConfidence: key?.confidence,
   };
@@ -153,9 +154,9 @@ export async function analysePreview(trackKey: string, previewUrl: string): Prom
   try {
     const cache = await readCache();
     cached = cache[trackKey];
-    // v1 entries were bpm-only: re-analyse them to get the richer fields
+    // v1 entries were bpm-only, v2 ones came from the untuned key/energy/danceability: re-analyse both
     let hit: Analysis;
-    if (cached && cached.v === 2) hit = cached;
+    if (cached && cached.v === 3) hit = cached;
     else {
       const fresh = await fetchAndAnalyse(previewUrl);
       if (!fresh) return staleOnly(cached);
@@ -174,7 +175,7 @@ export async function analysePreview(trackKey: string, previewUrl: string): Prom
   }
 }
 
-/** A v1 entry that could not be upgraded still has a usable bpm. */
+/** An older entry that could not be upgraded still has a usable bpm (tempo estimation did not change). */
 function staleOnly(cached: Analysis | undefined): Partial<Track> {
-  return cached && cached.v !== 2 && cached.bpm !== undefined ? { bpm: cached.bpm } : {};
+  return cached && cached.v !== 3 && cached.bpm !== undefined ? { bpm: cached.bpm } : {};
 }
