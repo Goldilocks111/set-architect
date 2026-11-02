@@ -4,6 +4,9 @@ import { dataDir } from './dataDir';
 import { ESSENTIALS, missingEssentials, withDanceabilityPrior, type Essential, type IncompleteReason } from './completeness';
 import type { Track } from '@/types/track';
 
+/** What a manual write may carry: the essentials plus the track length (non-essential, but a MIK file has it). */
+export type ManualFields = Partial<Pick<Track, Essential | 'durationMs'>>;
+
 export interface CacheEntry {
   fields: Partial<Track>;
   sources: Record<string, string>;
@@ -125,7 +128,7 @@ export function putResolved(key: string, track: Track, now = Date.now(), display
   return entry;
 }
 
-function applyManual(cache: Record<string, CacheEntry>, key: string, fields: Partial<Pick<Track, Essential>>): CacheEntry {
+function applyManual(cache: Record<string, CacheEntry>, key: string, fields: ManualFields): CacheEntry {
   const prev = cache[key];
   const entry: CacheEntry = {
     fields: { ...prev?.fields },
@@ -136,7 +139,7 @@ function applyManual(cache: Record<string, CacheEntry>, key: string, fields: Par
     retryAt: prev?.retryAt,
     ...(prev?.display ? { display: prev.display } : {}),
   };
-  for (const f of ESSENTIALS) {
+  for (const f of [...ESSENTIALS, 'durationMs'] as const) {
     const v = fields[f];
     if (v === undefined) continue;
     (entry.fields as Record<string, unknown>)[f] = v;
@@ -148,7 +151,7 @@ function applyManual(cache: Record<string, CacheEntry>, key: string, fields: Par
   return entry;
 }
 
-export function putManual(key: string, fields: Partial<Pick<Track, Essential>>): CacheEntry {
+export function putManual(key: string, fields: ManualFields): CacheEntry {
   const cache = read();
   const entry = applyManual(cache, key, fields);
   write(cache);
@@ -156,7 +159,7 @@ export function putManual(key: string, fields: Partial<Pick<Track, Essential>>):
 }
 
 /** Batch form of putManual: one read and one atomic write for the whole list (later items win on a repeated key). */
-export function putManualMany(items: Array<{ key: string; fields: Partial<Pick<Track, Essential>> }>): CacheEntry[] {
+export function putManualMany(items: Array<{ key: string; fields: ManualFields }>): CacheEntry[] {
   const cache = read();
   const entries = items.map(({ key, fields }) => applyManual(cache, key, fields));
   if (items.length) write(cache);

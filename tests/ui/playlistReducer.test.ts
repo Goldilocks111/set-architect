@@ -3,6 +3,7 @@ import {
   initialPlaylistState,
   playlistReducer,
   plannedLengthFor,
+  applyResolved,
   type PlaylistState,
 } from '@/components/playlistReducer';
 import type { Track } from '@/types/track';
@@ -108,5 +109,21 @@ describe('playlistReducer', () => {
   it('enrich for a track no longer in the set is a no-op', () => {
     const before = withTracks('a');
     expect(playlistReducer(before, { type: 'enrich', id: 'zzz', fields: { bpm: 1 } })).toBe(before);
+  });
+});
+
+describe('durationMs through the reducer', () => {
+  it("a search hit's exact-version length survives a resolver answer carrying another length", () => {
+    const merged = applyResolved(t('h', { durationMs: 390000 }), t('h', { durationMs: 210000, bpm: 124 }));
+    expect(merged.durationMs).toBe(390000);
+    expect(merged.bpm).toBe(124);
+  });
+  it('override applies a manual durationMs', () => {
+    const s = playlistReducer(
+      { ...initialPlaylistState, tracks: [t('a')] },
+      { type: 'override', id: 'a', fields: { durationMs: 401000 } }
+    );
+    expect(s.tracks[0].durationMs).toBe(401000);
+    expect(s.tracks[0].sources.durationMs).toBe('manual');
   });
 });

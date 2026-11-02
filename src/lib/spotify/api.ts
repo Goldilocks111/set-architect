@@ -23,6 +23,7 @@ export interface SpotifyPlaylistTrack {
   spotifyId: string;
   spotifyUrl?: string;
   popularity?: number;
+  durationMs?: number;
 }
 
 async function call<T>(token: string, path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
@@ -75,6 +76,7 @@ interface RawTrack {
   id?: string | null;
   name?: string;
   popularity?: number;
+  duration_ms?: number;
   type?: string;
   is_local?: boolean;
   external_urls?: { spotify?: string };
@@ -125,6 +127,7 @@ export async function playlistTracks(token: string, playlistId: string): Promise
         spotifyId: t.id,
         spotifyUrl: t.external_urls?.spotify,
         popularity: typeof t.popularity === 'number' ? t.popularity : undefined,
+        durationMs: typeof t.duration_ms === 'number' && t.duration_ms > 0 ? t.duration_ms : undefined,
       });
     }
     next = d.next ?? null;

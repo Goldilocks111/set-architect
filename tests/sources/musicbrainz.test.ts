@@ -9,6 +9,22 @@ afterEach(() => {
 });
 
 describe('musicbrainzAdapter', () => {
+  it('takes length (ms) from the accepted ISRC recording', async () => {
+    mockFetch([['/isrc/ISRC1', () => json({ recordings: [{ id: 'mbid-1', title: 'One More Time', length: 320000 }] })]]);
+    expect(await musicbrainzAdapter.enrich(base({ isrc: 'ISRC1' }))).toEqual({ mbid: 'mbid-1', durationMs: 320000 });
+  });
+  it('takes length from the accepted search recording, not a low-score one', async () => {
+    mockFetch([['/recording?', () => json({ recordings: [{ id: 'low', score: 80, length: 1000 }, { id: 'good', score: 95, title: 'One More Time', length: 241000 }] })]]);
+    expect(await musicbrainzAdapter.enrich(base())).toEqual({ mbid: 'good', durationMs: 241000 });
+  });
+  it('does not take a length from a recording whose title does not match', async () => {
+    mockFetch([['/recording?', () => json({ recordings: [{ id: 'x', score: 100, title: 'Different Song', length: 99000 }] })]]);
+    expect(await musicbrainzAdapter.enrich(base())).toEqual({ mbid: 'x' });
+  });
+  it('omits durationMs when the recording has no length', async () => {
+    mockFetch([['/recording?', () => json({ recordings: [{ id: 'x', score: 100 }] })]]);
+    expect(await musicbrainzAdapter.enrich(base())).toEqual({ mbid: 'x' });
+  });
   it('maps an ISRC to the first recording mbid and sends the descriptive User-Agent', async () => {
     const fetchFn = mockFetch([['/isrc/ISRC1', () => json({ isrc: 'ISRC1', recordings: [{ id: 'mbid-1' }, { id: 'mbid-2' }] })]]);
     const out = await musicbrainzAdapter.enrich(base({ isrc: 'ISRC1' }));

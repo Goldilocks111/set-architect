@@ -48,7 +48,7 @@ const ADAPTERS: SourceAdapter[] = [
 
 // Fields where a given adapter may replace an earlier source's value: SoundStat's analysis beats earlier
 // bpm/key estimates, and iTunes is the preferred previewUrl (Deezer's expires in ~15 min and is only a fallback).
-// previewUrl must not be persisted long-term.
+// previewUrl must not be persisted long-term. durationMs is first-accepted-wins (a search hit's own length is never replaced); each adapter gates it with lengthAgrees.
 const OVERRIDES: Record<string, Array<keyof Track>> = { soundstat: ['bpm', 'camelot'], itunes: ['previewUrl'] };
 
 /** Facts about one resolve pass, collected inside the loop so the reason is never guessed afterwards. */
