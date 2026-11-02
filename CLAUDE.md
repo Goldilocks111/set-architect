@@ -119,3 +119,23 @@ through subagents working off `docs/specs/build-plan.md`.
     and any provider in cooldown at start/end makes the run PARTIAL.
   - Never exercise the override editor / MIK import against the real cache in browser checks:
     manual values are permanent and beat every provider.
+- 2026-11-02 (V2 Phase 3 — recommendations): plan docs/superpowers/plans/2026-11-02-v2-phase3-recs.md,
+  branch v2-phase3. Shipped: client crate (localStorage, ≤ 2000, ≤ 600 sent) as the primary pool,
+  server lazily fills ≤ 2 crate items per refresh (Spotify/Deezer only), `crateKnown` sync, demo
+  "starter crate" below 30 ready tracks; Last.fm tags → 20 DJ lanes (`styles`, background queue,
+  breaker/budget 120/min, ≤ 4 req/s); engine lane fit + similar tracks from the last 3 tracks
+  (24 h cache) + compliance-first ranking (criterion 3); radio mode; `npm run bench:recs`
+  (`--warm` resumable warm-up; shared ~225-track library crate; compliantAvailable / pool-limited)
+  and a blind A/B rating page at /rate (dev only) scored by `npm run bench:recs:ratings`.
+  Automatic background resolves skip YouTube (shared Data API key with market-research).
+  Lessons:
+  - Track lists written from model memory were ~25% fictional or mis-credited; bench fixtures
+    must be grounded (verified search list or tracks seen in the 1001TL index, with neighbour
+    evidence for lane), and lane labels audited from cached tags after warm-up.
+  - Criterion 3 is bounded by pool composition (≥ 8 compliant tracks must exist) — measure
+    compliantAvailable separately from engine quality; a blind rating needs a control list
+    matched on lane AND tempo, or the engine list is identifiable by genre.
+  - Parallel worktrees can auto-merge into a semantic break (an options type lost a field) —
+    always run tsc after every merge, not just tests.
+  - A test asserting random ciphertext lacks a 2-letter string fails ~4% of runs — flaky tests
+    can be real test bugs, not load.
