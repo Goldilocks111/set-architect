@@ -175,6 +175,9 @@ async function withFreshPreview(cached: Track, budgetMs: number, without?: strin
 }
 
 /**
+ * `without` skips adapters for this call only (e.g. headroom-derived, re-evaluated at retry time); `retryWithout`
+ * is the intentional exclusion that also carries into the scheduled retry (crate fill never touches iTunes).
+ *
  * resolveTrack + the completeness gate: consults the persistent metadata cache (a complete entry costs zero
  * adapter calls), keeps manual overrides, and marks a still-incomplete track with `unresolved` and why.
  * A retryable verdict is scheduled on the re-resolve queue here, so every caller gets the same retry/negative-cache
@@ -184,7 +187,7 @@ async function withFreshPreview(cached: Track, budgetMs: number, without?: strin
 export async function resolveWithStatus(
   artist: string,
   title: string,
-  opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string }; signal?: AbortSignal; without?: string[] } = {}
+  opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string }; signal?: AbortSignal; without?: string[]; retryWithout?: string[] } = {}
 ): Promise<Track> {
   const track = await resolveCore(artist, title, opts);
   if (!track.unresolved && !opts.signal?.aborted) {
@@ -268,7 +271,7 @@ async function runStyles(key: string, track: Track): Promise<void> {
 async function resolveCore(
   artist: string,
   title: string,
-  opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string }; signal?: AbortSignal; without?: string[] }
+  opts: { budgetMs?: number; force?: boolean; hints?: { spotifyId?: string }; signal?: AbortSignal; without?: string[]; retryWithout?: string[] }
 ): Promise<Track> {
   const key = trackKeyOf(artist, title);
   const budgetMs = opts.budgetMs ?? RESOLVE_BUDGET_MS;
@@ -322,7 +325,7 @@ async function resolveCore(
   if (!missing.length) delete merged.unresolved;
   else if (merged.unresolved) {
     // after putResolved: the backoff step is picked from the entry's attempt count
-    const retryAt = scheduleRetry(artist, title, merged.unresolved.reason, opts.without);
+    const retryAt = scheduleRetry(artist, title, merged.unresolved.reason, opts.retryWithout);
     if (retryAt !== undefined) merged.unresolved = { ...merged.unresolved, retryAt };
     else {
       // a retryable verdict with nothing left to retry is no longer "retrying automatically"

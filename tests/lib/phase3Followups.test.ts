@@ -147,7 +147,22 @@ describe('iTunes leaks in the background fill', () => {
     await vi.waitFor(() => expect(resolve).toHaveBeenCalled());
     expect(resolve.mock.calls[0]).toEqual(['a', 'b', { without: ['itunes'] }]);
   });
-  it('resolveWithStatus passes its `without` into the retry', async () => {
+  it('without: [spotify] skips the Spotify adapter', async () => {
+    vi.stubEnv('SPOTIFY_CLIENT_ID', 'id');
+    vi.stubEnv('SPOTIFY_CLIENT_SECRET', 'secret');
+    const spotifyRoutes: Parameters<typeof mockFetch>[0] = [
+      ['accounts.spotify.com', () => json({ access_token: 'x', expires_in: 3600 })],
+      ['api.spotify.com', () => json({ tracks: { items: [] } })],
+      ...routes(),
+    ];
+    const fetchFn = mockFetch(spotifyRoutes);
+    await resolveWithStatus('Sp', 'One', { without: ['spotify'] });
+    expect(hosts(fetchFn).some((h) => h.endsWith('spotify.com'))).toBe(false);
+    fetchFn.mockClear();
+    await resolveWithStatus('Sp', 'Two');
+    expect(hosts(fetchFn).some((h) => h.endsWith('spotify.com'))).toBe(true);
+  });
+  it('a headroom-style `without` is not carried into the retry; retryWithout is', async () => {
     const timers: Array<() => void> = [];
     const resolve = vi.fn(async (artist: string, title: string, _opts?: { without?: string[] }) => ({ id: 'a', artist, title, sources: {} }) as Track);
     setReresolveDeps({ setTimer: (fn) => void timers.push(fn), resolve });
@@ -155,7 +170,23 @@ describe('iTunes leaks in the background fill', () => {
       ['api.deezer.com', () => { throw new Error('offline'); }],
       ['musicbrainz.org', () => json({ recordings: [] })],
     ]);
-    const t = await resolveWithStatus('Q', 'R', { without: ['itunes'] });
+    await resolveWithStatus('Hd', 'One', { without: ['spotify'] });
+    await resolveWithStatus('Hd', 'Two', { without: ['itunes'], retryWithout: ['itunes'] });
+    timers.forEach((f) => f());
+    await vi.waitFor(() => expect(resolve).toHaveBeenCalledTimes(2));
+    const byTitle = Object.fromEntries(resolve.mock.calls.map((c) => [c[1], c[2]]));
+    expect(byTitle.One).toBeUndefined();
+    expect(byTitle.Two).toEqual({ without: ['itunes'] });
+  });
+  it('resolveWithStatus passes its `retryWithout` into the retry', async () => {
+    const timers: Array<() => void> = [];
+    const resolve = vi.fn(async (artist: string, title: string, _opts?: { without?: string[] }) => ({ id: 'a', artist, title, sources: {} }) as Track);
+    setReresolveDeps({ setTimer: (fn) => void timers.push(fn), resolve });
+    mockFetch([
+      ['api.deezer.com', () => { throw new Error('offline'); }],
+      ['musicbrainz.org', () => json({ recordings: [] })],
+    ]);
+    const t = await resolveWithStatus('Q', 'R', { without: ['itunes'], retryWithout: ['itunes'] });
     expect(t.unresolved?.retryAt).toBeTypeOf('number');
     timers.forEach((f) => f());
     await vi.waitFor(() => expect(resolve).toHaveBeenCalled());

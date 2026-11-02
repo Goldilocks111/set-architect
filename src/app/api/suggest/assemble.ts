@@ -386,7 +386,7 @@ export async function loadSuggestDeps(): Promise<SuggestDeps> {
       // Only while Spotify and Deezer both have >= 50% budget headroom and no cooldown; iTunes is left out of this path entirely.
       const { budgetHeadroom, CANDIDATE_MIN_HEADROOM } = await import('@/lib/search/breaker');
       if (budgetHeadroom('spotify', { app: true }) < CANDIDATE_MIN_HEADROOM || budgetHeadroom('deezer', { app: true }) < CANDIDATE_MIN_HEADROOM) return;
-      await resolver.resolveWithStatus(artist, title, { without: ['itunes'] });
+      await resolver.resolveWithStatus(artist, title, { without: ['itunes'], retryWithout: ['itunes'] });
     };
   } catch {
     // resolver unavailable: demo pool only
