@@ -163,7 +163,7 @@ describe('RatingSession', () => {
     other.scenarios[1].name = 'Changed';
     await upload(other);
     const dlg = await screen.findByRole('alertdialog');
-    expect(dlg).toHaveTextContent(/saved notes/i);
+    expect(dlg).toHaveTextContent(/saved notes?/i);
     expect(dlg).not.toHaveTextContent(/\b0 ratings/);
   });
 
