@@ -1,4 +1,5 @@
 import type { Track } from '@/types/track';
+import { parseVersion } from './search/version';
 
 /** How much of each track is actually played in a mix (the rest is the overlap with its neighbours). */
 export const DEFAULT_PLAY_FRACTION = 0.75;
@@ -29,4 +30,21 @@ export function formatMinutes(ms: number): string {
   const m = Math.floor((total % 3600) / 60);
   const s = String(total % 60).padStart(2, '0');
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+}
+
+const lengthFamily = (title: string): 'extended' | 'radio' | undefined => {
+  const kind = parseVersion(title).kind;
+  return kind === 'extended' || kind === 'radio' ? kind : undefined;
+};
+
+/**
+ * Whether a provider's hit may supply the duration for the requested title. titleMatches treats original, extended
+ * and radio cuts as one recording, so their lengths differ wildly: when the request names a length (Extended, Club,
+ * Radio Edit...) the hit's own title must name the same one. An unqualified request accepts any hit.
+ */
+export function lengthAgrees(requestedTitle: string, hitTitle: string | undefined): boolean {
+  const want = lengthFamily(requestedTitle);
+  if (!want) return true;
+  if (hitTitle === undefined) return true; // the provider gave no title to compare
+  return lengthFamily(hitTitle) === want;
 }

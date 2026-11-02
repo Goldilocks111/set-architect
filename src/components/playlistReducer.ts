@@ -21,7 +21,7 @@ export type PlaylistAction =
   | { type: 'resolveStart'; id: string }
   | { type: 'resolved'; id: string; track: Track }
   | { type: 'resolveFailed'; id: string; reason: IncompleteReason }
-  | { type: 'override'; id: string; fields: Partial<Pick<Track, (typeof ESSENTIALS)[number]>> };
+  | { type: 'override'; id: string; fields: Partial<Pick<Track, (typeof ESSENTIALS)[number] | 'durationMs'>> };
 
 export const initialPlaylistState: PlaylistState = { tracks: [], template: '60min' };
 
@@ -112,7 +112,7 @@ export function playlistReducer(state: PlaylistState, action: PlaylistAction): P
     case 'override':
       return updateTrack(state, action.id, (t) => {
         const out: Track = { ...t, sources: { ...t.sources } };
-        for (const f of ESSENTIALS) {
+        for (const f of [...ESSENTIALS, 'durationMs'] as const) {
           const v = action.fields[f];
           if (v === undefined) continue;
           (out as unknown as Record<string, unknown>)[f] = v;

@@ -24,6 +24,10 @@ describe('deezer', () => {
     mockFetch([['/search', () => json({ data: [{ ...hit, duration: 380 }] })]]);
     expect((await deezerSearch('q'))[0].durationMs).toBe(380000);
   });
+  it('drops the length when the hit is another length family than the requested title', async () => {
+    mockFetch([['/search', () => json({ data: [{ ...hit, title: 'One More Time (Extended Mix)', duration: 390 }] })]]);
+    expect(await deezerAdapter.enrich(base({ title: 'One More Time (Radio Edit)' }))).not.toHaveProperty('durationMs');
+  });
   it('ignores a zero/absent duration and a rejected (wrong-artist) hit', async () => {
     mockFetch([['/track/42', () => json({ ...hit, duration: 0 })], ['/search', () => json({ data: [{ ...hit, duration: 0 }] })]]);
     expect(await deezerAdapter.enrich(base())).not.toHaveProperty('durationMs');

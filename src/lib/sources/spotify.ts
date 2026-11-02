@@ -1,5 +1,6 @@
 import type { Track } from '@/types/track';
 import { titleMatches } from './match';
+import { lengthAgrees } from '../duration';
 import { fetchJson, fetchWithTimeout, HttpError } from '../http';
 import type { SourceAdapter } from './types';
 
@@ -90,7 +91,7 @@ export const spotifyAdapter: SourceAdapter = {
     if (!hit) return {};
     const out: Partial<Track> = { spotifyId: hit.id };
     if (hit.name && hit.artists?.[0]?.name) Object.assign(out, { artist: (hit.artists ?? []).map((a) => a.name).join(', '), title: hit.name }); // display name only
-    if (typeof hit.duration_ms === 'number' && hit.duration_ms > 0) out.durationMs = hit.duration_ms; // this exact version's length
+    if (typeof hit.duration_ms === 'number' && hit.duration_ms > 0 && lengthAgrees(partial.title, hit.name)) out.durationMs = hit.duration_ms;
     if (hit.external_urls?.spotify) out.spotifyUrl = hit.external_urls.spotify;
     if (partial.popularity === undefined && typeof hit.popularity === 'number') out.popularity = hit.popularity;
     if (partial.isrc === undefined && hit.external_ids?.isrc) out.isrc = hit.external_ids.isrc;

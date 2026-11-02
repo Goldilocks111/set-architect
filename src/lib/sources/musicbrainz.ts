@@ -1,6 +1,7 @@
 import type { Track } from '@/types/track';
 import { fetchJson } from '../http';
 import { titleMatches } from './match';
+import { lengthAgrees } from '../duration';
 import type { SourceAdapter } from './types';
 
 const BASE = 'https://musicbrainz.org/ws/2';
@@ -56,7 +57,7 @@ interface MbMatch {
 
 function accept(r: MbRecording, wantedTitle: string, artist: string): MbMatch | undefined {
   if (!r.id) return undefined;
-  const ok = typeof r.length === 'number' && r.length > 0 && (!r.title || titleMatches(wantedTitle, r.title, artist));
+  const ok = typeof r.length === 'number' && r.length > 0 && (!r.title || (titleMatches(wantedTitle, r.title, artist) && lengthAgrees(wantedTitle, r.title)));
   return ok ? { mbid: r.id, durationMs: r.length } : { mbid: r.id };
 }
 

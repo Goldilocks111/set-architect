@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PLAY_FRACTION, durationOf, estimatedDurationMs, formatMinutes } from '@/lib/duration';
+import { DEFAULT_PLAY_FRACTION, durationOf, estimatedDurationMs, formatMinutes, lengthAgrees } from '@/lib/duration';
 import type { Track } from '@/types/track';
 
 const t = (over: Partial<Track> = {}): Track => ({ id: 'a|b', artist: 'A', title: 'B', sources: {}, ...over });
@@ -41,6 +41,18 @@ describe('formatMinutes', () => {
     expect(formatMinutes(NaN)).toBe('0:00');
     expect(formatMinutes(-10)).toBe('0:00');
   });
+});
+
+describe('lengthAgrees', () => {
+  it.each([
+    ['Opus', 'Opus (Extended Mix)', true],
+    ['Opus (Radio Edit)', 'Opus (Extended Mix)', false],
+    ['Opus (Radio Edit)', 'Opus - Radio Edit', true],
+    ['Opus (Extended Mix)', 'Opus', false],
+    ['Opus (Club Mix)', 'Opus (Extended Mix)', true],
+    ['Opus (Radio Edit)', undefined, true],
+    ['Opus (Extended Mix)', undefined, true],
+  ])('requested %s vs hit %s -> %s', (want, got, ok) => expect(lengthAgrees(want, got)).toBe(ok));
 });
 
 it('DEFAULT_PLAY_FRACTION is 0.75', () => expect(DEFAULT_PLAY_FRACTION).toBe(0.75));

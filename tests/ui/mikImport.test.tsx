@@ -23,6 +23,16 @@ afterEach(() => {
 });
 
 describe('<MikImport />', () => {
+  it('sends the Time column as durationMs and applies it to matching set tracks', async () => {
+    const fetchMock = batchFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    const onApply = vi.fn();
+    const { container } = render(<MikImport tracks={[track('t1', 'Artist A', 'Song One')]} onApply={onApply} />);
+    fireEvent.change(container.querySelector('input[type=file]')!, { target: { files: [csv('Artist,Title,Key,Time\nArtist A,Song One,8A,6:30\n')] } });
+    await waitFor(() => expect(onApply).toHaveBeenCalled());
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).items[0].fields).toEqual({ camelot: '8A', durationMs: 390000 });
+    expect(onApply).toHaveBeenCalledWith([{ id: 't1', fields: { camelot: '8A', durationMs: 390000 } }]);
+  });
   it('posts parsed rows as one batch, applies to matching set tracks, and reports counts', async () => {
     const fetchMock = batchFetch();
     vi.stubGlobal('fetch', fetchMock);
