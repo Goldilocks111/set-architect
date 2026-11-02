@@ -1,36 +1,36 @@
 import { DANCEABILITY_PRIOR_SOURCE, ESSENTIALS, missingEssentials, withDanceabilityPrior, type IncompleteReason } from '@/lib/completeness';
-import type { ArcTemplate, Track } from '@/types/track';
+import { clampPlayFraction, DEFAULT_ARC, DEFAULT_PLAY_FRACTION, toArc } from '@/lib/arc';
+import type { Arc, Track } from '@/types/track';
 import { isInSet, recordingKeys } from './recordingKeys';
 import { sanitizeTrack } from './trackSanitize';
 
 export interface PlaylistState {
   tracks: Track[];
-  template: ArcTemplate;
+  arc: Arc;
+  /** Share of each track played before the next is mixed in (0.5-1). */
+  playFraction: number;
   /** ids with a resolve request in flight; client-only, never persisted. */
   resolving?: string[];
 }
+
+/** What a load accepts: a saved set carries tracks + arc only; missing fields fall back. */
+export type LoadableState = Pick<PlaylistState, 'tracks'> & Partial<Omit<PlaylistState, 'tracks'>>;
 
 export type PlaylistAction =
   | { type: 'add'; track: Track }
   | { type: 'remove'; id: string }
   | { type: 'reorder'; from: number; to: number }
   | { type: 'clear' }
-  | { type: 'setTemplate'; template: ArcTemplate }
-  | { type: 'load'; state: PlaylistState }
+  | { type: 'setArc'; arc: Arc }
+  | { type: 'setPlayFraction'; playFraction: number }
+  | { type: 'load'; state: LoadableState }
   | { type: 'enrich'; id: string; fields: Partial<Track> }
   | { type: 'resolveStart'; id: string }
   | { type: 'resolved'; id: string; track: Track }
   | { type: 'resolveFailed'; id: string; reason: IncompleteReason }
   | { type: 'override'; id: string; fields: Partial<Pick<Track, (typeof ESSENTIALS)[number] | 'durationMs'>> };
 
-export const initialPlaylistState: PlaylistState = { tracks: [], template: '60min' };
-
-/** ~15 tracks per hour (mixing rulebook §3). */
-export function plannedLengthFor(template: ArcTemplate): number {
-  return template === '120min' ? 30 : 15;
-}
-
-const isTemplate = (v: unknown): v is ArcTemplate => v === '60min' || v === '120min';
+export const initialPlaylistState: PlaylistState = { tracks: [], arc: DEFAULT_ARC, playFraction: DEFAULT_PLAY_FRACTION };
 
 /** Fills fields the track doesn't have yet; never overwrites known values or the id (except a danceability prior, which a real value replaces). */
 export function enrichTrack(track: Track, fields: Partial<Track>): Track {
@@ -91,8 +91,10 @@ export function playlistReducer(state: PlaylistState, action: PlaylistAction): P
     }
     case 'clear':
       return { ...state, tracks: [] };
-    case 'setTemplate':
-      return { ...state, template: action.template };
+    case 'setArc':
+      return { ...state, arc: toArc(action.arc) };
+    case 'setPlayFraction':
+      return { ...state, playFraction: clampPlayFraction(action.playFraction) };
     case 'enrich': {
       const i = state.tracks.findIndex((t) => t.id === action.id);
       if (i < 0) return state;
@@ -122,10 +124,13 @@ export function playlistReducer(state: PlaylistState, action: PlaylistAction): P
         return settleTrack(withDanceabilityPrior(out), t.unresolved?.reason ?? 'not-found', t.unresolved?.retryAt);
       });
     case 'load': {
-      const s = action.state as Partial<PlaylistState> | null;
+      // `template` is the pre-minute-arc field ('60min' / '120min') of old localStorage and saved sets.
+      const s = action.state as (Partial<PlaylistState> & { template?: unknown }) | null;
       if (!s || typeof s !== 'object' || !Array.isArray(s.tracks)) return initialPlaylistState;
       return {
-        template: isTemplate(s.template) ? s.template : initialPlaylistState.template,
+        arc: toArc(s.arc ?? s.template),
+        // a saved set carries no fraction: it keeps the DJ's current setting
+        playFraction: s.playFraction === undefined ? state.playFraction : clampPlayFraction(s.playFraction),
         tracks: s.tracks.map(sanitizeTrack).filter((t): t is Track => t !== null),
       };
     }

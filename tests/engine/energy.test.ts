@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { energyTargetAt, scoreEnergyTransition } from '@/engine/energy';
+import { energyTargetAtMinute, scoreEnergyTransition, trackTargets } from '@/engine/energy';
+import type { Arc } from '@/types/track';
 
+const ARCS: Record<'60min' | '120min', Arc> = { '60min': { minutes: 60, shape: 'build' }, '120min': { minutes: 120, shape: 'journey' } };
+/** n tracks of 5:20 played at 75% = 4:00 each fill the 60/120-minute arc exactly. */
 const arc = (tpl: '60min' | '120min', n: number) =>
-  Array.from({ length: n }, (_, i) => energyTargetAt(tpl, i, n));
+  trackTargets(ARCS[tpl], Array.from({ length: n }, (_, i) => ({ id: String(i), artist: 'a', title: 't', sources: {}, durationMs: 320_000 })));
 
-describe('energyTargetAt 60min', () => {
+describe('build arc (rulebook 60 min)', () => {
   const a = arc('60min', 15);
   it('follows the rulebook template', () => {
     for (const i of [0, 1, 2]) expect(a[i]).toBeGreaterThanOrEqual(4), expect(a[i]).toBeLessThanOrEqual(5);
@@ -19,13 +22,13 @@ describe('energyTargetAt 60min', () => {
     expect(a.indexOf(Math.max(...a))).toBeGreaterThanOrEqual(10);
   });
   it('scales to other planned lengths and clamps', () => {
-    expect(energyTargetAt('60min', 0, 8)).toBeLessThanOrEqual(5);
-    expect(energyTargetAt('60min', 99, 15)).toBe(6);
-    expect(energyTargetAt('60min', -3, 15)).toBe(4);
+    expect(energyTargetAtMinute(ARCS['60min'], 0)).toBeLessThanOrEqual(5);
+    expect(energyTargetAtMinute(ARCS['60min'], 99 * 4)).toBe(6);
+    expect(energyTargetAtMinute(ARCS['60min'], -3 * 4)).toBe(4);
   });
 });
 
-describe('energyTargetAt 120min', () => {
+describe('journey arc (rulebook 120 min)', () => {
   const a = arc('120min', 30);
   it('has warmup, first peak, reset, second higher peak, cooldown', () => {
     expect(a[0]).toBeLessThanOrEqual(4);

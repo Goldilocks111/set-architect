@@ -3,8 +3,10 @@
   "id": "deep-house-warmup",
   "name": "Deep house warm-up",
   "lane": "deep-house",
-  "template": "60min",
-  "plannedLength": 12,
+  "arc": {
+   "minutes": 60,
+   "shape": "build"
+  },
   "set": [
    {
     "artist": "Dennis Ferrer",
@@ -28,8 +30,10 @@
   "id": "melodic-techno-build",
   "name": "Melodic techno build",
   "lane": "melodic-techno",
-  "template": "120min",
-  "plannedLength": 16,
+  "arc": {
+   "minutes": 120,
+   "shape": "journey"
+  },
   "set": [
    {
     "artist": "Adriatique",
@@ -53,8 +57,10 @@
   "id": "tech-house-peak",
   "name": "Tech house peak",
   "lane": "tech-house",
-  "template": "60min",
-  "plannedLength": 12,
+  "arc": {
+   "minutes": 60,
+   "shape": "build"
+  },
   "set": [
    {
     "artist": "Chris Lake, Chris Lorenzo",
@@ -82,8 +88,10 @@
   "id": "afro-house-midset",
   "name": "Afro house mid-set",
   "lane": "afro-house",
-  "template": "120min",
-  "plannedLength": 16,
+  "arc": {
+   "minutes": 120,
+   "shape": "journey"
+  },
   "set": [
    {
     "artist": "Black Coffee, David Guetta",
@@ -103,8 +111,10 @@
   "id": "progressive-journey",
   "name": "Progressive journey",
   "lane": "progressive-house",
-  "template": "120min",
-  "plannedLength": 16,
+  "arc": {
+   "minutes": 120,
+   "shape": "journey"
+  },
   "set": [
    {
     "artist": "Eric Prydz",
@@ -128,8 +138,10 @@
   "id": "techno-peak-time",
   "name": "Techno peak-time",
   "lane": "techno",
-  "template": "60min",
-  "plannedLength": 12,
+  "arc": {
+   "minutes": 60,
+   "shape": "build"
+  },
   "set": [
    {
     "artist": "Charlotte de Witte",
@@ -157,8 +169,10 @@
   "id": "disco-opener",
   "name": "Disco / nu-disco opener",
   "lane": "disco-nu-disco",
-  "template": "60min",
-  "plannedLength": 12,
+  "arc": {
+   "minutes": 60,
+   "shape": "build"
+  },
   "set": [
    {
     "artist": "Modjo",
@@ -178,8 +192,10 @@
   "id": "lane-change",
   "name": "Lane change: melodic techno into techno",
   "lane": "techno",
-  "template": "120min",
-  "plannedLength": 16,
+  "arc": {
+   "minutes": 120,
+   "shape": "journey"
+  },
   "set": [
    {
     "artist": "Adriatique",
@@ -207,8 +223,10 @@
   "id": "cold-start",
   "name": "Cold start: one track",
   "lane": "tech-house",
-  "template": "60min",
-  "plannedLength": 12,
+  "arc": {
+   "minutes": 60,
+   "shape": "build"
+  },
   "set": [
    {
     "artist": "Fisher",
@@ -220,8 +238,10 @@
   "id": "incomplete-track",
   "name": "Set with one incomplete track",
   "lane": "house",
-  "template": "60min",
-  "plannedLength": 12,
+  "arc": {
+   "minutes": 60,
+   "shape": "build"
+  },
   "set": [
    {
     "artist": "Route 94",

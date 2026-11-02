@@ -4,6 +4,8 @@ import SetList from '@/components/SetList';
 import Builder from '@/components/Builder';
 import { transitionParts } from '@/components/TransitionBadge';
 import { STORAGE_KEY } from '@/components/persistence';
+import { buildCurveData } from '@/components/curveData';
+import { nextTrackTarget, suggestNext } from '@/engine';
 import type { Track } from '@/types/track';
 
 const full = (id: string, camelot: string, bpm: number, energy: number): Track => ({
@@ -19,13 +21,13 @@ const partial: Track = { id: 'p', artist: 'Mystery', title: 'Unknown Data', sour
 
 describe('transitionParts', () => {
   it('scores known dimensions and marks unknown ones without a score', () => {
-    const parts = transitionParts({ from: full('a', '8A', 124, 5), to: partial, position: 1, template: '60min', plannedLength: 15 });
+    const parts = transitionParts({ from: full('a', '8A', 124, 5), to: partial, target: 4 });
     expect(parts.map((p) => p.detail)).toEqual(['Key unknown', 'BPM unknown', 'Energy unknown']);
     expect(parts.every((p) => p.score === undefined)).toBe(true);
   });
 
   it('describes a direct mix', () => {
-    const parts = transitionParts({ from: full('a', '8A', 124, 5), to: full('b', '8A', 125, 6), position: 1, template: '60min', plannedLength: 15 });
+    const parts = transitionParts({ from: full('a', '8A', 124, 5), to: full('b', '8A', 125, 6), target: 4 });
     expect(parts[0].text).toBe('8A→8A');
     expect(parts[1].text).toBe('+1 BPM');
     expect(parts[2].text).toBe('E +1');
@@ -37,7 +39,7 @@ describe('<SetList /> Spotify link-out', () => {
   it('renders only for tracks with spotifyUrl', () => {
     const withUrl = { ...full('a', '8A', 124, 5), spotifyUrl: 'https://open.spotify.com/track/a' };
     render(
-      <SetList tracks={[withUrl, full('b', '8A', 124, 5)]} template="60min" plannedLength={15} onRemove={() => {}} onMove={() => {}} />
+      <SetList tracks={[withUrl, full('b', '8A', 124, 5)]} arc={{ minutes: 60, shape: 'build' }} onRemove={() => {}} onMove={() => {}} />
     );
     const links = screen.getAllByRole('link', { name: /in Spotify/i, hidden: true });
     expect(links).toHaveLength(1);
@@ -52,8 +54,7 @@ describe('<SetList />', () => {
     const { container } = render(
       <SetList
         tracks={[full('a', '8A', 124, 5), partial, full('c', '9A', 125, 6)]}
-        template="60min"
-        plannedLength={15}
+        arc={{ minutes: 60, shape: 'build' }}
         onRemove={() => {}}
         onMove={() => {}}
       />
@@ -63,11 +64,26 @@ describe('<SetList />', () => {
     expect(screen.getAllByText('key ?').length).toBeGreaterThan(0);
   });
 
+  it("the badge's energy verdict uses the same target the engine used to suggest that track", () => {
+    const arc = { minutes: 60, shape: 'build' } as const;
+    // a short opener, then a 30-minute track: the engine placed b at ~2' (target 4), not at its own middle (~13', target 5)
+    const a = { ...full('a', '8A', 124, 8), durationMs: 120_000, danceability: 0.6 };
+    const b = { ...full('b', '8A', 124, 6), durationMs: 1_800_000, danceability: 0.6 };
+    const target = nextTrackTarget(arc, [a]);
+    expect(target).toBe(4);
+    const [engine] = suggestNext({ arc, playlist: [a], candidates: [b] });
+    const engineEnergy = engine.reasons.find((r) => r.kind === 'energy')!.label;
+    expect(engineEnergy).toBe('Energy drop'); // E8 -> E6 lands 2 off target 4 (target 5 would read "Energy reset")
+    render(<SetList tracks={[a, b]} arc={arc} onRemove={() => {}} onMove={() => {}} />);
+    expect(screen.getByLabelText(/^Transition:/).getAttribute('aria-label')).toContain(`Energy: ${engineEnergy}`);
+    expect(buildCurveData([a, b], arc)[1].target).toBe(target);
+  });
+
   it('move/remove buttons call back with indices and ids', () => {
     const onMove = vi.fn();
     const onRemove = vi.fn();
     render(
-      <SetList tracks={[full('a', '8A', 124, 5), full('b', '8A', 124, 5)]} template="60min" plannedLength={15} onRemove={onRemove} onMove={onMove} />
+      <SetList tracks={[full('a', '8A', 124, 5), full('b', '8A', 124, 5)]} arc={{ minutes: 60, shape: 'build' }} onRemove={onRemove} onMove={onMove} />
     );
     fireEvent.click(screen.getByRole('button', { name: 'Move Title b up' }));
     expect(onMove).toHaveBeenCalledWith(1, 0);

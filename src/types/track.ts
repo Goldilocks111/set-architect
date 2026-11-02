@@ -42,7 +42,11 @@ export interface Suggestion {
   compliant?: boolean;
 }
 
-export type ArcTemplate = '60min' | '120min';
+/** Energy-arc shape over the set's minutes (rulebook §3): 'build' = the 60-min curve, 'journey' = the 120-min curve. */
+export type ArcShape = 'build' | 'journey' | 'warm-up' | 'peak-time';
+
+/** The planned set: its length in minutes and the energy shape stretched over it. */
+export type Arc = { minutes: number; shape: ArcShape };
 
 export interface Weights {
   key: number;

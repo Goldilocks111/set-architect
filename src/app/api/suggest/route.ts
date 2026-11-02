@@ -1,7 +1,7 @@
-import { plannedLengthFor } from '@/components/playlistReducer';
 import { sanitizeTrack } from '@/components/trackSanitize';
+import { arcInput } from '@/lib/arc';
 import { isDemoMode } from '@/lib/demo';
-import type { ArcTemplate, Suggestion, Track } from '@/types/track';
+import type { Suggestion, Track } from '@/types/track';
 import { ensureNeighborsFor } from '@/lib/adjacency/live';
 import { assembleSuggestions, loadSuggestDeps, type CrateKnown } from './assemble';
 
@@ -25,21 +25,17 @@ function sanitizeCrate(raw: unknown): Track[] {
 }
 
 export async function POST(request: Request) {
-  let body: { playlist?: unknown; template?: unknown; plannedLength?: unknown; crate?: unknown };
+  let body: { playlist?: unknown; arc?: unknown; template?: unknown; playFraction?: unknown; crate?: unknown };
   try {
     body = await request.json();
   } catch {
-    return Response.json({ error: 'Request body must be JSON: { playlist, template }' }, { status: 400 });
+    return Response.json({ error: 'Request body must be JSON: { playlist, arc }' }, { status: 400 });
   }
   if (!body || typeof body !== 'object' || !Array.isArray(body.playlist)) {
     return Response.json({ error: 'playlist must be an array of tracks' }, { status: 400 });
   }
 
-  const template: ArcTemplate = body.template === '120min' ? '120min' : '60min';
-  const plannedLength =
-    typeof body.plannedLength === 'number' && body.plannedLength > 0 && body.plannedLength <= MAX_PLAYLIST
-      ? Math.round(body.plannedLength)
-      : plannedLengthFor(template);
+  const { arc, playFraction } = arcInput(body);
   const playlist = body.playlist
     .map(sanitizeTrack)
     .filter((t): t is Track => t !== null)
@@ -78,7 +74,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const { suggestions, crateKnown } = await assembleSuggestions({ playlist, template, plannedLength, crate }, await loadSuggestDeps());
+  const { suggestions, crateKnown } = await assembleSuggestions({ playlist, arc, playFraction, crate }, await loadSuggestDeps());
   const result: { suggestions: Suggestion[]; crateKnown?: CrateKnown[]; digging?: true } = { suggestions, crateKnown };
   if (digging) result.digging = true;
 

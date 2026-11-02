@@ -62,7 +62,7 @@ describe('co-occurrence provenance (I4)', () => {
 
   it('labels demo-adjacency counts as sample sets', async () => {
     const res = await assembleSuggestions(
-      { playlist: [last], template: '60min', plannedLength: 15 },
+      { playlist: [last], arc: { minutes: 60, shape: 'build' } },
       {
         loadAdjacency: async () =>
           handle(async () => [{ trackKey: trackKeyOf(target.artist, target.title), count: 3, direction: 'after', sample: true }]),
@@ -74,7 +74,7 @@ describe('co-occurrence provenance (I4)', () => {
 
   it('keeps "real sets" for scraped neighbors', async () => {
     const res = await assembleSuggestions(
-      { playlist: [last], template: '60min', plannedLength: 15 },
+      { playlist: [last], arc: { minutes: 60, shape: 'build' } },
       {
         loadAdjacency: async () =>
           handle(async () => [{ trackKey: trackKeyOf(target.artist, target.title), count: 2, direction: 'after' }]),
@@ -147,7 +147,7 @@ describe('<SuggestionBox /> daily limit (I3)', () => {
       'fetch',
       vi.fn(async () => new Response(JSON.stringify({ error: 'Daily suggestion limit reached. Upgrade for unlimited suggestions.' }), { status: 429 }))
     );
-    render(<SuggestionBox tracks={[]} template="60min" plannedLength={15} onAdd={() => {}} />);
+    render(<SuggestionBox tracks={[]} arc={{ minutes: 60, shape: 'build' }} onAdd={() => {}} />);
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Daily suggestion limit reached'));
     expect(screen.queryByText(/Couldn.t load suggestions/)).toBeNull();
   });

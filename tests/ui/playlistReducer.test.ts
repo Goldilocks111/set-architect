@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   initialPlaylistState,
   playlistReducer,
-  plannedLengthFor,
   applyResolved,
   type PlaylistState,
 } from '@/components/playlistReducer';
@@ -22,11 +21,9 @@ const withTracks = (...ids: string[]): PlaylistState => ({
 });
 
 describe('playlistReducer', () => {
-  it('starts empty on the 60min template with 15 planned tracks', () => {
+  it('starts empty on the 60-minute build arc', () => {
     expect(initialPlaylistState.tracks).toEqual([]);
-    expect(initialPlaylistState.template).toBe('60min');
-    expect(plannedLengthFor('60min')).toBe(15);
-    expect(plannedLengthFor('120min')).toBe(30);
+    expect(initialPlaylistState.arc).toEqual({ minutes: 60, shape: 'build' });
   });
 
   it('adds a track to the end', () => {
@@ -59,18 +56,18 @@ describe('playlistReducer', () => {
     expect(playlistReducer(before, { type: 'reorder', from: 1, to: 1 })).toBe(before);
   });
 
-  it('clears all tracks but keeps the template', () => {
+  it('clears all tracks but keeps the arc', () => {
     const s = playlistReducer(
-      { ...withTracks('a', 'b'), template: '120min' },
+      { ...withTracks('a', 'b'), arc: { minutes: 120, shape: 'journey' } },
       { type: 'clear' }
     );
     expect(s.tracks).toEqual([]);
-    expect(s.template).toBe('120min');
+    expect(s.arc).toEqual({ minutes: 120, shape: 'journey' });
   });
 
-  it('sets the arc template', () => {
-    const s = playlistReducer(withTracks('a'), { type: 'setTemplate', template: '120min' });
-    expect(s.template).toBe('120min');
+  it('sets the arc', () => {
+    const s = playlistReducer(withTracks('a'), { type: 'setArc', arc: { minutes: 90, shape: 'peak-time' } });
+    expect(s.arc).toEqual({ minutes: 90, shape: 'peak-time' });
     expect(s.tracks).toHaveLength(1);
   });
 
@@ -78,11 +75,12 @@ describe('playlistReducer', () => {
     const s = playlistReducer(initialPlaylistState, {
       type: 'load',
       state: {
-        template: '120min',
+        arc: { minutes: 120, shape: 'journey' },
+        playFraction: 0.75,
         tracks: [t('x'), { nope: true } as unknown as Track, t('y')],
       },
     });
-    expect(s.template).toBe('120min');
+    expect(s.arc).toEqual({ minutes: 120, shape: 'journey' });
     expect(s.tracks.map((x) => x.id)).toEqual(['x', 'y']);
   });
 

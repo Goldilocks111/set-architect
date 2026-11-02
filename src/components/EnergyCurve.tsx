@@ -10,9 +10,9 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import type { ArcTemplate, Track } from '@/types/track';
+import { arcLabel, DEFAULT_PLAY_FRACTION } from '@/lib/arc';
+import type { Arc, Track } from '@/types/track';
 import { buildCurveData, quarantineForCurve, type CurveRow } from './curveData';
-import { plannedLengthFor } from './playlistReducer';
 
 export const CURVE_COLORS = {
   energy: '#F2B33D',
@@ -24,7 +24,8 @@ export const CURVE_COLORS = {
 
 interface Props {
   tracks: Track[];
-  template: ArcTemplate;
+  arc: Arc;
+  playFraction?: number;
   height?: number;
 }
 
@@ -48,9 +49,8 @@ function CurveTooltip({ active, payload }: { active?: boolean; payload?: Array<{
   );
 }
 
-export default function EnergyCurve({ tracks, template, height = 260 }: Props) {
-  const planned = plannedLengthFor(template);
-  const data = buildCurveData(quarantineForCurve(tracks), template, planned);
+export default function EnergyCurve({ tracks, arc, playFraction = DEFAULT_PLAY_FRACTION, height = 260 }: Props) {
+  const data = buildCurveData(quarantineForCurve(tracks), arc, playFraction);
   const bpms = data.map((d) => d.bpm).filter((b): b is number => b !== null);
   const bpmDomain: [number, number] = bpms.length
     ? [Math.floor(Math.min(...bpms) - 8), Math.ceil(Math.max(...bpms) + 2)]
@@ -119,7 +119,7 @@ export default function EnergyCurve({ tracks, template, height = 260 }: Props) {
         </span>
         <span className="flex items-center gap-2">
           <span className="inline-block w-5 border-t-2 border-dashed" style={{ borderColor: CURVE_COLORS.target }} />
-          Target arc ({template === '60min' ? '1 hour' : '2 hours'}, {planned} tracks)
+          Target arc ({arcLabel(arc)})
         </span>
         <span className="flex items-center gap-2">
           <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: CURVE_COLORS.bpm }} />

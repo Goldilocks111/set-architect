@@ -1,14 +1,12 @@
-import { energyTargetAt, scoreBpmTransition, scoreEnergyTransition, scoreKeyTransition } from '@/engine';
-import type { ArcTemplate, Track } from '@/types/track';
+import { scoreBpmTransition, scoreEnergyTransition, scoreKeyTransition } from '@/engine';
+import type { Track } from '@/types/track';
 import { QUALITY_CLASSES, quality } from './trackFormat';
 
 interface Props {
   from: Track;
   to: Track;
-  /** 0-based set position of `to`. */
-  position: number;
-  template: ArcTemplate;
-  plannedLength: number;
+  /** The arc energy target the engine used for `to`'s position (engine trackTargets). */
+  target: number;
 }
 
 interface Part {
@@ -20,7 +18,7 @@ interface Part {
 
 const finite = (n: number | undefined): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0;
 
-export function transitionParts({ from, to, position, template, plannedLength }: Props): Part[] {
+export function transitionParts({ from, to, target }: Props): Part[] {
   const key: Part =
     from.camelot && to.camelot
       ? (() => {
@@ -45,7 +43,7 @@ export function transitionParts({ from, to, position, template, plannedLength }:
   const energy: Part =
     finite(from.energy) && finite(to.energy)
       ? (() => {
-          const e = scoreEnergyTransition(from.energy, to.energy, energyTargetAt(template, position, plannedLength));
+          const e = scoreEnergyTransition(from.energy, to.energy, target);
           const d = Math.round(to.energy - from.energy);
           return { name: 'Energy', text: `E ${d > 0 ? '+' : d < 0 ? '−' : '±'}${Math.abs(d)}`, detail: e.label, score: e.score };
         })()

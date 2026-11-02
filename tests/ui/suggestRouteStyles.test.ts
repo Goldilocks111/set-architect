@@ -73,7 +73,7 @@ describe('C1: styles reach the engine in the real app', () => {
     cache.set(keyOf(crate[1]), entryOf(crate[1], ['techno'])); // already tagged
     const queueStyles = vi.fn((_t: Track) => true);
     await assembleSuggestions(
-      { playlist: set, template: '60min', plannedLength: 15, crate },
+      { playlist: set, arc: { minutes: 60, shape: 'build' }, crate },
       { getCachedEntries: (keys) => new Map(keys.flatMap((k) => (cache.has(k) ? [[k, cache.get(k)!] as const] : []))), queueStyles },
     );
     expect(MAX_STYLES_QUEUED_PER_REQUEST).toBe(4);
@@ -86,7 +86,7 @@ describe('C1: styles reach the engine in the real app', () => {
     const cache = new Map<string, Entry>(crate.map((t) => [keyOf(t), entryOf(t)]));
     const queueStyles = vi.fn((t: Track) => keyOf(t) !== keyOf(crate[0]));
     const deps: SuggestDeps = { getCachedEntries: (keys) => new Map(keys.flatMap((k) => (cache.has(k) ? [[k, cache.get(k)!] as const] : []))), queueStyles };
-    await assembleSuggestions({ playlist: [], template: '60min', plannedLength: 15, crate }, deps);
+    await assembleSuggestions({ playlist: [], arc: { minutes: 60, shape: 'build' }, crate }, deps);
     expect(queueStyles.mock.calls.filter(([t], i) => queueStyles.mock.results[i].value === true)).toHaveLength(4);
     expect(queueStyles).toHaveBeenCalledTimes(5);
   });
@@ -97,14 +97,14 @@ describe('C1: styles reach the engine in the real app', () => {
     const cache = new Map<string, Entry>(crate.map((t) => [keyOf(t), entryOf(t)]));
     const getCachedEntries: SuggestDeps['getCachedEntries'] = (keys) => new Map(keys.flatMap((k) => (cache.has(k) ? [[k, cache.get(k)!] as const] : [])));
     const q1 = vi.fn((_t: Track) => true);
-    await assembleSuggestions({ playlist: [], template: '60min', plannedLength: 15, crate }, { getCachedEntries, queueStyles: q1, stylesFillOpen: () => true });
+    await assembleSuggestions({ playlist: [], arc: { minutes: 60, shape: 'build' }, crate }, { getCachedEntries, queueStyles: q1, stylesFillOpen: () => true });
     expect(q1).toHaveBeenCalledTimes(25);
     let n = 0;
     const q2 = vi.fn((_t: Track) => (n++, true));
-    await assembleSuggestions({ playlist: [], template: '60min', plannedLength: 15, crate }, { getCachedEntries, queueStyles: q2, stylesFillOpen: () => n < 10 });
+    await assembleSuggestions({ playlist: [], arc: { minutes: 60, shape: 'build' }, crate }, { getCachedEntries, queueStyles: q2, stylesFillOpen: () => n < 10 });
     expect(q2).toHaveBeenCalledTimes(10);
     const q3 = vi.fn((_t: Track) => true);
-    await assembleSuggestions({ playlist: [], template: '60min', plannedLength: 15, crate }, { getCachedEntries, queueStyles: q3, stylesFillOpen: () => false });
+    await assembleSuggestions({ playlist: [], arc: { minutes: 60, shape: 'build' }, crate }, { getCachedEntries, queueStyles: q3, stylesFillOpen: () => false });
     expect(q3).toHaveBeenCalledTimes(4);
   });
 

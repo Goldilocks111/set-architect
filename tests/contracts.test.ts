@@ -38,8 +38,7 @@ describe('frozen contracts', () => {
     const out = suggestNext({
       playlist: tracks.slice(0, 3),
       candidates: tracks,
-      template: '60min',
-      plannedLength: 15,
+      arc: { minutes: 60, shape: 'build' },
       weights: DEFAULT_WEIGHTS,
     });
     expect(out.length).toBeGreaterThan(0);

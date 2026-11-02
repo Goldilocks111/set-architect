@@ -1,11 +1,11 @@
-import type { ArcTemplate, Suggestion, SuggestionReason, Track, Weights } from '@/types/track';
+import type { Arc, Suggestion, SuggestionReason, Track, Weights } from '@/types/track';
 import { trackKeyOf } from '@/types/track';
 import { primaryArtist } from '@/lib/primaryArtist';
 export { primaryArtist };
 import { isEnergyBoostKey, parseCamelot, scoreKeyTransition } from './camelot';
 import { scoreBpmTransition } from './bpm';
 import { isComplete } from '@/lib/completeness';
-import { energyTargetAt, scoreEnergyTransition } from './energy';
+import { nextTrackTarget, scoreEnergyTransition } from './energy';
 import { isCompliant, isCompliantOpener } from './compliance';
 import { laneProfile, styleScore } from './style';
 
@@ -28,8 +28,9 @@ const fmt = (n: number) => `${n > 0 ? '+' : ''}${Math.round(n * 10) / 10}`;
 export function suggestNext(args: {
   playlist: Track[];
   candidates: Track[];
-  template: ArcTemplate;
-  plannedLength: number;
+  arc: Arc;
+  /** Share of each track played (0.5-1, default 0.75): places the next track on the arc's minute scale. */
+  playFraction?: number;
   weights?: Weights;
   adjacency?: Map<string, number>;
   similarity?: Map<string, number>;
@@ -39,11 +40,11 @@ export function suggestNext(args: {
   const w = args.weights ?? DEFAULT_WEIGHTS;
   const { playlist } = args;
   // Incomplete set tracks carry no usable essentials: they never anchor a transition, but still
-  // occupy a slot in the arc and still block re-suggestion.
+  // occupy their minutes of the arc and still block re-suggestion.
   const scored = playlist.filter(isComplete);
   const last = scored[scored.length - 1];
   const stillResolving = playlist.length > 0 && !last;
-  const target = energyTargetAt(args.template, playlist.length, args.plannedLength);
+  const target = nextTrackTarget(args.arc, playlist, args.playFraction);
   const inSet = new Set(playlist.map((t) => t.id));
   const recent = scored.slice(-FLAT_RUN);
   const lanes = laneProfile(scored);

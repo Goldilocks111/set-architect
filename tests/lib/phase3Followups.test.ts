@@ -20,7 +20,7 @@ import { demoTracks } from '@/lib/demo';
 import { trackKeyOf, type Track } from '@/types/track';
 
 const last = demoTracks()[0];
-const input = { playlist: [last], template: '60min' as const, plannedLength: 15 };
+const input = { playlist: [last], arc: { minutes: 60, shape: 'build' as const } };
 const hosts = (fn: ReturnType<typeof mockFetch>) => fn.mock.calls.map((c) => new URL(String(c[0])).hostname);
 const routes = (): Parameters<typeof mockFetch>[0] => [
   ['api.deezer.com', () => json({ data: [{ id: 1, title: 'T', rank: 5, preview: 'dz', artist: { name: 'A' } }] })],
