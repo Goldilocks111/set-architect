@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ArcTemplate, Suggestion, Track } from '@/types/track';
 import SuggestionCard from './SuggestionCard';
 import { displayTitle } from './trackFormat';
@@ -14,6 +14,15 @@ interface Props {
 
 type Status = 'loading' | 'done' | 'error' | 'limit';
 
+/** User actions (add/remove/reorder, template, retry) refresh promptly. */
+const PROMPT_MS = 150;
+/** Resolver answers only change a track's data: a burst of them (a set reload, "Add all") becomes one refresh. */
+export const ENRICH_DEBOUNCE_MS = 1500;
+
+/** What the server scores on; `unresolved`/resolving churn alone never changes it. */
+const dataKeyOf = (tracks: Track[]) =>
+  tracks.map((t) => [t.artist, t.title, t.bpm, t.camelot, t.energy, t.danceability].join('\u0001')).join('\n');
+
 export default function SuggestionBox({ tracks, template, plannedLength, onAdd }: Props) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [status, setStatus] = useState<Status>('loading');
@@ -23,17 +32,28 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd }
   const last = tracks[tracks.length - 1];
   const lastKey = last ? `${last.artist}|${last.title}` : '';
   const refetched = useRef(new Set<string>());
+  const latest = useRef(tracks);
+  useLayoutEffect(() => {
+    latest.current = tracks;
+  });
+  const shapeKey = tracks.map((t) => t.id).join('\n');
+  const dataKey = dataKeyOf(tracks);
+  const lastTrigger = useRef<string | null>(null);
 
   useEffect(() => {
     const ctrl = new AbortController();
     let refetchTimer: ReturnType<typeof setTimeout> | undefined;
+    const trigger = JSON.stringify([shapeKey, template, plannedLength, retry]);
+    // recorded when the request fires, so a cancelled run (StrictMode, a quick follow-up change) stays prompt
+    const prompt = lastTrigger.current !== trigger;
     const timer = setTimeout(async () => {
+      lastTrigger.current = trigger;
       setStatus('loading');
       try {
         const res = await fetch('/api/suggest', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ playlist: tracks, template, plannedLength }),
+          body: JSON.stringify({ playlist: latest.current, template, plannedLength }),
           signal: ctrl.signal,
         });
         if (res.status === 429) {
@@ -56,13 +76,13 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd }
       } catch (e) {
         if ((e as Error).name !== 'AbortError') setStatus('error');
       }
-    }, 150);
+    }, prompt ? PROMPT_MS : ENRICH_DEBOUNCE_MS);
     return () => {
       clearTimeout(timer);
       clearTimeout(refetchTimer);
       ctrl.abort();
     };
-  }, [tracks, template, plannedLength, retry]);
+  }, [shapeKey, dataKey, template, plannedLength, retry, lastKey]);
 
   return (
     <section aria-labelledby="suggestions-heading" className="flex flex-col">

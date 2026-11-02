@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type DragEvent } from 'react';
-import { isComplete } from '@/lib/completeness';
+import { DANCEABILITY_PRIOR_SOURCE, isComplete } from '@/lib/completeness';
 import type { OverrideFields } from '@/lib/overrideValidation';
 import type { Track } from '@/types/track';
 import CompletenessBadge from './CompletenessBadge';
@@ -89,7 +89,13 @@ export default function SetRow({
           </span>
           <span className="shrink-0">{fmtBpm(track.bpm)} BPM</span>
           <span className="shrink-0">E{fmtEnergy(track.energy)}</span>
-          <span className="shrink-0">D{fmtDance(track.danceability)}</span>
+          {track.sources?.danceability === DANCEABILITY_PRIOR_SOURCE ? (
+            <span className="shrink-0" title="Estimated from energy: no source had danceability for this track">
+              D{fmtDance(track.danceability)} <span className="text-[10.5px] italic">est.</span>
+            </span>
+          ) : (
+            <span className="shrink-0">D{fmtDance(track.danceability)}</span>
+          )}
         </div>
         <div className="mt-0.5">
           <CompletenessBadge track={track} resolving={resolving} />

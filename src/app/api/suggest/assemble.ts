@@ -24,9 +24,10 @@ export const playCountBonus = (n: number) => PLAY_COUNT_MAX_BONUS * Math.min(1, 
 
 /** Optional collaborators; anything missing, throwing or too slow degrades to the demo pool. */
 export interface SuggestDeps {
-  resolveTrack?: (artist: string, title: string) => Promise<Track>;
+  /** Cached resolve (resolveWithStatus): writes the metadata cache; `signal` stops the adapter chain at the budget. */
+  resolveTrack?: (artist: string, title: string, opts?: { budgetMs?: number; signal?: AbortSignal }) => Promise<Track>;
   /** Metadata-cache lookup by trackKey; a complete hit supplies a candidate without any provider call. */
-  getCachedEntry?: (key: string) => { fields: Partial<Track> } | undefined;
+  getCachedEntry?: (key: string) => { fields: Partial<Track>; sources?: Record<string, string> } | undefined;
   getSimilarTracks?: (artist: string, title: string) => Promise<Array<{ artist: string; title: string; match: number }>>;
   loadAdjacency?: () => Promise<AdjacencyHandle>;
   suggestNext?: typeof engineSuggestNext;
@@ -46,7 +47,70 @@ export interface SuggestInput {
 }
 
 const MAX_EXTERNAL = 8;
+/** Cache misses resolved per refresh; the rest wait for a later refresh (by then earlier ones are cached). */
+export const MAX_CANDIDATE_RESOLVES = 4;
+/** Candidate resolves running at once across all suggest requests, so they can't starve the user's own resolves. */
+export const MAX_CONCURRENT_CANDIDATE_RESOLVES = 2;
 const keyOf = (t: { artist: string; title: string }) => trackKeyOf(t.artist, t.title);
+
+interface Limiter {
+  active: number;
+  waiters: Array<() => void>;
+  inflight: Map<string, Promise<Track | null>>;
+}
+const limiter: Limiter = { active: 0, waiters: [], inflight: new Map() };
+
+export function resetCandidateLimiter(): void {
+  limiter.active = 0;
+  limiter.waiters = [];
+  limiter.inflight.clear();
+}
+
+/** Resolves when `p` settles or `signal` aborts (then with null). */
+function untilAbort<T>(p: Promise<T>, signal: AbortSignal): Promise<T | null> {
+  if (signal.aborted) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const onAbort = () => resolve(null);
+    signal.addEventListener('abort', onAbort, { once: true });
+    p.then(
+      (v) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(v);
+      },
+      () => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(null);
+      }
+    );
+  });
+}
+
+/** Takes a global slot; false when the request's budget ran out while waiting. */
+function acquireSlot(signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  if (limiter.active < MAX_CONCURRENT_CANDIDATE_RESOLVES) {
+    limiter.active++;
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    const grant = () => {
+      signal.removeEventListener('abort', onAbort);
+      resolve(true); // active was incremented by releaseSlot on our behalf
+    };
+    const onAbort = () => {
+      limiter.waiters = limiter.waiters.filter((w) => w !== grant);
+      resolve(false);
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    limiter.waiters.push(grant);
+  });
+}
+
+function releaseSlot(): void {
+  const next = limiter.waiters.shift();
+  if (next) next();
+  else limiter.active = Math.max(0, limiter.active - 1);
+}
 
 async function safe<T>(fn: (() => Promise<T>) | undefined, fallback: T): Promise<T> {
   if (!fn) return fallback;
@@ -148,22 +212,48 @@ export async function assembleSuggestions(
     if (seen.has(e.key) || poolByKey.has(e.key)) continue;
     seen.add(e.key);
     // Cache first: a complete entry costs no provider call and no share of the external-lookup budget.
-    const fields = await safe(deps.getCachedEntry && (async () => deps.getCachedEntry!(e.key)?.fields), undefined);
-    const hit: Track | undefined = fields && { ...fields, id: `cache-${e.key}`, artist: e.artist, title: e.title, sources: {} };
+    const entry = await safe(deps.getCachedEntry && (async () => deps.getCachedEntry!(e.key)), undefined);
+    const hit: Track | undefined = entry && {
+      ...entry.fields,
+      id: `cache-${e.key}`,
+      artist: e.artist,
+      title: e.title,
+      sources: { ...entry.sources },
+    };
     if (hit && isComplete(hit)) cached.push(hit);
     else toResolve.push(e);
   }
-  // Resolves that finish inside the budget are used; the rest are dropped (the demo pool still ranks).
-  const resolved: Array<Track | null> = toResolve.map(() => null);
-  await withTimeout(
-    Promise.all(
-      toResolve.map(async (e, i) => {
-        resolved[i] = await safe(deps.resolveTrack && (() => deps.resolveTrack!(e.artist, e.title)), null);
-      })
-    ),
-    remaining(),
-    undefined
-  );
+  // Resolves that finish inside the budget are used; at the budget the signal stops the rest (what they found is
+  // cached as 'timeout' and retried server-side, so a later refresh gets them from the cache).
+  const picked = deps.resolveTrack ? toResolve.slice(0, MAX_CANDIDATE_RESOLVES) : [];
+  const resolved: Array<Track | null> = picked.map(() => null);
+  if (picked.length) {
+    const ctrl = new AbortController();
+    const budget = setTimeout(() => ctrl.abort(), remaining());
+    const resolveOne = async (e: (typeof picked)[number]): Promise<Track | null> => {
+      const shared = limiter.inflight.get(e.key);
+      if (shared) return untilAbort(shared, ctrl.signal);
+      if (!(await acquireSlot(ctrl.signal))) return null;
+      const p = safe(() => deps.resolveTrack!(e.artist, e.title, { budgetMs: remaining(), signal: ctrl.signal }), null);
+      limiter.inflight.set(e.key, p);
+      try {
+        return await untilAbort(p, ctrl.signal);
+      } finally {
+        if (limiter.inflight.get(e.key) === p) limiter.inflight.delete(e.key);
+        releaseSlot();
+      }
+    };
+    let next = 0;
+    const worker = async () => {
+      while (!ctrl.signal.aborted && next < picked.length) {
+        const i = next++;
+        resolved[i] = await resolveOne(picked[i]);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT_CANDIDATE_RESOLVES, picked.length) }, worker));
+    clearTimeout(budget);
+    ctrl.abort(); // nothing left running; also releases anyone still waiting on a shared promise
+  }
 
   const inSet = new Set(input.playlist.flatMap((t) => [t.id, keyOf(t)]));
   const candidates: Track[] = [];
@@ -217,7 +307,8 @@ export async function loadSuggestDeps(): Promise<SuggestDeps> {
   const deps: SuggestDeps = {};
   try {
     const resolver = await import('@/lib/resolver');
-    deps.resolveTrack = resolver.resolveTrack;
+    // the cached resolver: candidates land in the metadata cache, so a later refresh costs no provider call
+    deps.resolveTrack = (artist, title, opts) => resolver.resolveWithStatus(artist, title, opts);
     deps.getSimilarTracks = resolver.getSimilarTracks;
   } catch {
     // resolver unavailable: demo pool only

@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { acquireLock, isLockHeld, releaseLock } from '../../scripts/ingest/lock';
-import { nextSeeds, runDriver } from '../../scripts/ingest/run';
+import { HALT_MS, nextSeeds, runDriver } from '../../scripts/ingest/run';
 import { trackKeyOf } from '../../src/types/track';
 
 let dir: string;
@@ -162,6 +162,35 @@ describe('repeated hard blocks', () => {
     expect(existsSync(h.lockPath)).toBe(false);
     const lines = readFileSync(h.growthPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     expect(lines.at(-1).stopped).toBe('repeated-hard-blocks');
+  });
+  it('writes a durable 7-day halt marker into live-state so the dev server cannot resume fetching', async () => {
+    const counters = { softBlocks: 0, hardBlocks: 0 };
+    const h = harness({ counters, seeds: [1, 2, 3, 4, 5].map((n) => ({ artist: `Art${n}`, title: `T${n}` })) }, 500);
+    h.deps.ingestor.ensureNeighborsFor = async (a, ti) => {
+      counters.hardBlocks++;
+      const st = existsSync(h.statePath) ? JSON.parse(readFileSync(h.statePath, 'utf8')) : { searched: {}, backoff: {} };
+      st.backoff[trackKeyOf(a, ti)] = h.now() + 1e9;
+      st.pausedUntil = h.now() + 1800_000;
+      writeFileSync(h.statePath, JSON.stringify(st));
+      return { digging: true };
+    };
+    await runDriver(h.deps);
+    const st = JSON.parse(readFileSync(h.statePath, 'utf8'));
+    expect(st.haltedUntil).toBe(h.now() + HALT_MS);
+    expect(HALT_MS).toBe(7 * 24 * 60 * 60_000);
+    expect(st.haltReason).toBe('repeated-hard-blocks');
+    expect(Object.keys(st.backoff)).toHaveLength(3); // the rest of the state is kept
+  });
+  it('refuses to fetch while halted, and its start line says how to clear the halt', async () => {
+    const logs: string[] = [];
+    const h = harness({ log: (l) => void logs.push(l) });
+    writeFileSync(h.statePath, JSON.stringify({ searched: {}, backoff: {}, haltedUntil: h.now() + 86_400_000, haltReason: 'repeated-hard-blocks' }));
+    expect(await runDriver(h.deps)).toBe(0);
+    expect(h.ensured).toEqual([]);
+    expect(existsSync(h.lockPath)).toBe(false);
+    expect(logs[0]).toContain('haltedUntil');
+    expect(logs[0]).toContain(h.statePath);
+    expect(logs.some((l) => /halted/.test(l) && /repeated-hard-blocks/.test(l))).toBe(true);
   });
   it('a successful job between blocks resets the streak', async () => {
     const counters = { softBlocks: 0, hardBlocks: 0 };

@@ -230,16 +230,16 @@ describe('GET /api/search/resolve', () => {
   beforeEach(() => vi.resetAllMocks());
   afterEach(() => vi.useRealTimers());
 
-  it('returns track.unresolved from resolveWithStatus with a retryAt for retryable reasons', async () => {
+  it('passes through track.unresolved (with the retryAt resolveWithStatus scheduled) without scheduling again', async () => {
     const { GET } = await import('@/app/api/search/resolve/route');
     mocks.resolver.resolveWithStatus.mockResolvedValue({
-      id: 'x|y', artist: 'X', title: 'Y', sources: {}, unresolved: { reason: 'providers-unavailable', missing: ['bpm'] },
+      id: 'x|y', artist: 'X', title: 'Y', sources: {}, unresolved: { reason: 'providers-unavailable', missing: ['bpm'], retryAt: 1234 },
     });
-    mocks.reresolve.scheduleRetry.mockReturnValue(1234);
     const res = await GET(new Request('http://x/api/search/resolve?artist=X&title=Y'));
     const body = await res.json();
     expect(mocks.resolver.resolveWithStatus).toHaveBeenCalledWith('X', 'Y', { budgetMs: 45_000 });
     expect(body.track.unresolved).toEqual({ reason: 'providers-unavailable', missing: ['bpm'], retryAt: 1234 });
+    expect(mocks.reresolve.scheduleRetry).not.toHaveBeenCalled();
   });
 
   it('responds within the budget even if the resolver hangs (fake timers)', async () => {
@@ -252,5 +252,7 @@ describe('GET /api/search/resolve', () => {
     expect(res.status).toBeLessThan(500);
     const body = await res.json();
     expect(body.track.unresolved.reason).toBe('timeout');
+    // a hung resolver never scheduled its own retry, so the route does
+    expect(mocks.reresolve.scheduleRetry).toHaveBeenCalledWith('X', 'Y', 'timeout');
   });
 });

@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { dataDir } from '../../src/lib/dataDir';
 import { createIngestor, LIVE_STATE_PATH } from '../../src/lib/adjacency/live';
@@ -13,6 +13,9 @@ export const JOB_GAP_MS = 20_000;
 export const MAX_CONSECUTIVE_HARD_BLOCKS = 3;
 export const MAX_SLEEP_CHUNK_MS = 60_000;
 export const EMPTY_FRONTIER_SLEEP_MS = 30 * 60_000;
+/** After repeated hard blocks, neither the driver nor the dev server's live ingestor fetches for this long. */
+export const HALT_MS = 7 * 24 * 60 * 60_000;
+export const HALT_REASON = 'repeated-hard-blocks';
 
 export interface SeedTrack {
   artist: string;
@@ -23,6 +26,8 @@ interface StateView {
   searched: Record<string, number>;
   backoff: Record<string, number>;
   pausedUntil?: number;
+  haltedUntil?: number;
+  haltReason?: string;
 }
 
 export interface Counters {
@@ -85,13 +90,29 @@ const readState = (file: string): StateView => {
   try {
     if (existsSync(file)) {
       const s = JSON.parse(readFileSync(file, 'utf8')) as Partial<StateView>;
-      return { searched: s.searched ?? {}, backoff: s.backoff ?? {}, pausedUntil: s.pausedUntil };
+      return { searched: s.searched ?? {}, backoff: s.backoff ?? {}, pausedUntil: s.pausedUntil, haltedUntil: s.haltedUntil, haltReason: s.haltReason };
     }
   } catch {
     /* corrupt: treat as empty */
   }
   return { searched: {}, backoff: {} };
 };
+
+/** Durable halt marker in live-state (read-modify-write, keeping every other field). */
+function writeHalt(file: string, until: number): void {
+  let s: Record<string, unknown> = {};
+  try {
+    if (existsSync(file)) s = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+  } catch {
+    /* corrupt: the halt still gets written */
+  }
+  s.haltedUntil = until;
+  s.haltReason = HALT_REASON;
+  mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.halt.tmp`;
+  writeFileSync(tmp, JSON.stringify(s));
+  renameSync(tmp, file);
+}
 
 /** Returns the process exit code: 1 when another driver is alive, otherwise 0 after an orderly stop. */
 export async function runDriver(deps: DriverDeps): Promise<number> {
@@ -126,9 +147,13 @@ export async function runDriver(deps: DriverDeps): Promise<number> {
   let hardStreak = 0;
   let hardSeen = deps.counters.hardBlocks;
   try {
-    log(`ingest: driver started (pid ${pid})`);
+    log(`ingest: driver started (pid ${pid}); to clear a halt, delete haltedUntil and haltReason from ${deps.statePath}`);
     while (!stopped()) {
       const state = readState(deps.statePath);
+      if ((state.haltedUntil ?? 0) > now()) {
+        log(`ingest: halted until ${new Date(state.haltedUntil!).toISOString()} (${state.haltReason ?? 'unknown'}); refusing to fetch`);
+        return 0;
+      }
       const pausedFor = (state.pausedUntil ?? 0) - now();
       if (pausedFor > 0) {
         log(`ingest: queue paused; sleeping ${Math.round(pausedFor / 60_000)} min`);
@@ -164,7 +189,8 @@ export async function runDriver(deps: DriverDeps): Promise<number> {
           }) + '\n'
         );
         if (giveUp) {
-          log(`ingest: ${hardStreak} consecutive hard blocks; stopping for good`);
+          writeHalt(deps.statePath, now() + HALT_MS);
+          log(`ingest: ${hardStreak} consecutive hard blocks; halted for 7 days (live ingestion too)`);
           return 0;
         }
       }

@@ -1,4 +1,4 @@
-import { ESSENTIALS, missingEssentials, type IncompleteReason } from '@/lib/completeness';
+import { DANCEABILITY_PRIOR_SOURCE, ESSENTIALS, missingEssentials, withDanceabilityPrior, type IncompleteReason } from '@/lib/completeness';
 import type { ArcTemplate, Track } from '@/types/track';
 import { isInSet, recordingKeys } from './recordingKeys';
 import { sanitizeTrack } from './trackSanitize';
@@ -32,13 +32,15 @@ export function plannedLengthFor(template: ArcTemplate): number {
 
 const isTemplate = (v: unknown): v is ArcTemplate => v === '60min' || v === '120min';
 
-/** Fills fields the track doesn't have yet; never overwrites known values or the id. */
+/** Fills fields the track doesn't have yet; never overwrites known values or the id (except a danceability prior, which a real value replaces). */
 export function enrichTrack(track: Track, fields: Partial<Track>): Track {
   const out: Track = { ...track, sources: { ...track.sources } };
   for (const [k, v] of Object.entries(fields) as Array<[keyof Track, unknown]>) {
-    if (k === 'id' || k === 'sources' || v === undefined || out[k] !== undefined) continue;
-    (out as unknown as Record<string, unknown>)[k] = v;
+    if (k === 'id' || k === 'sources' || v === undefined) continue;
     const src = fields.sources?.[k];
+    const replacesPrior = out.sources[k] === DANCEABILITY_PRIOR_SOURCE && src !== undefined && src !== DANCEABILITY_PRIOR_SOURCE;
+    if (out[k] !== undefined && !replacesPrior) continue;
+    (out as unknown as Record<string, unknown>)[k] = v;
     if (src) out.sources[k] = src;
   }
   return out;
@@ -116,7 +118,8 @@ export function playlistReducer(state: PlaylistState, action: PlaylistAction): P
           (out as unknown as Record<string, unknown>)[f] = v;
           out.sources[f] = 'manual';
         }
-        return settleTrack(out, t.unresolved?.reason ?? 'not-found', t.unresolved?.retryAt);
+        // same rule as the server's metadata cache: a manual/MIK row with energy is completed by the danceability prior
+        return settleTrack(withDanceabilityPrior(out), t.unresolved?.reason ?? 'not-found', t.unresolved?.retryAt);
       });
     case 'load': {
       const s = action.state as Partial<PlaylistState> | null;
