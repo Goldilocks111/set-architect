@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ArcTemplate, Suggestion, Track } from '@/types/track';
 import { crateForRequest, EMPTY_CRATE_COPY, isCrateComplete, type CrateKnownItem, type CrateTrack } from './crate';
+import RadioControl, { RADIO_COUNTDOWN_S, radioPick, RadioStatus } from './RadioControl';
 import SuggestionCard from './SuggestionCard';
 import { displayTitle } from './trackFormat';
 
@@ -14,6 +15,8 @@ interface Props {
   crate?: CrateTrack[];
   /** What the server's cache knows about crate items; the owner folds it into the stored crate. */
   onCrateKnown?: (known: CrateKnownItem[]) => void;
+  /** Tracks are still being resolved/queued: radio waits rather than adding in parallel. */
+  busy?: boolean;
 }
 
 type Status = 'loading' | 'done' | 'error' | 'limit';
@@ -31,12 +34,21 @@ const dataKeyOf = (tracks: Track[]) =>
 export const CRATE_HINT_BELOW = 30;
 const NO_CRATE: CrateTrack[] = [];
 
-export default function SuggestionBox({ tracks, template, plannedLength, onAdd, crate = NO_CRATE, onCrateKnown }: Props) {
+export default function SuggestionBox({ tracks, template, plannedLength, onAdd, crate = NO_CRATE, onCrateKnown, busy = false }: Props) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [status, setStatus] = useState<Status>('loading');
   const [limitMessage, setLimitMessage] = useState('');
   const [retry, setRetry] = useState(0);
   const [digging, setDigging] = useState(false);
+  const [radio, setRadio] = useState(false);
+  const [radioNote, setRadioNote] = useState('');
+  const [countdown, setCountdown] = useState<{ suggestion: Suggestion; seconds: number } | null>(null);
+  /** The set the current suggestions were computed for (ids), so radio never acts on a stale list. */
+  const [suggestedFor, setSuggestedFor] = useState('');
+  const sectionRef = useRef<HTMLElement>(null);
+  const proposed = useRef(new Set<string>());
+  const radioAdded = useRef<string | null>(null);
+  const prevShape = useRef('');
   const last = tracks[tracks.length - 1];
   const lastKey = last ? `${last.artist}|${last.title}` : '';
   const refetched = useRef(new Set<string>());
@@ -85,6 +97,7 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd, 
         const body = (await res.json()) as { suggestions: Suggestion[]; digging?: boolean; crateKnown?: CrateKnownItem[] };
         if (body.crateKnown?.length) knownHandler.current?.(body.crateKnown);
         setSuggestions(body.suggestions ?? []);
+        setSuggestedFor(latest.current.map((x) => x.id).join('\n'));
         setStatus('done');
         setDigging(body.digging === true);
         // One re-fetch after ingestion has had time to land; the key changes with the track so it never loops.
@@ -103,14 +116,92 @@ export default function SuggestionBox({ tracks, template, plannedLength, onAdd, 
     };
   }, [shapeKey, dataKey, crateKey, template, plannedLength, retry, lastKey]);
 
+  const stopRadio = useCallback((why = '') => {
+    setRadio(false);
+    setCountdown(null);
+    setRadioNote(why);
+  }, []);
+  const toggleRadio = () => {
+    if (radio) return stopRadio();
+    proposed.current = new Set();
+    radioAdded.current = null;
+    setRadioNote('');
+    setRadio(true);
+  };
+
+  // Any change to the set that radio did not make itself is the owner steering: hand back control.
+  useEffect(() => {
+    const before = prevShape.current;
+    prevShape.current = shapeKey;
+    if (!radio || before === shapeKey) return;
+    const own = radioAdded.current !== null && shapeKey === `${before}\n${radioAdded.current}`.replace(/^\n/, '');
+    radioAdded.current = null;
+    if (!own) stopRadio('Radio stopped: the set changed.');
+  }, [shapeKey, radio, stopRadio]);
+
+  // Using the search box (or anything else outside this panel) also stops it.
+  useEffect(() => {
+    if (!radio) return;
+    const outside = (e: Event) => {
+      const el = e.target as HTMLElement | null;
+      return !!el && !sectionRef.current?.contains(el);
+    };
+    const onPointer = (e: Event) => outside(e) && stopRadio('Radio stopped: you took over.');
+    const onKey = (e: Event) => {
+      const el = e.target as HTMLElement | null;
+      if (el && outside(e) && (el.closest('input,textarea,select') || el.isContentEditable)) stopRadio('Radio stopped: you took over.');
+    };
+    document.addEventListener('pointerdown', onPointer, true);
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer, true);
+      document.removeEventListener('keydown', onKey, true);
+    };
+  }, [radio, stopRadio]);
+
+  // Radio: once suggestions are fresh for the current set and nothing is in flight, count down, then add the pick.
+  const pick = useMemo(() => radioPick(suggestions), [suggestions]);
+  const fresh = status === 'done' && suggestedFor === shapeKey;
+  const pickId = pick?.track.id;
+  useEffect(() => {
+    if (!radio) return;
+    if (tracks.length >= plannedLength) return stopRadio('Radio stopped: the set is full.');
+    if (status === 'error' || status === 'limit') return stopRadio('Radio stopped: suggestions failed.');
+    if (!fresh || busy) return;
+    if (!pick) return stopRadio('Radio stopped: no compliant suggestion.');
+    if (proposed.current.has(pick.track.id) || tracks.some((x) => x.id === pick.track.id))
+      return stopRadio('Radio stopped: the same track was proposed twice.');
+    let left = RADIO_COUNTDOWN_S;
+    setCountdown({ suggestion: pick, seconds: left });
+    const timer = setInterval(() => {
+      left -= 1;
+      if (left > 0) return setCountdown({ suggestion: pick, seconds: left });
+      clearInterval(timer);
+      setCountdown(null);
+      proposed.current.add(pick.track.id);
+      radioAdded.current = pick.track.id;
+      onAdd(pick.track);
+    }, 1000);
+    return () => {
+      clearInterval(timer);
+      setCountdown(null);
+    };
+    // pick is identified by its id: a same-top refresh must not restart the countdown
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [radio, fresh, busy, pickId, status, tracks.length, plannedLength]);
+
   return (
-    <section aria-labelledby="suggestions-heading" className="flex flex-col">
+    <section ref={sectionRef} aria-labelledby="suggestions-heading" className="flex flex-col">
       <header className="mb-1 flex items-baseline justify-between gap-3">
         <h2 id="suggestions-heading" className="font-[family-name:var(--font-display)] text-xl font-semibold text-[#E8E4DA]">
           {last ? 'Next up' : 'Openers'}
         </h2>
-        {status === 'loading' && <span className="text-xs text-[#8A8FA3]">Scoring…</span>}
+        <span className="flex items-baseline gap-2">
+          {status === 'loading' && <span className="text-xs text-[#8A8FA3]">Scoring…</span>}
+          <RadioControl on={radio} onToggle={toggleRadio} />
+        </span>
       </header>
+      <RadioStatus on={radio} pending={countdown} note={radioNote} onCancel={() => stopRadio('Radio cancelled.')} />
       {digging && (
         <p className="mb-1 text-xs italic text-[#8A8FA3]">
           Digging through real DJ sets… suggestions improve as sets are indexed
