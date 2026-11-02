@@ -15,7 +15,7 @@ import {
 import { arcLabel, DEFAULT_PLAY_FRACTION } from '@/lib/arc';
 import { formatMinutes } from '@/lib/duration';
 import type { Arc, Track } from '@/types/track';
-import { buildCurveData, quarantineForCurve, type CurvePoint } from './curveData';
+import { buildCurveData, minuteTicks, quarantineForCurve, type CurvePoint } from './curveData';
 
 export const CURVE_COLORS = {
   energy: '#F2B33D',
@@ -63,13 +63,8 @@ function CurveTooltip({ active, payload }: { active?: boolean; payload?: Array<{
   );
 }
 
-/** A tick every 5/10/15/30/60 minutes, about eight across the axis. */
-function minuteTicks(max: number): number[] {
-  const step = [5, 10, 15, 30, 60].find((s) => max / s <= 8) ?? 60;
-  const out: number[] = [];
-  for (let m = 0; m <= max + 1e-9; m += step) out.push(m);
-  return out;
-}
+/** Overrun shading paints above the BPM area (zIndex 100) and below the lines (400), over the full plot height. */
+export const OVERRUN_Z_INDEX = 150;
 
 export default function EnergyCurve({ tracks, arc, playFraction = DEFAULT_PLAY_FRACTION, height = 260 }: Props) {
   const { points, plannedMin, maxMin, overrun } = buildCurveData(quarantineForCurve(tracks), arc, playFraction);
@@ -88,6 +83,7 @@ export default function EnergyCurve({ tracks, arc, playFraction = DEFAULT_PLAY_F
               dataKey="minute"
               type="number"
               domain={[0, maxMin]}
+              allowDataOverflow
               ticks={minuteTicks(maxMin)}
               tickFormatter={(m: number) => `${m}′`}
               tick={{ fill: CURVE_COLORS.axis, fontSize: 11 }}
@@ -120,6 +116,7 @@ export default function EnergyCurve({ tracks, arc, playFraction = DEFAULT_PLAY_F
                 fillOpacity={0.1}
                 stroke="none"
                 ifOverflow="hidden"
+                zIndex={OVERRUN_Z_INDEX}
                 label={{ value: 'over', position: 'insideTopRight', fill: CURVE_COLORS.overrun, fontSize: 11 }}
               />
             )}

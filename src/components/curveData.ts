@@ -16,7 +16,7 @@ export interface SetTiming {
   plannedMin: number;
   /** Any track's length is an estimate, so the played total is too. */
   estimated: boolean;
-  /** Played minutes beyond the planned length (0 when within). */
+  /** Played minutes beyond the planned length, in whole seconds (0 when within): the one overrun threshold. */
   overrunMin: number;
 }
 
@@ -33,7 +33,7 @@ export function setTiming(tracks: Track[], arc: Arc, playFraction = DEFAULT_PLAY
     playedMin,
     plannedMin: arc.minutes,
     estimated: rows.some((r) => r.estimated),
-    overrunMin: Math.max(0, playedMin - arc.minutes),
+    overrunMin: Math.max(0, Math.round(playedMin * 60) - Math.round(arc.minutes * 60)) / 60,
   };
 }
 
@@ -46,7 +46,7 @@ export function timingHeaderText(t: SetTiming, count: number, plannedCount: numb
 
 /** "+4:10 over" when the set plays past the planned length (to the second), else null. */
 export function overrunText(t: SetTiming): string | null {
-  return Math.round(t.overrunMin * 60) > 0 ? `+${fmtMin(t.overrunMin)} over` : null;
+  return t.overrunMin > 0 ? `+${fmtMin(t.overrunMin)} over` : null;
 }
 
 export interface CurvePoint {
@@ -84,16 +84,19 @@ const MAX_SAMPLE_MINUTE = 2_000;
 export function buildCurveData(tracks: Track[], arc: Arc, playFraction = DEFAULT_PLAY_FRACTION): CurveData {
   const timing = setTiming(tracks, arc, playFraction);
   const plannedMin = arc.minutes;
-  const maxMin = Math.max(plannedMin, timing.playedMin);
+  // same threshold as the header's "+over" pill: a sub-second tail is not an overrun
+  const over = timing.overrunMin > 0;
+  const maxMin = over ? Math.max(plannedMin, timing.playedMin) : plannedMin;
   const starts = timing.tracks.map((r) => r.startMin);
   const ends = tracks.map((_, i) => (i + 1 < tracks.length ? starts[i + 1] : timing.playedMin));
 
   const point = (minute: number, i: number | null): CurvePoint => {
     const t = i === null ? undefined : tracks[i];
-    const overrun = minute > plannedMin + EPS;
+    const beyond = minute > plannedMin + EPS;
+    const overrun = over && beyond;
     return {
       minute,
-      target: overrun ? null : energyTargetAtMinute(arc, minute),
+      target: beyond ? null : energyTargetAtMinute(arc, minute),
       energy: finiteOrNull(t?.energy),
       bpm: finiteOrNull(t?.bpm),
       position: i === null ? null : i + 1,
@@ -128,10 +131,19 @@ export function buildCurveData(tracks: Track[], arc: Arc, playFraction = DEFAULT
     points: events.map((e) => point(e.minute, e.i)),
     plannedMin,
     maxMin,
-    overrun: maxMin > plannedMin + EPS ? { from: plannedMin, to: maxMin } : null,
+    overrun: over ? { from: plannedMin, to: maxMin } : null,
   };
 }
 
 /** Incomplete tracks are quarantined: their energy is not drawn on the curve (the slot stays, as a gap). */
 export const quarantineForCurve = (tracks: Track[]): Track[] =>
   tracks.map((t) => (isComplete(t) ? t : { ...t, energy: undefined }));
+
+/** X-axis ticks: 0 and every 5/10/15/30/60/120/240/480 minutes, at most 9 ticks for any length. */
+export function minuteTicks(max: number): number[] {
+  const m = Number.isFinite(max) && max > 0 ? max : 0;
+  const step = [5, 10, 15, 30, 60, 120, 240, 480].find((s) => m / s <= 8) ?? Math.ceil(m / 8 / 60) * 60;
+  const out: number[] = [];
+  for (let t = 0; t <= m + 1e-9; t += step) out.push(t);
+  return out.length >= 2 ? out : [0, m || 1];
+}

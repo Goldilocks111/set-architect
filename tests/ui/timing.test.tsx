@@ -3,7 +3,9 @@ import { act, cleanup, render, screen, within } from '@testing-library/react';
 import Builder from '@/components/Builder';
 import SetList from '@/components/SetList';
 import { STORAGE_KEY } from '@/components/persistence';
-import { buildCurveData, overrunText, setTiming, timingHeaderText } from '@/components/curveData';
+import { buildCurveData, minuteTicks, overrunText, setTiming, timingHeaderText } from '@/components/curveData';
+import { OVERRUN_Z_INDEX } from '@/components/EnergyCurve';
+import { DefaultZIndexes } from 'recharts';
 import { transitionParts } from '@/components/TransitionBadge';
 import { sanitizeTrack } from '@/components/trackSanitize';
 import { energyTargetAtMinute, plannedTrackCount, startMinutes } from '@/engine';
@@ -198,11 +200,47 @@ describe('carried minors', () => {
     expect(at6.tone).toBe('ok');
     const half6 = transitionParts({ from: tr('a', { bpm: 100 }), to: tr('b', { bpm: 53 }), target: 5 })[1];
     expect(half6.detail).toBe('half-time mix');
-    expect(half6.tone).not.toBe('poor');
+    expect(half6.tone).toBe('ok');
     const over = transitionParts({ from: tr('a', { bpm: 100 }), to: tr('b', { bpm: 107 }), target: 5 })[1];
     expect(over.detail).toBe('Tempo clash');
     expect(over.tone).toBe('poor');
     const close = transitionParts({ from: tr('a', { bpm: 124 }), to: tr('b', { bpm: 124 }), target: 5 })[1];
     expect(close.tone).toBe('good');
+  });
+});
+
+describe('fix round 1', () => {
+  const ARC_30: Arc = { minutes: 30, shape: 'build' };
+  it('header pill and curve shading share one whole-second overrun threshold (0.4 s over = not over)', () => {
+    const under = [tr('a', { durationMs: 1_800_400 })]; // 30:00.4 played at 100%
+    const tu = setTiming(under, ARC_30, 1);
+    expect(overrunText(tu)).toBeNull();
+    const du = buildCurveData(under, ARC_30, 1);
+    expect(du.overrun).toBeNull();
+    expect(du.maxMin).toBe(30);
+    expect(du.points.some((p) => p.overrun)).toBe(false);
+
+    const over = [tr('a', { durationMs: 1_800_600 })]; // 30:00.6 -> rounds to 30:01
+    const to = setTiming(over, ARC_30, 1);
+    expect(overrunText(to)).toBe('+0:01 over');
+    const d = buildCurveData(over, ARC_30, 1);
+    expect(d.overrun).not.toBeNull();
+    expect(d.points.some((p) => p.overrun)).toBe(true);
+  });
+
+  it('minuteTicks stays readable for any length, even a pathological 10 000-minute overrun', () => {
+    for (const max of [30, 60, 120, 240, 480, 1_000, 10_000]) {
+      const ticks = minuteTicks(max);
+      expect(ticks[0]).toBe(0);
+      expect(ticks.length).toBeGreaterThanOrEqual(2);
+      expect(ticks.length).toBeLessThanOrEqual(9);
+      expect(ticks.at(-1)!).toBeLessThanOrEqual(max);
+    }
+    expect(minuteTicks(60)).toEqual([0, 10, 20, 30, 40, 50, 60]);
+  });
+
+  it('the overrun shading paints above the BPM area and below the energy lines', () => {
+    expect(OVERRUN_Z_INDEX).toBeGreaterThan(DefaultZIndexes.area);
+    expect(OVERRUN_Z_INDEX).toBeLessThan(DefaultZIndexes.line);
   });
 });
